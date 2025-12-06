@@ -1,0 +1,23 @@
+{{- if and .Values.security .Values.security.network .Values.security.network.allowedIPs }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-ip-whitelist
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: security
+spec:
+  ipWhiteList:
+    sourceRange:
+    {{- range .Values.security.network.allowedIPs }}
+    - {{ . | quote }}
+    {{- end }}
+    # Optional: specify how to handle X-Forwarded-For header
+    ipStrategy:
+      depth: 2  # Number of IPs to check in X-Forwarded-For
+      excludedIPs:
+      - 10.0.0.0/8     # Exclude private networks
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+{{- end }}

@@ -1,0 +1,226 @@
+{{- if and .Values.backup .Values.backup.enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "supabase.fullname" . }}-db-backup
+  labels:
+    {{- include "supabase.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | default "0 2 * * *" | quote }}
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "supabase.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: backup
+            image: postgres:15-alpine
+            env:
+            - name: PGHOST
+              value: {{ include "supabase.fullname" . }}-db
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: postgres
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase.fullname" . }}-db
+                  key: password
+            {{- if eq .Values.backup.provider "s3" }}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase.fullname" . }}-backup-credentials
+                  key: aws-access-key-id
+                  optional: true
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase.fullname" . }}-backup-credentials
+                  key: aws-secret-access-key
+                  optional: true
+            - name: AWS_DEFAULT_REGION
+              value: {{ .Values.backup.s3.region | default "us-east-1" | quote }}
+            - name: S3_BUCKET
+              value: {{ required "backup.s3.bucket is required" .Values.backup.s3.bucket | quote }}
+            - name: S3_PREFIX
+              value: {{ .Values.backup.s3.prefix | default "supabase-backups" | quote }}
+            {{- else if eq .Values.backup.provider "gcs" }}
+            - name: GCS_BUCKET
+              value: {{ required "backup.gcs.bucket is required" .Values.backup.gcs.bucket | quote }}
+            - name: GCS_PREFIX
+              value: {{ .Values.backup.gcs.prefix | default "supabase-backups" | quote }}
+            {{- else if eq .Values.backup.provider "azure-blob" }}
+            - name: AZURE_STORAGE_ACCOUNT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase.fullname" . }}-backup-credentials
+                  key: azure-storage-account
+            - name: AZURE_STORAGE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase.fullname" . }}-backup-credentials
+                  key: azure-storage-key
+            - name: AZURE_CONTAINER
+              value: {{ required "backup.azure.container is required" .Values.backup.azure.container | quote }}
+            - name: AZURE_PREFIX
+              value: {{ .Values.backup.azure.prefix | default "supabase-backups" | quote }}
+            {{- end }}
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              # Generate backup filename with timestamp
+              BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+              BACKUP_FILE="supabase_backup_${BACKUP_DATE}.sql.gz"
+
+              echo "Starting backup at $(date)"
+              echo "Backup file: ${BACKUP_FILE}"
+
+              # Perform the backup
+              pg_dumpall | gzip > "/tmp/${BACKUP_FILE}"
+
+              BACKUP_SIZE=$(du -h "/tmp/${BACKUP_FILE}" | cut -f1)
+              echo "Backup completed. Size: ${BACKUP_SIZE}"
+
+              # Upload to storage provider
+              {{- if eq .Values.backup.provider "s3" }}
+              # Install AWS CLI
+              apk add --no-cache aws-cli
+
+              # Upload to S3
+              aws s3 cp "/tmp/${BACKUP_FILE}" "s3://${S3_BUCKET}/${S3_PREFIX}/${BACKUP_FILE}"
+              echo "Backup uploaded to S3: s3://${S3_BUCKET}/${S3_PREFIX}/${BACKUP_FILE}"
+
+              # Clean up old backups based on retention policy
+              if [ -n "{{ .Values.backup.retention }}" ]; then
+                RETENTION_DAYS=$(echo "{{ .Values.backup.retention }}" | sed 's/d$//')
+                echo "Cleaning up backups older than ${RETENTION_DAYS} days"
+
+                # List and delete old backups
+                aws s3 ls "s3://${S3_BUCKET}/${S3_PREFIX}/" | \
+                  awk '{print $4}' | \
+                  grep "^supabase_backup_" | \
+                  sort -r | \
+                  tail -n +$((${RETENTION_DAYS} + 1)) | \
+                  xargs -I {} aws s3 rm "s3://${S3_BUCKET}/${S3_PREFIX}/{}"
+              fi
+
+              {{- else if eq .Values.backup.provider "gcs" }}
+              # Install Google Cloud SDK
+              apk add --no-cache python3 py3-pip
+              pip3 install --no-cache-dir google-cloud-storage
+
+              # Create Python script for GCS upload
+              cat > /tmp/upload_gcs.py << 'EOF'
+              import os
+              from google.cloud import storage
+              from datetime import datetime, timedelta
+
+              bucket_name = os.environ['GCS_BUCKET']
+              prefix = os.environ['GCS_PREFIX']
+              backup_file = os.environ['BACKUP_FILE']
+              retention = '{{ .Values.backup.retention | default "30d" }}'
+
+              client = storage.Client()
+              bucket = client.bucket(bucket_name)
+
+              # Upload the backup
+              blob = bucket.blob(f"{prefix}/{backup_file}")
+              blob.upload_from_filename(f"/tmp/{backup_file}")
+              print(f"Backup uploaded to gs://{bucket_name}/{prefix}/{backup_file}")
+
+              # Clean up old backups
+              if retention:
+                  days = int(retention.rstrip('d'))
+                  cutoff_date = datetime.now() - timedelta(days=days)
+
+                  for blob in bucket.list_blobs(prefix=prefix):
+                      if blob.name.startswith(f"{prefix}/supabase_backup_") and blob.time_created < cutoff_date:
+                          blob.delete()
+                          print(f"Deleted old backup: {blob.name}")
+              EOF
+
+              export BACKUP_FILE="${BACKUP_FILE}"
+              python3 /tmp/upload_gcs.py
+
+              {{- else if eq .Values.backup.provider "azure-blob" }}
+              # Install Azure CLI
+              apk add --no-cache azure-cli
+
+              # Upload to Azure Blob Storage
+              az storage blob upload \
+                --account-name "${AZURE_STORAGE_ACCOUNT}" \
+                --account-key "${AZURE_STORAGE_KEY}" \
+                --container-name "${AZURE_CONTAINER}" \
+                --name "${AZURE_PREFIX}/${BACKUP_FILE}" \
+                --file "/tmp/${BACKUP_FILE}"
+
+              echo "Backup uploaded to Azure: ${AZURE_CONTAINER}/${AZURE_PREFIX}/${BACKUP_FILE}"
+
+              # Clean up old backups based on retention policy
+              if [ -n "{{ .Values.backup.retention }}" ]; then
+                RETENTION_DAYS=$(echo "{{ .Values.backup.retention }}" | sed 's/d$//')
+                echo "Cleaning up backups older than ${RETENTION_DAYS} days"
+
+                CUTOFF_DATE=$(date -d "${RETENTION_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
+
+                az storage blob list \
+                  --account-name "${AZURE_STORAGE_ACCOUNT}" \
+                  --account-key "${AZURE_STORAGE_KEY}" \
+                  --container-name "${AZURE_CONTAINER}" \
+                  --prefix "${AZURE_PREFIX}/supabase_backup_" \
+                  --query "[?properties.lastModified < '${CUTOFF_DATE}'].name" \
+                  -o tsv | \
+                  xargs -I {} az storage blob delete \
+                    --account-name "${AZURE_STORAGE_ACCOUNT}" \
+                    --account-key "${AZURE_STORAGE_KEY}" \
+                    --container-name "${AZURE_CONTAINER}" \
+                    --name "{}"
+              fi
+              {{- end }}
+
+              # Clean up local backup file
+              rm -f "/tmp/${BACKUP_FILE}"
+
+              echo "Backup process completed at $(date)"
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "1Gi"
+                cpu: "500m"
+          {{- if eq .Values.backup.provider "gcs" }}
+          {{- if .Values.backup.gcs.serviceAccountKey }}
+          volumeMounts:
+          - name: gcs-key
+            mountPath: /var/secrets/google
+            readOnly: true
+          env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /var/secrets/google/key.json
+          volumes:
+          - name: gcs-key
+            secret:
+              secretName: {{ include "supabase.fullname" . }}-backup-credentials
+              items:
+              - key: gcs-service-account-key
+                path: key.json
+          {{- end }}
+          {{- end }}
+{{- end }}

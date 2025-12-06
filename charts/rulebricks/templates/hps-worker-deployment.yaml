@@ -1,0 +1,122 @@
+{{- if and .Values.hps .Values.hps.enabled .Values.hps.workers.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hps-worker
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: 80
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hps-worker
+spec:
+  serviceName: {{ include "rulebricks-chart.hps-worker.fullname" . }}
+  replicas: {{ .Values.hps.workers.replicas | default 3 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      {{- with .Values.hps.workers.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hps.workers.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hps.workers.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - {{ include "rulebricks-chart.hps-worker.fullname" . }}
+              topologyKey: kubernetes.io/hostname
+          - weight: 80
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - {{ include "rulebricks-chart.hps.fullname" . }}
+              topologyKey: kubernetes.io/hostname
+          - weight: 80
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - kafka
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+      {{- with .Values.hps.workers.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
+      - maxSkew: 2
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
+      {{- end }}
+      containers:
+        - name: hps-worker
+          image: {{ .Values.hps.image.repository }}:{{ .Values.hps.image.workerTag | default "worker-latest" }}
+          imagePullPolicy: {{ .Values.hps.image.pullPolicy }}
+          resources:
+            requests:
+              cpu: {{ .Values.hps.workers.resources.requests.cpu | default "250m" }}
+              memory: {{ .Values.hps.workers.resources.requests.memory | default "256Mi" }}
+            limits:
+              cpu: {{ .Values.hps.workers.resources.limits.cpu | default "500m" }}
+              memory: {{ .Values.hps.workers.resources.limits.memory | default "512Mi" }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "rulebricks-chart.app.configmap" . }}
+          env:
+            - name: WORKER_TOPICS
+              value: {{ .Values.hps.workers.topics | default "solution" | quote }}
+            - name: NODE_ENV
+              value: "production"
+{{- end }}

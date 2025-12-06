@@ -1,0 +1,214 @@
+# Self-hosted Supabase configuration
+# This file contains the configuration for deploying Supabase in a self-hosted environment
+
+# Generate these secrets before deployment:
+# JWT_SECRET: openssl rand -base64 32
+# ANON_KEY and SERVICE_KEY: Generate using JWT with the secret above
+
+secret:
+  jwt:
+    # These will be generated during deployment
+    anonKey: "GENERATED_ANON_KEY"
+    serviceKey: "GENERATED_SERVICE_KEY"
+    secret: "GENERATED_JWT_SECRET"
+
+  smtp:
+    # Default SMTP credentials using Resend service
+    # Users can override these with their own SMTP server
+    username: "resend"
+    password: "re_XXXXXX"  # Replace with actual password
+
+  db:
+    username: "postgres"
+    password: "GENERATED_DB_PASSWORD"
+    database: "postgres"
+
+  analytics:
+    apiKey: "GENERATED_ANALYTICS_KEY"
+
+  dashboard:
+    username: "supabase"
+    password: "GENERATED_DASHBOARD_PASSWORD"
+
+# Enable internal PostgreSQL database
+db:
+  enabled: true
+  image:
+    repository: supabase/postgres
+    tag: "15.1.0.147"
+    pullPolicy: IfNotPresent
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""  # Uses default storage class
+
+  service:
+    type: ClusterIP
+    port: 5432
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+  # Ensure we override any default values
+  nameOverride: ""
+  fullnameOverride: ""
+
+# Studio configuration
+studio:
+  enabled: true
+  image:
+    repository: supabase/studio
+    tag: "20231123-64a766a"
+    pullPolicy: IfNotPresent
+
+  environment:
+    STUDIO_PG_META_URL: "http://{{ include \"supabase.meta.fullname\" . }}:{{ .Values.meta.service.port }}"
+    POSTGRES_PASSWORD: "{{ .Values.secret.db.password }}"
+    DEFAULT_ORGANIZATION_NAME: "Default Organization"
+    DEFAULT_PROJECT_NAME: "Default Project"
+    SUPABASE_URL: "http://{{ include \"supabase.kong.fullname\" . }}:{{ .Values.kong.service.port }}"
+    SUPABASE_PUBLIC_URL: ""  # Will be set based on ingress
+
+# Auth service
+auth:
+  enabled: true
+  image:
+    repository: supabase/gotrue
+    tag: "v2.132.3"
+
+  environment:
+    GOTRUE_SITE_URL: ""  # Will be set based on ingress
+    GOTRUE_URI_ALLOW_LIST: "*"
+    GOTRUE_DISABLE_SIGNUP: "false"
+    GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
+    GOTRUE_MAILER_AUTOCONFIRM: "true"
+    GOTRUE_SMS_AUTOCONFIRM: "true"
+    GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+    GOTRUE_EXTERNAL_PHONE_ENABLED: "true"
+
+# REST API
+rest:
+  enabled: true
+  image:
+    repository: postgrest/postgrest
+    tag: "v12.0.1"
+
+# Realtime
+realtime:
+  enabled: true
+  image:
+    repository: supabase/realtime
+    tag: "v2.25.50"
+
+# Meta service
+meta:
+  enabled: true
+  image:
+    repository: supabase/postgres-meta
+    tag: "v0.75.0"
+
+# Storage
+storage:
+  enabled: true
+  image:
+    repository: supabase/storage-api
+    tag: "v0.46.4"
+
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""  # Uses default storage class
+
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# Image Proxy
+imgproxy:
+  enabled: true
+  image:
+    repository: darthsim/imgproxy
+    tag: "v3.8.0"
+
+  persistence:
+    enabled: false
+
+# Kong API Gateway
+kong:
+  enabled: true
+  image:
+    repository: kong
+    tag: "2.8.1"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 8000
+
+  ingress:
+    enabled: false  # Will be configured by setup script
+    className: "traefik"
+    annotations:
+      traefik.ingress.kubernetes.io/router.middlewares: "default-headers@kubernetescrd"
+    hosts:
+      - host: supabase.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "512Mi"
+
+# Analytics
+analytics:
+  enabled: true
+  image:
+    repository: supabase/logflare
+    tag: "1.4.0"
+
+# Vector for log aggregation
+vector:
+  enabled: true
+  image:
+    repository: timberio/vector
+    tag: "0.28.1-alpine"
+
+# Functions
+functions:
+  enabled: false  # Can be enabled if Edge Functions are needed
+  image:
+    repository: supabase/edge-runtime
+    tag: "v1.29.1"
+
+# MinIO for S3-compatible storage
+minio:
+  enabled: false  # Storage API uses local filesystem by default
+  image:
+    repository: quay.io/minio/minio
+    tag: "RELEASE.2023-12-09T18-17-51Z"
+
+# Resource limits for all services
+global:
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"

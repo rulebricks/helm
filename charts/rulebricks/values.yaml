@@ -1,0 +1,183 @@
+#  Prefix Software, Inc. Confidential
+#  __________________________________
+#
+#   Copyright (c) 2025 Prefix Software, Inc. All Rights Reserved.
+#
+#  NOTICE:  All information contained herein is, and remains
+#  the property of Prefix Software, Inc. and its suppliers, if any.
+#  The intellectual and technical concepts contained herein are
+#  proprietary to Prefix Software, Inc. and its suppliers and may be
+#  covered by U.S. and Foreign Patents, patents in process,
+#  and are protected by trade secret or copyright law. Dissemination
+#  of this information or reproduction of this material is strictly
+#  forbidden unless prior written permission is obtained from
+#  Prefix Software, Inc.
+#
+#  __________________________________
+
+app:
+  image:
+    repository: index.docker.io/rulebricks/app
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "512m"
+      memory: "512Mi"
+    limits:
+      cpu: "1150m"
+      memory: "1Gi"
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 50
+    targetMemoryUtilizationPercentage: 80
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 0 # Instant response to traffic spikes
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 10
+      scaleDown:
+        stabilizationWindowSeconds: 30
+        policies:
+          - type: Pods
+            value: 1
+            periodSeconds: 5
+  livenessProbe:
+    httpGet:
+      path: /
+      port: 3000
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+  readinessProbe:
+    httpGet:
+      path: /api/health
+      port: 3000
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 6
+  tlsEnabled: true
+  email: "support@rulebricks.com"
+  licenseKey: "evaluation"
+  supabaseUrl: ""
+  supabaseServiceKey: ""
+  supabaseAnonKey: ""
+
+hps:
+  enabled: true
+  replicas: 1
+  image:
+    repository: index.docker.io/rulebricks/hps
+    pullPolicy: Always
+    tag: "latest"
+    workerTag: "worker-latest"
+
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 50
+    targetMemoryUtilizationPercentage: 80
+    behavior:
+      scaleUp:
+        stabilizationWindowSeconds: 0 # Instant response to traffic spikes
+        policies:
+          - type: Percent
+            value: 100
+            periodSeconds: 10
+      scaleDown:
+        stabilizationWindowSeconds: 30
+        policies:
+          - type: Pods
+            value: 1
+            periodSeconds: 5
+
+  workers:
+    enabled: true
+    replicas: 3  # Starting replicas
+    topics: "solution"
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+
+    # KEDA-based autoscaling for workers
+    keda:
+      enabled: true
+      minReplicaCount: 3
+      maxReplicaCount: 50
+      lagThreshold: 100  # Scale up when lag > 100 messages
+      cpuThreshold: 75   # Backup: scale on CPU
+      memoryThreshold: 80
+      pollingInterval: 15  # How often to check metrics (seconds)
+      cooldownPeriod: 300  # Wait before scaling down (seconds)
+
+redis:
+  tag: "7.2"
+  persistence:
+    enabled: true
+    size: "4Gi"
+    storageClass: "gp2"
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "4Gi"
+
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    # CORS configuration using Traefik annotations
+    traefik.ingress.kubernetes.io/headers.customrequestheaders.Access-Control-Allow-Methods: "GET,OPTIONS,PUT,POST,DELETE,PATCH"
+    traefik.ingress.kubernetes.io/headers.customrequestheaders.Access-Control-Allow-Origin: "*"
+    traefik.ingress.kubernetes.io/headers.customrequestheaders.Access-Control-Allow-Headers: "*"
+  hosts:
+    - host: "localhost"
+      paths:
+        - path: /
+          pathType: Prefix
+
+imageCredentials:
+  name: regcred
+  registry: index.docker.io
+  username: rulebricks
+  password: ""
+
+service:
+  type: ClusterIP
+  port: 80
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+volumes: []
+volumeMounts: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+podSecurityContext: {}
+securityContext: {}

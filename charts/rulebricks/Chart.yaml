@@ -1,0 +1,20 @@
+apiVersion: v2
+
+name: rulebricks
+
+description: A Helm chart for privately deploying Rulebricks via Kubernetes
+
+type: application
+
+version: 0.0.1
+
+appVersion: "0.0.1"
+
+home: https://rulebricks.com
+
+maintainers:
+  - name: Rulebricks
+    email: support@rulebricks.com
+    url: https://rulebricks.com
+
+icon: https://d1zic6dm9txw4h.cloudfront.net/rulebricks-docs-assets/static/images/application/logo.png

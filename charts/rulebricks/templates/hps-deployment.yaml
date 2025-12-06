@@ -1,0 +1,139 @@
+{{- if and .Values.hps .Values.hps.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rulebricks-chart.hps.headless" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hps
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: 3000
+      targetPort: 3000
+      protocol: TCP
+      name: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "rulebricks-chart.hps.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hps
+spec:
+  serviceName: {{ include "rulebricks-chart.hps.headless" . }}
+  replicas: {{ .Values.hps.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      {{- with .Values.hps.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hps.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hps.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hps.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}
+      {{- end }}
+      {{- if not .Values.hps.affinity }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - {{ include "rulebricks-chart.hps.fullname" . }}
+              topologyKey: kubernetes.io/hostname
+          - weight: 80
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - {{ include "rulebricks-chart.hps-worker.fullname" . }}
+              topologyKey: kubernetes.io/hostname
+          - weight: 80
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - kafka
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+      containers:
+        - name: hps
+          image: {{ .Values.hps.image.repository }}:{{ .Values.hps.image.tag | default "latest" }}
+          imagePullPolicy: {{ .Values.hps.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          resources:
+            requests:
+              cpu: {{ .Values.hps.resources.requests.cpu | default "1000m" }}
+              memory: {{ .Values.hps.resources.requests.memory | default "1Gi" }}
+            limits:
+              cpu: {{ .Values.hps.resources.limits.cpu | default "2000m" }}
+              memory: {{ .Values.hps.resources.limits.memory | default "2Gi" }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: {{ .Values.app.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.app.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.livenessProbe.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: {{ .Values.app.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.app.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.readinessProbe.failureThreshold }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "rulebricks-chart.app.configmap" . }}
+          env:
+            - name: HPS_REPLICAS
+              value: "{{ .Values.hps.replicas }}"
+            - name: MAX_WORKERS
+              value: "{{ .Values.hps.workers.keda.maxReplicaCount | default 8 }}"
+{{- end }}

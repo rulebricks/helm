@@ -1,0 +1,34 @@
+{{- if and .Values.hps .Values.hps.enabled .Values.hps.workers.enabled .Values.hps.workers.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "rulebricks-chart.hps-worker.fullname" . }}-scaler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hps-worker-scaler
+spec:
+  scaleTargetRef:
+    kind: StatefulSet
+    name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
+  minReplicaCount: {{ .Values.hps.workers.keda.minReplicaCount | default 3 }}
+  maxReplicaCount: {{ .Values.hps.workers.keda.maxReplicaCount | default 50 }}
+  pollingInterval: {{ .Values.hps.workers.keda.pollingInterval | default 15 }}  # Check interval in seconds
+  cooldownPeriod: {{ .Values.hps.workers.keda.cooldownPeriod | default 300 }}  # Wait before scaling down in seconds
+  triggers:
+  # Primary triggers: Kafka lag for each topic
+  - type: kafka
+    metadata:
+      # Use templated Kafka bootstrap servers - handles any release name and namespace
+      {{- $kafkaBrokers := .Values.app.logging.kafkaBrokers | default (include "rulebricks-chart.kafka.bootstrapServers" .) }}
+      bootstrapServers: {{ $kafkaBrokers }}
+      consumerGroup: generic-workers
+      topic: solution
+      lagThreshold: "{{ .Values.hps.workers.keda.lagThreshold | default 100 }}"
+      offsetResetPolicy: latest
+  # Backup trigger: CPU (in case Kafka metrics fail)
+  - type: cpu
+    metadata:
+      type: Utilization
+      value: "{{ .Values.hps.workers.keda.cpuThreshold | default 25 }}"
+{{- end }}

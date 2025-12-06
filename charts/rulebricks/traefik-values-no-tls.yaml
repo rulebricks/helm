@@ -1,0 +1,134 @@
+# HPA configuration for automatic scaling
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+      selectPolicy: Max
+
+# Resource configuration
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"
+
+# Deployment configuration
+deployment:
+  replicas: 1 # HPA will handle scaling
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0 # Zero downtime
+
+# Pod anti-affinity for distribution
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - traefik
+          topologyKey: kubernetes.io/hostname
+
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+
+service:
+  type: LoadBalancer
+
+ports:
+  web:
+    port: 8000 # Changed from 80
+    expose:
+      enabled: true
+      port: 80
+    exposedPort: 80
+    protocol: TCP
+  websecure:
+    enabled: false
+  traefik:
+    port: 9000
+    expose:
+      enabled: true
+      port: 9000
+    protocol: TCP
+  metrics:
+    port: 9100
+    expose:
+      enabled: true
+      port: 9100
+    protocol: TCP
+
+additionalArguments: []
+
+providers:
+  kubernetesCRD:
+    enabled: true
+  kubernetesIngress:
+    enabled: true
+
+logs:
+  general:
+    level: ERROR # Reduce logging to prevent memory buildup
+  access:
+    enabled: false # Disable access logs for memory efficiency
+
+# Explicitly disable SSL
+ssl:
+  enabled: false
+  enforced: false
+
+# Disable metrics and dashboard for simplicity
+# Disable persistence to allow horizontal scaling with HPA
+persistence:
+  enabled: false
+  path: /data
+  size: 1Gi
+  accessMode: ReadWriteOnce
+  storageClass: "standard" # Default storage class, CLI will override based on cloud provider
+  annotations:
+    helm.sh/resource-policy: keep # Prevent PVC deletion on helm uninstall
+
+metrics:
+  prometheus:
+    enabled: false
+
+api:
+  dashboard: false

@@ -1,0 +1,22 @@
+{{- if and (index .Values "cert-manager" "enabled") .Values.rulebricks.app.tlsEnabled }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Release.Name }}-letsencrypt
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  acme:
+    # Use Let's Encrypt production server
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: {{ .Values.global.email | required "global.email is required for TLS certificate generation" }}
+    privateKeySecretRef:
+      name: {{ .Release.Name }}-letsencrypt-account-key
+    solvers:
+    - http01:
+        ingress:
+          class: traefik
+{{- end }}
+

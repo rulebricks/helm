@@ -1,0 +1,39 @@
+apiVersion: v2
+name: rulebricks-standalone
+description: A unified Helm chart for deploying Rulebricks and its dependencies (Kafka, Supabase, Traefik, etc.)
+type: application
+version: 0.1.0
+appVersion: "0.0.1"
+icon: https://d1zic6dm9txw4h.cloudfront.net/rulebricks-docs-assets/static/images/application/logo.png
+dependencies:
+  - name: rulebricks
+    version: 0.0.1
+    repository: file://charts/rulebricks
+  - name: kafka
+    version: 32.4.4
+    repository: file://charts/kafka
+    condition: kafka.enabled
+  - name: supabase
+    version: 0.1.3
+    repository: file://charts/supabase
+    condition: supabase.enabled
+  - name: kube-prometheus-stack
+    version: 67.6.0
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: monitoring.enabled
+  - name: traefik
+    version: 33.1.0
+    repository: https://helm.traefik.io/traefik
+    condition: traefik.enabled
+  - name: keda
+    version: 2.16.0
+    repository: https://kedacore.github.io/charts
+    condition: keda.enabled
+  - name: cert-manager
+    version: v1.16.2
+    repository: https://charts.jetstack.io
+    condition: cert-manager.enabled
+  - name: vector
+    version: 0.40.0
+    repository: https://helm.vector.dev
+    condition: vector.enabled

@@ -1,0 +1,163 @@
+# HPA configuration for automatic scaling
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+      selectPolicy: Max
+
+# Resource configuration
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "1000m"
+    memory: "2Gi"
+
+# Deployment configuration
+deployment:
+  replicas: 1 # HPA will handle scaling
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1 # Allow one pod to be unavailable for scaling
+
+# Pod anti-affinity for distribution
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - traefik
+          topologyKey: kubernetes.io/hostname
+
+service:
+  type: LoadBalancer
+
+ports:
+  web:
+    port: 8000
+    expose:
+      enabled: true
+      port: 80
+    exposedPort: 80
+    protocol: TCP
+  websecure:
+    port: 8443
+    expose:
+      enabled: true
+      port: 443
+    exposedPort: 443
+    protocol: TCP
+    tls:
+      enabled: true
+      # No certResolver needed - cert-manager will provide certificates via secrets
+  traefik:
+    port: 9000
+    expose:
+      enabled: true
+      port: 9000
+    protocol: TCP
+  metrics:
+    port: 9100
+    expose:
+      enabled: true
+      port: 9100
+    protocol: TCP
+
+additionalArguments:
+  - "--api.insecure=false"
+  - "--api.dashboard=true"
+  - "--log.level=ERROR" # Reduce logging to prevent memory buildup
+  - "--accesslog=false" # Disable access logs for memory efficiency
+  - "--entrypoints.metrics.address=:9100"
+  - "--entrypoints.traefik.address=:9000"
+  - "--entrypoints.web.address=:8000"
+  - "--entrypoints.websecure.address=:8443"
+  # HTTP->HTTPS redirect removed to allow ACME challenges
+  # Redirect is now handled by IngressRoute with exceptions for /.well-known/acme-challenge/
+
+# No init containers needed when using cert-manager
+
+# Disable persistence to enable horizontal scaling with cert-manager
+persistence:
+  enabled: false
+
+# Security contexts
+podSecurityContext:
+  fsGroup: 65532
+
+securityContext:
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
+  runAsGroup: 65532
+  runAsNonRoot: true
+  runAsUser: 65532
+
+# Configure providers
+providers:
+  kubernetesCRD:
+    enabled: true
+  kubernetesIngress:
+    enabled: true
+    publishedService:
+      enabled: true
+
+# Enable metrics
+metrics:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: false
+    addEntryPointsLabels: false # Reduce cardinality
+    addServicesLabels: false # Reduce cardinality
+
+# Global arguments
+globalArguments:
+  - "--global.checknewversion"
+
+# Enable API and ping
+api:
+  dashboard: true
+  insecure: false
+
+ping:
+  enabled: true
+  manualRouting: true
+  entryPoint: "traefik"

@@ -1,0 +1,20 @@
+{{- if .Values.kong.enabled -}}
+{{- if .Values.kong.ingress.enabled -}}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "supabase.kong.fullname" . }}-websocket
+  labels:
+    {{- include "supabase.labels" . | nindent 4 }}
+spec:
+  headers:
+    customRequestHeaders:
+      {{- if .Values.kong.ingress.tls }}
+      X-Forwarded-Proto: https,wss
+      {{- else }}
+      X-Forwarded-Proto: http,ws
+      {{- end }}
+      Connection: keep-alive, Upgrade
+      Upgrade: WebSocket
+{{- end }}
+{{- end }}

@@ -1,0 +1,119 @@
+{{- /*
+Ingress resource for Rulebricks
+*/ -}}
+{{- $name := include "rulebricks-chart.fullname" . -}}
+{{- $labels := include "rulebricks-chart.labels" . | nindent 4 -}}
+{{- $ingress := .Values.ingress | default dict -}}
+{{- $hosts := $ingress.hosts | default list -}}
+{{- if eq (len $hosts) 0 }}
+{{- fail "No hosts defined in .Values.ingress.hosts" }}
+{{- end }}
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  labels:
+{{ $labels }}
+  annotations:
+    {{- if $ingress.annotations }}
+{{ toYaml $ingress.annotations | nindent 4 }}
+    {{- end }}
+    {{- if and .Values.security .Values.security.network .Values.security.network.allowedIPs }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ .Release.Name }}-ip-whitelist@kubernetescrd
+    {{- end }}
+    {{- if .Values.app.tlsEnabled }}
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    {{- else }}
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    ingress.kubernetes.io/force-ssl-redirect: "false"
+    traefik.ingress.kubernetes.io/router.tls: "false"
+    ingress.kubernetes.io/ssl-redirect: "false"
+    traefik.ingress.kubernetes.io/frontend-entry-points: http
+    {{- end }}
+spec:
+  ingressClassName: traefik
+  {{- if .Values.app.tlsEnabled }}
+  tls:
+    - hosts:
+      {{- range .Values.ingress.hosts }}
+        - {{ .host }}
+      {{- end }}
+      secretName: {{ include "rulebricks-chart.tls.secretName" . }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- if and $.Values.hps $.Values.hps.enabled }}
+          # HPS API endpoints
+          - path: /api/v1/solve/
+            pathType: Prefix
+            backend:
+              {{- if semverCompare ">=1.19-0" $.Capabilities.KubeVersion.GitVersion }}
+              service:
+                name: {{ include "rulebricks-chart.hps.fullname" $ }}
+                port:
+                  number: 80
+              {{- else }}
+              serviceName: {{ include "rulebricks-chart.hps.fullname" $ }}
+              servicePort: 80
+              {{- end }}
+          - path: /api/v1/bulk-solve/
+            pathType: Prefix
+            backend:
+              {{- if semverCompare ">=1.19-0" $.Capabilities.KubeVersion.GitVersion }}
+              service:
+                name: {{ include "rulebricks-chart.hps.fullname" $ }}
+                port:
+                  number: 80
+              {{- else }}
+              serviceName: {{ include "rulebricks-chart.hps.fullname" $ }}
+              servicePort: 80
+              {{- end }}
+          - path: /api/v1/parallel-solve
+            pathType: Exact
+            backend:
+              {{- if semverCompare ">=1.19-0" $.Capabilities.KubeVersion.GitVersion }}
+              service:
+                name: {{ include "rulebricks-chart.hps.fullname" $ }}
+                port:
+                  number: 80
+              {{- else }}
+              serviceName: {{ include "rulebricks-chart.hps.fullname" $ }}
+              servicePort: 80
+              {{- end }}
+          - path: /api/v1/flows/
+            pathType: Prefix
+            backend:
+              {{- if semverCompare ">=1.19-0" $.Capabilities.KubeVersion.GitVersion }}
+              service:
+                name: {{ include "rulebricks-chart.hps.fullname" $ }}
+                port:
+                  number: 80
+              {{- else }}
+              serviceName: {{ include "rulebricks-chart.hps.fullname" $ }}
+              servicePort: 80
+              {{- end }}
+          {{- end }}
+
+          # Default paths - fallback to main app
+          {{- range .paths }}
+          - path: {{ .path }}
+            {{- if and .pathType (semverCompare ">=1.18-0" $.Capabilities.KubeVersion.GitVersion) }}
+            pathType: {{ .pathType }}
+            {{- end }}
+            backend:
+              {{- if semverCompare ">=1.19-0" $.Capabilities.KubeVersion.GitVersion }}
+              service:
+                name: {{ $name }}
+                port:
+                  number: 80  # Ensure this points to the correct app port
+              {{- else }}
+              serviceName: {{ $name }}
+              servicePort: 80
+              {{- end }}
+          {{- end }}
+    {{- end }}

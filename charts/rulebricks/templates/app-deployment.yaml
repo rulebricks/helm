@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rulebricks-chart.app.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  {{- if not .Values.app.autoscaling.enabled }}
+  replicas: {{ .Values.app.replicas | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "rulebricks-chart.app.fullname" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "rulebricks-chart.app.fullname" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      {{- with .Values.app.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: app
+          image: {{ .Values.app.image.repository }}:{{ .Values.app.image.tag | default .Chart.AppVersion }}
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          resources:
+            requests:
+              cpu: {{ .Values.app.resources.requests.cpu | default "256m" }}
+              memory: {{ .Values.app.resources.requests.memory | default "256Mi" }}
+            limits:
+              cpu: {{ .Values.app.resources.limits.cpu | default "512m" }}
+              memory: {{ .Values.app.resources.limits.memory | default "1Gi" }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.app.livenessProbe.httpGet.path | default "/" }}
+              port: {{ .Values.app.livenessProbe.httpGet.port }}
+            initialDelaySeconds: {{ .Values.app.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.app.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.livenessProbe.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.app.readinessProbe.httpGet.path | default "/api/health" }}
+              port: {{ .Values.app.readinessProbe.httpGet.port }}
+            initialDelaySeconds: {{ .Values.app.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.app.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.readinessProbe.failureThreshold }}
+          env:
+            - name: LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rulebricks-chart.app.secret" . }}
+                  key: LICENSE_KEY
+            - name: EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rulebricks-chart.app.secret" . }}
+                  key: EMAIL
+            - name: UPSTASH_REDIS_REST_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "rulebricks-chart.app.configmap" . }}
+                  key: KV_REST_API_URL
+            - name: UPSTASH_REDIS_REST_TOKEN
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "rulebricks-chart.app.configmap" . }}
+                  key: KV_REST_API_TOKEN
+          envFrom:
+            - configMapRef:
+                name: {{ include "rulebricks-chart.app.configmap" . }}
+            - secretRef:
+                name: {{ include "rulebricks-chart.app.secret" . }}

@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rulebricks-chart.serverless-redis-http.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: serverless-redis-http
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "rulebricks-chart.serverless-redis-http.fullname" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "rulebricks-chart.serverless-redis-http.fullname" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      {{- with .Values.redis.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.redis.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: serverless-redis-http
+          image: hiett/serverless-redis-http:latest
+          ports:
+            - containerPort: 80
+          env:
+            - name: SRH_MODE
+              value: "env"
+            - name: SRH_TOKEN
+              value: "local_redis"
+            - name: SRH_CONNECTION_STRING
+              # Reference the templated redis service name
+              value: "redis://{{ include "rulebricks-chart.redis.fullname" . }}:6379"

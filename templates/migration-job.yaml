@@ -1,0 +1,123 @@
+{{- if .Values.migrations.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-db-migrate-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-migrations
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: migrations
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}-migrations
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: extract-assets
+          # Use the configured migration image or fallback to app image
+          image: "{{ .Values.migrations.image.repository }}:{{ .Values.migrations.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Extracting Supabase assets..."
+              # Copy the assets from the image to the shared volume
+              # Path based on CLI logic: /opt/rulebricks/assets/supabase
+              if [ -d "/opt/rulebricks/assets/supabase" ]; then
+                cp -r /opt/rulebricks/assets/supabase/* /assets/
+                echo "Assets extracted successfully."
+              else
+                echo "Warning: /opt/rulebricks/assets/supabase not found in image."
+              fi
+          volumeMounts:
+            - name: assets
+              mountPath: /assets
+      containers:
+        - name: migrate
+          # Use a postgres client image to run the migrations
+          image: postgres:15-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Waiting for database to be ready..."
+              until pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER; do
+                echo "Waiting for postgres..."
+                sleep 2
+              done
+
+              echo "Running database migrations..."
+              
+              # Export PGPASSWORD for psql
+              export PGPASSWORD=$DB_PASSWORD
+
+              # Create schema_migrations table if not exists
+              psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -c "
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                  version VARCHAR(255) PRIMARY KEY,
+                  applied_at TIMESTAMP DEFAULT NOW()
+                );"
+
+              # Function to check if migration is applied
+              is_applied() {
+                psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -t -c "SELECT 1 FROM schema_migrations WHERE version = '$1';" | grep -q 1
+              }
+
+              # Iterate over migration files
+              if [ -d "/assets/migrations" ]; then
+                for f in /assets/migrations/*.sql; do
+                  [ -e "$f" ] || continue
+                  
+                  # Extract version (filename)
+                  version=$(basename "$f")
+                  
+                  if is_applied "$version"; then
+                    echo "Skipping $version (already applied)"
+                  else
+                    echo "Applying $version..."
+                    if psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -f "$f"; then
+                      psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -c "INSERT INTO schema_migrations (version) VALUES ('$version');"
+                      echo "Successfully applied $version"
+                    else
+                      echo "Failed to apply $version"
+                      exit 1
+                    fi
+                  fi
+                done
+              else
+                echo "No migrations found in /assets/migrations"
+              fi
+              
+              echo "Migrations completed."
+          env:
+            - name: DB_HOST
+              # Templated Supabase DB service name: <release>-supabase-db
+              value: "{{ .Release.Name }}-supabase-db"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: {{ .Values.supabase.secret.db.username | default "postgres" | quote }}
+            - name: DB_NAME
+              value: {{ .Values.supabase.secret.db.database | default "postgres" | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  # Supabase chart creates secret named: <release>-supabase-db
+                  name: {{ .Release.Name }}-supabase-db
+                  key: password
+          volumeMounts:
+            - name: assets
+              mountPath: /assets
+      volumes:
+        - name: assets
+          emptyDir: {}
+{{- end }}
