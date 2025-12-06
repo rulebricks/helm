@@ -1,4 +1,4 @@
-# Rulebricks Standalone Helm Chart
+# Rulebricks Enterprise Helm Chart
 
 This chart deploys Rulebricks and its dependencies (Supabase, Kafka, etc.) to a Kubernetes cluster. It is designed to be a self-contained "umbrella" chart that can be used to spin up a full stack, or configured to connect to existing external infrastructure.
 
@@ -11,87 +11,78 @@ This chart deploys Rulebricks and its dependencies (Supabase, Kafka, etc.) to a 
 
 ## Installation
 
-1.  **Clone the repository** (if not already done).
-
-2.  **Update Dependencies**:
-    Dependencies are managed locally in the `charts/` directory and via remote repositories.
+1.  **Add the Rulebricks Enterprise Helm Repository**:
 
     ```bash
-    helm dependency update standalone-chart/
+    helm repo add rulebricks-enterprise https://github.com/rulebricks/helm/releases/latest/download
+    helm repo update
     ```
 
-3.  **Configure `values.yaml`**:
-    Edit `standalone-chart/values.yaml` to set your domain, license key, and secrets.
+2.  **Configure `values.yaml`**:
+    Download the default [values.yaml](https://github.com/rulebricks/helm/blob/main/values.yaml) and edit it to set your domain, license key, and secrets.
 
     **CRITICAL**: You must change the default passwords and keys in `supabase.secret` before deploying to production.
 
-4.  **Install**:
+3.  **Install**:
     ```bash
-    helm install rulebricks standalone-chart/ --namespace rulebricks --create-namespace
+    helm install rulebricks rulebricks-enterprise/rulebricks-enterprise \
+      --namespace rulebricks \
+      --create-namespace \
+      -f values.yaml
     ```
 
 ## TLS Certificate Management
 
-This chart integrates with **cert-manager** for automatic TLS certificate provisioning via Let's Encrypt.
+**TLS is mandatory for Rulebricks.** This chart integrates with **cert-manager** for automatic TLS certificate provisioning via Let's Encrypt.
 
-### How It Works
+### Setup Guide
 
-1. When `cert-manager.enabled: true` and `rulebricks.app.tlsEnabled: true`:
+1.  **Configure Global Settings**:
+    Set your email address (required for Let's Encrypt) and your domain in `values.yaml`:
 
-   - A `ClusterIssuer` is created for Let's Encrypt
-   - A `Certificate` resource is created for your domain(s)
-   - The certificate is stored in a Kubernetes Secret
-   - Traefik automatically uses this certificate for HTTPS
+    ```yaml
+    global:
+      domain: "rulebricks.example.com"
+      email: "admin@example.com"
+    ```
 
-2. **Required Configuration**:
+2.  **DNS Configuration**:
+    Ensure your domain points to the LoadBalancer IP of the Traefik service.
+    - If installing on a new cluster, run the install first, get the LoadBalancer IP (`kubectl get svc -n rulebricks`), update your DNS A record, and then wait for propagation.
+    - **cert-manager** will automatically attempt to provision a certificate once the DNS resolves.
 
-   ```yaml
-   global:
-     email: "your-email@example.com" # Required for Let's Encrypt registration
+### Using Existing Cert Manager
 
-   rulebricks:
-     app:
-       tlsEnabled: true
-     ingress:
-       hosts:
-         - host: "your-domain.com"
-           paths:
-             - path: /
-               pathType: Prefix
+If you already have `cert-manager` installed in your cluster:
 
-   cert-manager:
-     enabled: true
-     installCRDs: true
-   ```
+1.  Disable the bundled installation:
 
-3. **DNS Requirements**:
-   - Your domain must point to the Traefik LoadBalancer IP
-   - HTTP-01 challenge requires port 80 to be accessible from the internet
+    ```yaml
+    cert-manager:
+      enabled: false
+    ```
 
-### Disabling TLS
+2.  Ensure your existing `cert-manager` can satisfy the `Certificate` resources created by this chart, or configure the chart to use your existing `ClusterIssuer` if applicable (refer to chart templates for issuer details).
 
-For local development or environments with external TLS termination:
+### Using Existing Traefik / Ingress
 
-```yaml
-rulebricks:
-  app:
-    tlsEnabled: false
+Rulebricks relies heavily on Traefik's middleware and routing capabilities. If you have an existing ingress controller (even Traefik), it is **strongly recommended** to let Rulebricks deploy its own dedicated Traefik instance to avoid configuration conflicts.
 
-cert-manager:
-  enabled: false
-```
+If you must use an existing ingress:
+
+1.  Disable Traefik: `traefik.enabled: false`.
+2.  You will need to manually create Ingress resources that match the routing logic provided by the chart. This is an advanced configuration and not fully supported out-of-the-box.
 
 ## Automated Database Migrations
 
 This chart includes a Helm hook that automatically runs database migrations on install and upgrade.
 
-- The application image contains migration scripts in `/opt/rulebricks/assets/supabase`.
 - A Kubernetes Job runs `post-install` and `post-upgrade`.
-- This Job extracts the scripts from the app image and applies them to the Postgres database, tracking applied migrations in a `schema_migrations` table.
+- It applies migration scripts from the app image to the Postgres database.
 
 You can disable this automation by setting `migrations.enabled: false` in `values.yaml`.
 
-> **Note**: If you are using an external or managed Supabase instance, you must disable this job and run migrations manually (see Managed Supabase Setup), as the job is configured to connect to the self-hosted instance.
+> **Note**: If you are using an external or managed Supabase instance, you **must** disable this job and run migrations manually (see below).
 
 ## Configuration
 
@@ -102,61 +93,7 @@ You can disable this automation by setting `migrations.enabled: false` in `value
 | `global.domain` | The base domain for the deployment          | `rulebricks.local`     |
 | `global.email`  | Admin email (required for TLS certificates) | `admin@rulebricks.com` |
 
-### Dependencies
-
-You can enable or disable specific components if you have existing infrastructure:
-
-| Component                 | Enable Flag            | Description                                                             |
-| ------------------------- | ---------------------- | ----------------------------------------------------------------------- |
-| **Supabase**              | `supabase.enabled`     | Embedded Postgres/Supabase stack. Disable to use external DB.           |
-| **Kafka**                 | `kafka.enabled`        | Embedded Kafka broker. Disable to use external Kafka.                   |
-| **Vector**                | `vector.enabled`       | Stateless log aggregator that consumes from Kafka (enabled by default). |
-| **Traefik**               | `traefik.enabled`      | Ingress controller. Disable if you have an existing Ingress.            |
-| **KEDA**                  | `keda.enabled`         | Event-driven autoscaling.                                               |
-| **Cert-Manager**          | `cert-manager.enabled` | TLS certificate management via Let's Encrypt.                           |
-| **kube-prometheus-stack** | `monitoring.enabled`   | Prometheus (Grafana disabled) with optional remote-write configuration. |
-
-### Service Naming
-
-All services use templated names based on the Helm release name. This allows multiple installations in the same namespace and ensures consistency.
-
-**Service Name Format:**
-
-- App: `<release-name>-app`
-- HPS: `<release-name>-hps`
-- HPS Worker: `<release-name>-hps-worker`
-- Redis: `<release-name>-redis`
-- Serverless Redis HTTP: `<release-name>-serverless-redis-http`
-
-**External Service References (auto-discovered):**
-
-- Kafka: `<release-name>-kafka.<namespace>.svc.cluster.local:9092`
-- Supabase Kong: `http://<release-name>-supabase-kong.<namespace>.svc.cluster.local:8000`
-- Supabase DB: `<release-name>-supabase-db`
-
-### Default Secrets & Credentials
-
-The CLI generates a large set of secrets at deploy time. To keep the Helm install experience friction-free, this chart ships **demo-only** credentials in `values.yaml`. They are good enough to bring the stack up locally but **MUST** be rotated before production. Replace every `change-me` or `demo` string with values from your secret manager.
-
-### Logging (Vector)
-
-Vector is deployed automatically as a stateless aggregator that consumes the `logs` topic from Kafka. By default it writes to stdout, but you can configure enterprise sinks (S3, Datadog, Splunk, etc.) under the `vector.customConfig.sinks` section.
-
-**Note**: If using a custom release name, update the `bootstrap_servers` in the Vector config to match: `<release-name>-kafka:9092`
-
-### Monitoring (Prometheus Remote Write)
-
-Grafana has been removed. Instead we install Prometheus only (`kube-prometheus-stack`) and disable the bundled Grafana/Alertmanager. Prometheus retains 7 days of data locally and exposes a `remoteWrite` array under `kube-prometheus-stack.prometheus.prometheusSpec.remoteWrite`. Populate that list to forward metrics into your existing observability platform.
-
 ## Using External Services
-
-### External Database
-
-To use an external Postgres database (instead of embedded Supabase):
-
-1.  Set `supabase.enabled: false`.
-2.  Configure `rulebricks.app.supabaseUrl` to point to your Supabase instance or compatible API.
-3.  Set the appropriate `rulebricks.app.supabaseAnonKey` and `rulebricks.app.supabaseServiceKey`.
 
 ### Managed Supabase Setup
 
@@ -241,7 +178,6 @@ To use an external Kafka cluster:
 
 1.  Set `kafka.enabled: false`.
 2.  Configure `rulebricks.app.logging.kafkaBrokers` with your Kafka bootstrap servers.
-3.  Update the Vector config's `bootstrap_servers` if using Vector.
 
 ## Architecture
 
@@ -260,35 +196,23 @@ This chart composes several subcharts:
 
 ### TLS Certificate Issues
 
-1. Check cert-manager logs:
+1.  Check cert-manager logs:
 
-   ```bash
-   kubectl logs -n cert-manager -l app=cert-manager
-   ```
+    ```bash
+    kubectl logs -n cert-manager -l app=cert-manager
+    ```
 
-2. Check certificate status:
+2.  Check certificate status:
 
-   ```bash
-   kubectl get certificates -n <namespace>
-   kubectl describe certificate <release-name>-tls -n <namespace>
-   ```
+    ```bash
+    kubectl get certificates -n <namespace>
+    kubectl describe certificate <release-name>-tls -n <namespace>
+    ```
 
-3. Check ClusterIssuer status:
-   ```bash
-   kubectl describe clusterissuer <release-name>-letsencrypt
-   ```
-
-### Service Discovery Issues
-
-If services cannot connect to each other, verify the service names match:
-
-```bash
-# List all services
-kubectl get svc -n <namespace>
-
-# Check service endpoints
-kubectl get endpoints -n <namespace>
-```
+3.  Check ClusterIssuer status:
+    ```bash
+    kubectl describe clusterissuer <release-name>-letsencrypt
+    ```
 
 ### Database Migration Issues
 
