@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  CHART_NAME: rulebricks
+  CHART_NAME: rulebricks/stack
 
 jobs:
   release:
@@ -41,6 +41,16 @@ jobs:
           helm package .
 
           # Push to GHCR
-          helm push enterprise-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }}
+          helm push stack-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }}
 
           echo "✅ Pushed oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }}:${VERSION}"
+
+      - name: Summary
+        run: |
+          VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
+          echo "## 🎉 Published Chart" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Install:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "helm install rulebricks oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }} --version ${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
