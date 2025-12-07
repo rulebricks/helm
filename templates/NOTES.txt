@@ -3,10 +3,6 @@
 RULEBRICKS INSTALLATION - 1/2 – DNS SETUP REQUIRED
 =============================================================================
 
-Your Rulebricks cluster is provisioned!
-
-NEXT STEPS TO ENABLE SSL/TLS:
-
 1. Get your LoadBalancer Address:
    kubectl get svc -n {{ .Release.Namespace }} -l app.kubernetes.io/name=traefik -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'
 
@@ -14,8 +10,6 @@ NEXT STEPS TO ENABLE SSL/TLS:
    Point the following CNAME records to the LoadBalancer address above:
    - {{ .Values.global.domain }}
    - supabase.{{ .Values.global.domain }}
-
-   Wait a few minutes for DNS to propagate.
 
 3. Enable TLS (Phase 2):
    Run the following command to secure your cluster and finish installation:

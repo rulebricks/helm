@@ -214,7 +214,7 @@ studio:
     STUDIO_DEFAULT_ORGANIZATION: Default Organization
     STUDIO_DEFAULT_PROJECT: Default Project
     STUDIO_PORT: "3000"
-    SUPABASE_PUBLIC_URL: http://example.com
+    # NOTE: SUPABASE_PUBLIC_URL is set dynamically from global.domain and global.tlsEnabled
     NEXT_PUBLIC_ENABLE_LOGS: "true"
     # Set value to bigquery to use Big Query backend for analytics
     NEXT_ANALYTICS_BACKEND_PROVIDER: postgres # postgres, bigquery
@@ -295,12 +295,10 @@ auth:
     DB_PORT: 5432
     DB_DRIVER: postgres
     DB_SSL: disable # disable, allow, prefer, require, verify-ca, verify-full
-    # Domain settings are overridden from global.domain in deployment template
-    API_EXTERNAL_URL: http://localhost
+    # NOTE: API_EXTERNAL_URL, GOTRUE_SITE_URL, and GOTRUE_URI_ALLOW_LIST are set
+    # dynamically in the deployment template from global.domain and global.tlsEnabled
     GOTRUE_API_HOST: "0.0.0.0"
     GOTRUE_API_PORT: "9999"
-    GOTRUE_SITE_URL: http://localhost
-    GOTRUE_URI_ALLOW_LIST: "*"
     GOTRUE_DISABLE_SIGNUP: "false"
     # JWT settings
     GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
@@ -329,11 +327,7 @@ auth:
     GOTRUE_MAILER_URLPATHS_CONFIRMATION: "/auth/v1/verify"
     GOTRUE_MAILER_URLPATHS_RECOVERY: "/auth/v1/verify"
     GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: "/auth/v1/verify"
-    # Email subjects
-    GOTRUE_MAILER_SUBJECTS_INVITE: "Join your team on Rulebricks"
-    GOTRUE_MAILER_SUBJECTS_CONFIRMATION: "Confirm Your Email"
-    GOTRUE_MAILER_SUBJECTS_RECOVERY: "Reset Your Password"
-    GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE: "Confirm Email Change"
+    # NOTE: Email subjects and templates are set dynamically from global.emails
   envFrom:
     []
     # - secretRef:

@@ -13,23 +13,23 @@ data:
   PROTOCOL: {{ $protocol | quote }}
   DOMAIN_NAME: {{ $domain | quote }}
   ROUTER_ENTRYPOINT: {{ $routerEntrypoint | quote }}
-  # Supabase configuration - prefer global.supabase.*, fallback to app.* for backward compatibility
-  {{- $supabaseUrl := "" }}
+  # Supabase configuration
+  # - Self-hosted (supabase.enabled: true): URL derived from global.domain
+  # - External (supabase.enabled: false): URL from global.supabase.url
   {{- $supabaseAnonKey := "" }}
   {{- $supabaseServiceKey := "" }}
+  {{- $supabaseUrl := "" }}
   {{- if and .Values.global .Values.global.supabase }}
-    {{- $supabaseUrl = .Values.global.supabase.url | default "" }}
     {{- $supabaseAnonKey = .Values.global.supabase.anonKey | default "" }}
     {{- $supabaseServiceKey = .Values.global.supabase.serviceKey | default "" }}
+    {{- /* Check if external Supabase URL is explicitly provided */ -}}
+    {{- if .Values.global.supabase.url }}
+      {{- $supabaseUrl = .Values.global.supabase.url }}
+    {{- end }}
   {{- end }}
+  {{- /* If no explicit URL, derive public URL from global.domain (self-hosted) */ -}}
   {{- if not $supabaseUrl }}
-    {{- $supabaseUrl = .Values.app.supabaseUrl | default (include "rulebricks-chart.supabase.kongUrl" .) }}
-  {{- end }}
-  {{- if not $supabaseAnonKey }}
-    {{- $supabaseAnonKey = .Values.app.supabaseAnonKey | default "" }}
-  {{- end }}
-  {{- if not $supabaseServiceKey }}
-    {{- $supabaseServiceKey = .Values.app.supabaseServiceKey | default "" }}
+    {{- $supabaseUrl = printf "%s://supabase.%s" $protocol $domain }}
   {{- end }}
   SUPABASE_PUBLIC_KEY: {{ $supabaseAnonKey | quote }}
   SUPABASE_SECRET_KEY: {{ $supabaseServiceKey | quote }}

@@ -1,5 +1,6 @@
 # An example minimum configuration for a Rulebricks cluster
-# Note instances must be ARM/Graviton based
+# Note instances must be ARM based
+# Storage is required - customize the storage class in the values.yaml file accordingly
 
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
@@ -12,7 +13,7 @@ metadata:
 managedNodeGroups:
   - name: standard-nodes
     instanceType: c8g.large # ARM/Graviton instance
-    minSize: 4
+    minSize: 4 # 8CPU/16GB required if self-hosting db
     maxSize: 4
     desiredCapacity: 4
     volumeSize: 50

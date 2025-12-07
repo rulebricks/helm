@@ -92,6 +92,29 @@ spec:
             - name: GOTRUE_SMTP_SENDER_NAME
               value: {{ .Values.global.smtp.fromName | quote }}
             {{- end }}
+            {{- /* Email customization from supabase.emails in parent chart */ -}}
+            {{- if .Values.emails }}
+            {{- if .Values.emails.subjects }}
+            - name: GOTRUE_MAILER_SUBJECTS_INVITE
+              value: {{ .Values.emails.subjects.invite | quote }}
+            - name: GOTRUE_MAILER_SUBJECTS_CONFIRMATION
+              value: {{ .Values.emails.subjects.confirmation | quote }}
+            - name: GOTRUE_MAILER_SUBJECTS_RECOVERY
+              value: {{ .Values.emails.subjects.recovery | quote }}
+            - name: GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE
+              value: {{ .Values.emails.subjects.emailChange | quote }}
+            {{- end }}
+            {{- if .Values.emails.templates }}
+            - name: GOTRUE_MAILER_TEMPLATES_INVITE
+              value: {{ .Values.emails.templates.invite | quote }}
+            - name: GOTRUE_MAILER_TEMPLATES_CONFIRMATION
+              value: {{ .Values.emails.templates.confirmation | quote }}
+            - name: GOTRUE_MAILER_TEMPLATES_RECOVERY
+              value: {{ .Values.emails.templates.recovery | quote }}
+            - name: GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE
+              value: {{ .Values.emails.templates.emailChange | quote }}
+            {{- end }}
+            {{- end }}
             {{- end }}
             {{- if .Values.db.enabled }}
             - name: DB_HOST

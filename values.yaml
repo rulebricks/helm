@@ -1,6 +1,6 @@
 # =============================================================================
-# GLOBAL SETTINGS
-# These values are used across multiple components and should be set here
+# GLOBAL RULEBRICKS SETTINGS
+# These important values are used across multiple components and should be set here
 # =============================================================================
 global:
   # Domain for ingress and TLS certificate generation
@@ -43,7 +43,7 @@ global:
     openaiApiKey: "" # Your OpenAI API key
 
 # =============================================================================
-# RULEBRICKS APPLICATION
+# RULEBRICKS APPLICATION STACK
 # =============================================================================
 rulebricks:
   app:
@@ -69,6 +69,7 @@ rulebricks:
       - path: /
         pathType: Prefix
 
+  # Redis is used heavily
   redis:
     resources:
       requests:
@@ -82,6 +83,8 @@ rulebricks:
       size: "4Gi"
       storageClass: gp3
 
+  # HPS (High Performance Server)
+  # HPS intercepts requests on solution endpoints via Traefik and processes them scalably
   hps:
     enabled: true
     replicas: 2
@@ -96,39 +99,6 @@ rulebricks:
         cooldownPeriod: 300
         lagThreshold: 8
         cpuThreshold: 25
-
-# =============================================================================
-# SELF-HOSTED DATABASE SETTINGS (Supabase)
-# Set enabled: false to use an external Supabase instance instead
-# =============================================================================
-supabase:
-  enabled: true
-  secret:
-    # SMTP credentials are sourced from global.smtp.user and global.smtp.pass
-    # JWT keys are sourced from global.supabase.* (anonKey, serviceKey, jwtSecret)
-    db:
-      username: "postgres"
-      password: "postgres-password-change-me"
-      database: "postgres"
-    dashboard:
-      username: "supabase"
-      password: "dashboard-password-change-me"
-  # Database resource and storage configuration (for self-hosted)
-  db:
-    resources:
-      requests:
-        cpu: "500m"
-        memory: "1Gi"
-    persistence:
-      enabled: true
-      size: 10Gi
-      storageClassName: gp3
-  # Kong API Gateway ingress configuration
-  kong:
-    ingress:
-      enabled: true
-      className: traefik
-      annotations: {}
 
 # Message Queue (Kafka)
 kafka:
@@ -273,6 +243,52 @@ vector:
       #   # auth:
       #   #   access_key_id: "${AWS_ACCESS_KEY_ID}"
       #   #   secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
+
+# =============================================================================
+# SELF-HOSTED DATABASE SETTINGS (Supabase)
+# Set enabled: false to use an external Supabase instance instead
+# =============================================================================
+supabase:
+  enabled: true
+  secret:
+    # SMTP credentials are sourced from global.smtp.user and global.smtp.pass
+    # JWT keys are sourced from global.supabase.* (anonKey, serviceKey, jwtSecret)
+    db:
+      username: "postgres"
+      password: "postgres-password-change-me"
+      database: "postgres"
+    dashboard:
+      username: "supabase"
+      password: "dashboard-password-change-me"
+  # Database resource and storage configuration (for self-hosted)
+  db:
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClassName: gp3
+  # Kong API Gateway ingress configuration
+  kong:
+    ingress:
+      enabled: true
+      className: traefik
+      annotations: {}
+  # Email Customization (subjects and templates for self-hosted auth emails)
+  emails:
+    subjects:
+      invite: "Join your team on Rulebricks"
+      confirmation: "Confirm Your Email"
+      recovery: "Reset Your Password"
+      emailChange: "Confirm Email Change"
+    templates:
+      # HTML templates hosted on S3 (or any public URL)
+      invite: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/invite.html"
+      confirmation: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/verify.html"
+      recovery: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/password_change.html"
+      emailChange: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/email_change.html"
 
 # =============================================================================
 # MONITORING (Prometheus only)

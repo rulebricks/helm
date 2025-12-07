@@ -36,8 +36,25 @@ spec:
           imagePullPolicy: {{ .Values.studio.image.pullPolicy }}
           env:
             {{- range $key, $value := .Values.studio.environment }}
+            {{- /* Skip SUPABASE_PUBLIC_URL - it's set dynamically below */ -}}
+            {{- if ne $key "SUPABASE_PUBLIC_URL" }}
             - name: {{ $key }}
               value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+            {{- /* Override SUPABASE_PUBLIC_URL with global.domain and global.tlsEnabled */ -}}
+            {{- if .Values.global }}
+            {{- if .Values.global.domain }}
+            {{- $protocol := ternary "https" "http" (eq (.Values.global.tlsEnabled | toString) "true") }}
+            - name: SUPABASE_PUBLIC_URL
+              value: {{ printf "%s://supabase.%s" $protocol .Values.global.domain | quote }}
+            {{- else }}
+            - name: SUPABASE_PUBLIC_URL
+              value: {{ .Values.studio.environment.SUPABASE_PUBLIC_URL | default "http://localhost" | quote }}
+            {{- end }}
+            {{- else }}
+            - name: SUPABASE_PUBLIC_URL
+              value: {{ .Values.studio.environment.SUPABASE_PUBLIC_URL | default "http://localhost" | quote }}
             {{- end }}
             {{- if .Values.kong.enabled }}
             - name: SUPABASE_URL
