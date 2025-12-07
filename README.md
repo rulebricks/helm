@@ -24,7 +24,7 @@
 
 ---
 
-Simplified resources to deploy your own configurations of Rulebricks and its dependencies via Helm.
+Resources to deploy custom configurations of Rulebricks and its dependencies via Helm.
 
 ## Prerequisites
 

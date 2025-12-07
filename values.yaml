@@ -103,6 +103,18 @@ rulebricks:
 # Message Queue (Kafka)
 kafka:
   enabled: true
+  # KRaft mode (no Zookeeper)
+  kraft:
+    enabled: true
+  zookeeper:
+    enabled: false
+  # Kafka broker configuration
+  overrideConfiguration:
+    auto.create.topics.enable: "true"
+    log.retention.hours: "24"
+    default.replication.factor: "1"
+    offsets.topic.replication.factor: "1"
+    num.partitions: "3"
   controller:
     replicaCount: 1
     resources:
@@ -116,10 +128,11 @@ kafka:
       enabled: true
       size: 10Gi
       storageClass: gp3
-    # JVM heap options for optimal performance
-    # Note: Worth trying ZGC if you make the heap larger
-    heapOpts: "-Xmx1g -Xms1g -XX:+UseG1GC -XX:+AlwaysPreTouch"
+    # Tune heap options for your needs
+    heapOpts: "-Xmx1g -Xms1g -XX:+UseZGC -XX:+AlwaysPreTouch"
     extraEnvVars:
+      - name: KAFKA_JVM_PERFORMANCE_OPTS
+        value: "-XX:MaxDirectMemorySize=256M -Djdk.nio.maxCachedBufferSize=262144"
       - name: KAFKA_CFG_QUEUED_MAX_REQUESTS
         value: "10000"
       - name: KAFKA_CFG_NUM_NETWORK_THREADS
@@ -136,8 +149,22 @@ kafka:
         value: "4294967296"
       - name: KAFKA_CFG_LOG_SEGMENT_BYTES
         value: "1073741824"
+      - name: KAFKA_CFG_NUM_REPLICA_FETCHERS
+        value: "4"
+      - name: KAFKA_CFG_REPLICA_SOCKET_RECEIVE_BUFFER_BYTES
+        value: "1048576"
+      - name: KAFKA_CFG_LOG_CLEANER_DEDUPE_BUFFER_SIZE
+        value: "268435456"
+      - name: KAFKA_CFG_LOG_CLEANER_IO_BUFFER_SIZE
+        value: "1048576"
+      - name: KAFKA_CFG_MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION
+        value: "10"
   listeners:
     client:
+      protocol: PLAINTEXT
+    controller:
+      protocol: PLAINTEXT
+    interbroker:
       protocol: PLAINTEXT
 
 # Ingress Controller (Traefik)
