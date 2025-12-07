@@ -20,7 +20,7 @@ NEXT STEPS TO ENABLE SSL/TLS:
 3. Enable TLS (Phase 2):
    Run the following command to secure your cluster and finish installation:
 
-   helm upgrade {{ .Release.Name }} oci://ghcr.io/rulebricks/enterprise \
+   helm upgrade {{ .Release.Name }} oci://ghcr.io/rulebricks/charts/stack \
      --namespace {{ .Release.Namespace }} \
      --reuse-values \
      --set global.tlsEnabled=true

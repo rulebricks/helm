@@ -39,7 +39,7 @@ See [Minimum Cluster Requirements](example-min-cluster.yaml) for an example EKS 
 
 ```bash
 # Install from OCI registry (follow on-screen instructions for DNS & TLS setup)
-helm install rulebricks oci://ghcr.io/rulebricks/enterprise \
+helm install rulebricks oci://ghcr.io/rulebricks/charts/stack \
   --namespace rulebricks \
   --create-namespace \
   -f values.yaml \
