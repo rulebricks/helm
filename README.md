@@ -1,288 +1,254 @@
-# Rulebricks Helm Charts
+```
 
-This chart deploys Rulebricks and its dependencies (Supabase, Kafka, etc.) to a Kubernetes cluster. It is designed to be a self-contained "umbrella" chart that can be used to spin up a full stack, or configured to connect to existing external infrastructure.
+
+           ⟋ ‾‾‾‾⟋|
+           ██████  |
+           ██████  |
+           ██████ ⟋ ‾‾‾⟋|
+         ⟋     ⟋██████  |
+        ██████   ██████  |
+        ██████   ██████⟋
+        ██████⟋
+
+            [Charts]
+
+```
+
+<div align="start">
+  <p>
+    <a href="https://rulebricks.com">Website</a> •
+    <a href="https://rulebricks.com/docs">Documentation</a> •
+    <a href="#support">Support</a>
+  </p>
+</div>
+
+---
+
+Simplified resources to deploy your own configurations of Rulebricks and its dependencies via Helm.
 
 ## Prerequisites
 
 - Kubernetes 1.19+
 - Helm 3.2.0+
-- PV provisioner support in the underlying infrastructure
-- A domain name you control (for TLS)
+- PV provisioner support (e.g., AWS EBS CSI driver)
+- A domain name you control
 
-## Installation
+See [Minimum Cluster Requirements](example-min-cluster.yaml) for an example EKS cluster configuration.
 
-We recommend a **Two-Phase Installation** to ensure DNS is correctly configured before attempting to provision TLS certificates. This prevents rate-limiting issues with Let's Encrypt.
+## Quick Start
 
-### Phase 1: Bootstrap (HTTP only)
+```bash
+# Add the Helm repository
+helm repo add rulebricks-enterprise https://github.com/rulebricks/helm/releases/latest/download
+helm repo update
 
-1.  **Add the Rulebricks Enterprise Helm Repository**:
+# Install (follow the on-screen instructions for DNS & TLS setup)
+helm install rulebricks rulebricks-enterprise/rulebricks-enterprise \
+  --namespace rulebricks \
+  --create-namespace \
+  -f values.yaml \
+  --set global.licenseKey=<YOUR_LICENSE_KEY>
+```
 
-    ```bash
-    helm repo add rulebricks-enterprise https://github.com/rulebricks/helm/releases/latest/download
-    helm repo update
-    ```
-
-2.  **Configure `values.yaml`**:
-    Download the default [values.yaml](https://github.com/rulebricks/helm/blob/main/values.yaml) and edit `global.domain` and your secrets.
-
-3.  **Install**:
-
-    ```bash
-    helm install rulebricks rulebricks-enterprise/rulebricks-enterprise \
-      --namespace rulebricks \
-      --create-namespace \
-      -f values.yaml \
-      --set rulebricks.app.licenseKey=<YOUR_LICENSE_KEY>
-    ```
-
-4.  **Get LoadBalancer Address**:
-    After installation, wait a minute for the LoadBalancer to be provisioned, then run:
-
-    ```bash
-    kubectl get svc -n rulebricks -l app.kubernetes.io/name=traefik -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'
-    ```
-
-5.  **Configure DNS**:
-    Create CNAME records for the following domains pointing to the address retrieved above:
-
-    - `your-domain.com` (Main App)
-    - `supabase.your-domain.com` (Backend Services)
-
-    _Wait a few minutes for DNS to propagate._
-
-### Phase 2: Secure (Enable TLS)
-
-Once DNS is pointing to your cluster, enable TLS. This will automatically provision production certificates via Let's Encrypt.
-
-1.  **Upgrade**:
-
-    ```bash
-    helm upgrade rulebricks rulebricks-enterprise/rulebricks-enterprise \
-      --namespace rulebricks \
-      --reuse-values \
-      --set global.tlsEnabled=true \
-      --set rulebricks.app.tlsEnabled=true
-    ```
-
-2.  **Verify**:
-    Check that your site is now accessible via `https://`.
+After installation, Helm will display instructions for configuring DNS and enabling TLS.
 
 ## Configuration
 
 ### Global Settings
 
-| Parameter           | Description                                 | Default                |
-| ------------------- | ------------------------------------------- | ---------------------- |
-| `global.domain`     | The base domain for the deployment          | `rulebricks.local`     |
-| `global.email`      | Admin email (required for TLS certificates) | `admin@rulebricks.com` |
-| `global.tlsEnabled` | Enable TLS/SSL (Phase 2)                    | `false`                |
+| Parameter                    | Description                                         | Default                   |
+| ---------------------------- | --------------------------------------------------- | ------------------------- |
+| `global.domain`              | Base domain for the deployment                      | `rulebricks.local`        |
+| `global.email`               | Admin email (required for TLS certificates)         | `admin@rulebricks.com`    |
+| `global.licenseKey`          | Rulebricks Enterprise license key                   | `evaluation`              |
+| `global.tlsEnabled`          | Enable TLS/HTTPS (set after DNS is configured)      | `false`                   |
+| `global.migrations.enabled`  | Run database migrations automatically               | `true`                    |
+| `global.smtp.host`           | SMTP server hostname                                | `smtp.mailtrap.io`        |
+| `global.smtp.port`           | SMTP server port                                    | `2525`                    |
+| `global.smtp.user`           | SMTP username                                       | —                         |
+| `global.smtp.pass`           | SMTP password                                       | —                         |
+| `global.smtp.from`           | Sender email address                                | `no-reply@rulebricks.com` |
+| `global.smtp.fromName`       | Sender display name                                 | `Rulebricks`              |
+| `global.supabase.url`        | External Supabase URL (leave empty for self-hosted) | `""`                      |
+| `global.supabase.anonKey`    | Supabase anonymous/public key                       | _(demo key)_              |
+| `global.supabase.serviceKey` | Supabase service role key                           | _(demo key)_              |
+| `global.supabase.jwtSecret`  | JWT signing secret (self-hosted only)               | _(demo secret)_           |
 
-## Automated Database Migrations
+### Storage Class (AWS)
 
-This chart includes a Helm hook that automatically runs database migrations on install and upgrade.
+The chart automatically creates a `gp3` StorageClass for AWS EBS. Disable with `storageClass.create: false` if you have your own.
 
-- A Kubernetes Job runs `post-install` and `post-upgrade`.
-- It applies migration scripts from the app image to the Postgres database.
+---
 
-You can disable this automation by setting `migrations.enabled: false` in `values.yaml`.
+<details>
+<summary><strong>Using Managed Supabase (Cloud)</strong></summary>
 
-> **Note**: If you are using an external or managed Supabase instance, you **must** disable this job and run migrations manually (see below).
+If you prefer Supabase Cloud instead of self-hosting:
 
-## Using External Services
+1. **Extract migration files** from the app image:
 
-### Managed Supabase Setup
+   ```bash
+   docker create --name temp-rb rulebricks/app:latest
+   docker cp temp-rb:/opt/rulebricks/assets/supabase ./supabase
+   docker rm temp-rb
+   ```
 
-If you prefer to use Supabase Cloud (Managed) instead of self-hosting, follow this one-time setup process:
+2. **Push schema to your Supabase project**:
 
-1.  **Prerequisites**: Install the [Supabase CLI](https://supabase.com/docs/guides/cli) and [Docker](https://docs.docker.com/get-docker/).
+   ```bash
+   cd supabase
+   supabase login
+   supabase link --project-ref <your-project-ref>
+   supabase db push --include-all
+   ```
 
-2.  **Extract Supabase Assets**:
-    The necessary configuration and migration files are packaged in the application image. Run the following to extract them to a local `supabase` directory:
+3. **Configure Helm values**:
 
-    ```bash
-    # Create a temporary container
-    docker create --name temp-rb rulebricks/app:latest
+   ```yaml
+   supabase:
+     enabled: false
 
-    # Extract the assets
-    docker cp temp-rb:/opt/rulebricks/assets/supabase ./supabase
+   global:
+     migrations:
+       enabled: false # Already ran manually
+     supabase:
+       url: "https://<project-ref>.supabase.co"
+       anonKey: "<your-anon-key>"
+       serviceKey: "<your-service-role-key>"
+   ```
 
-    # Clean up
-    docker rm temp-rb
-    ```
+</details>
 
-3.  **Initialize Supabase Project**:
+<details>
+<summary><strong>Using External Kafka</strong></summary>
 
-    - **Login and Create Project**:
+To connect to an existing Kafka cluster:
 
-      ```bash
-      supabase login
-      supabase projects create rulebricks --org-id <your-org-id> --db-password <secure-password> --region <region>
-      # Or use an existing project
-      ```
+```yaml
+kafka:
+  enabled: false
 
-    - **Link Project**:
-      ```bash
-      cd supabase
-      supabase link --project-ref <your-project-ref>
-      ```
-    - **Push Database Schema**:
-      ```bash
-      supabase db push --include-all
-      ```
-    - **Configure Auth & Settings**:
-      Edit `supabase/config.toml` and replace `env(FULL_URL)` with your actual application domain (e.g., `https://rulebricks.example.com`).
+rulebricks:
+  app:
+    logging:
+      kafkaBrokers: "kafka-1:9092,kafka-2:9092"
+```
 
-      Then push the configuration:
+</details>
 
-      ```bash
-      supabase config push
-      ```
+<details>
+<summary><strong>S3 Log Storage (AWS)</strong></summary>
 
-4.  **Get Credentials**:
-    Retrieve your project URL and API keys:
+To send rule execution logs to S3:
 
-    ```bash
-    supabase projects api-keys
-    ```
+1. **Create an IAM policy** (`vector-s3-policy.json`):
 
-5.  **Configure Helm**:
-    Update your `values.yaml` to disable the self-hosted stack and use your managed instance:
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Action": ["s3:PutObject", "s3:PutObjectAcl"],
+         "Resource": "arn:aws:s3:::YOUR_BUCKET/*"
+       },
+       {
+         "Effect": "Allow",
+         "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+         "Resource": "arn:aws:s3:::YOUR_BUCKET"
+       }
+     ]
+   }
+   ```
 
-    ```yaml
-    # Disable self-hosted Supabase
-    supabase:
-      enabled: false
+2. **Set up IRSA** (IAM Roles for Service Accounts):
 
-    # Disable in-cluster migrations (you ran them manually above)
-    migrations:
-      enabled: false
+   ```bash
+   # Create OIDC provider (if needed)
+   eksctl utils associate-iam-oidc-provider --cluster=YOUR_CLUSTER --approve
 
-    rulebricks:
-      app:
-        # Set your Managed Supabase URL
-        supabaseUrl: "https://<your-project-ref>.supabase.co"
+   # Create IAM policy
+   aws iam create-policy --policy-name VectorS3Access --policy-document file://vector-s3-policy.json
 
-        # Set your keys (retrieved in step 4)
-        supabaseAnonKey: "<your-anon-key>"
-        supabaseServiceKey: "<your-service-role-key>"
-    ```
+   # Create service account
+   eksctl create iamserviceaccount \
+     --cluster=YOUR_CLUSTER \
+     --namespace=rulebricks \
+     --name=vector-s3-access \
+     --attach-policy-arn=arn:aws:iam::YOUR_ACCOUNT:policy/VectorS3Access \
+     --approve
+   ```
 
-### External Kafka
+3. **Configure Vector** in `values.yaml`:
 
-To use an external Kafka cluster:
+   ```yaml
+   vector:
+     serviceAccount:
+       name: vector-s3-access
+     customConfig:
+       sinks:
+         s3:
+           type: aws_s3
+           inputs:
+             - kafka
+           bucket: "your-logs-bucket"
+           region: "us-east-1"
+           key_prefix: "rulebricks/logs/%Y/%m/%d/"
+           compression: gzip
+           encoding:
+             codec: json
+   ```
 
-1.  Set `kafka.enabled: false`.
-2.  Configure `rulebricks.app.logging.kafkaBrokers` with your Kafka bootstrap servers.
+> For GCS or Azure Blob, see the [Vector sinks documentation](https://vector.dev/docs/reference/configuration/sinks/).
 
-### S3 Log Storage (AWS)
+</details>
 
-To send rule execution logs to S3 instead of (or in addition to) the console, you need to:
-
-1.  **Create an S3 bucket** for your logs.
-
-2.  **Create an IAM policy** with permissions to write to the bucket:
-
-    ```json
-    {
-      "Version": "2012-10-17",
-      "Statement": [
-        {
-          "Effect": "Allow",
-          "Action": ["s3:PutObject", "s3:PutObjectAcl"],
-          "Resource": "arn:aws:s3:::YOUR_BUCKET/*"
-        },
-        {
-          "Effect": "Allow",
-          "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
-          "Resource": "arn:aws:s3:::YOUR_BUCKET"
-        }
-      ]
-    }
-    ```
-
-3.  **Set up IRSA (IAM Roles for Service Accounts)** on EKS:
-
-    ```bash
-    # Create OIDC provider (if not exists)
-    eksctl utils associate-iam-oidc-provider --cluster=YOUR_CLUSTER --approve
-
-    # Create IAM policy
-    aws iam create-policy \
-      --policy-name VectorS3Access \
-      --policy-document file://policy.json
-
-    # Create service account with IRSA
-    eksctl create iamserviceaccount \
-      --cluster=YOUR_CLUSTER \
-      --namespace=rulebricks \
-      --name=vector-s3-access \
-      --attach-policy-arn=arn:aws:iam::YOUR_ACCOUNT:policy/VectorS3Access \
-      --approve
-    ```
-
-4.  **Configure Vector** in your `values.yaml`:
-
-    ```yaml
-    vector:
-      serviceAccount:
-        name: vector-s3-access
-      customConfig:
-        sinks:
-          s3:
-            type: aws_s3
-            inputs:
-              - kafka
-            bucket: "your-logs-bucket"
-            region: "us-east-1"
-            key_prefix: "rulebricks/logs/%Y/%m/%d/"
-            compression: gzip
-            encoding:
-              codec: json
-    ```
-
-5.  **Upgrade** your Helm release to apply the changes.
-
-> **Note**: For GCS or Azure Blob Storage, similar patterns apply using Workload Identity (GCP) or Managed Identity (Azure). See the [Vector documentation](https://vector.dev/docs/reference/configuration/sinks/) for sink-specific configuration.
+---
 
 ## Architecture
 
-This chart composes several subcharts:
+| Component                 | Description                                        | Enabled |
+| ------------------------- | -------------------------------------------------- | :-----: |
+| **rulebricks**            | Core application and high-performance solver (HPS) |    ✓    |
+| **supabase**              | Backend services (Postgres, Auth, REST API)        |    ✓    |
+| **kafka**                 | Message queuing for async rule execution           |    ✓    |
+| **traefik**               | Ingress controller with automatic TLS              |    ✓    |
+| **cert-manager**          | Let's Encrypt certificate provisioning             |    ✓    |
+| **keda**                  | Event-driven autoscaling for HPS workers           |    ✓    |
+| **vector**                | Log aggregation and forwarding                     |    ✓    |
+| **kube-prometheus-stack** | Metrics collection (Prometheus)                    |    ✗    |
 
-- **rulebricks**: The core application and high-performance solver (HPS).
-- **supabase**: A fork of the Supabase community chart for backend services.
-- **kafka**: Bitnami Kafka chart for message queuing.
-- **traefik**: Ingress controller with TLS support.
-- **cert-manager**: Automatic TLS certificate provisioning.
-- **keda**: Event-driven autoscaling for HPS workers.
-- **vector**: Log aggregation and forwarding.
-- **kube-prometheus-stack**: Metrics collection (Prometheus only).
+---
 
-## Troubleshooting
+<details>
+<summary><strong>Troubleshooting</strong></summary>
 
 ### TLS Certificate Issues
 
-1.  Check cert-manager logs:
+```bash
+# Check cert-manager logs
+kubectl logs -n cert-manager -l app=cert-manager
 
-    ```bash
-    kubectl logs -n cert-manager -l app=cert-manager
-    ```
+# Check certificate status
+kubectl get certificates -n rulebricks
+kubectl describe certificate rulebricks-tls -n rulebricks
 
-2.  Check certificate status:
-
-    ```bash
-    kubectl get certificates -n <namespace>
-    kubectl describe certificate <release-name>-tls -n <namespace>
-    ```
-
-3.  Check ClusterIssuer status:
-    ```bash
-    kubectl describe clusterissuer <release-name>-letsencrypt
-    ```
+# Check ClusterIssuer
+kubectl describe clusterissuer rulebricks-letsencrypt
+```
 
 ### Database Migration Issues
 
-Check the migration job logs:
+```bash
+kubectl logs job/rulebricks-db-migrate-1 -n rulebricks
+```
+
+### Pod Issues
 
 ```bash
-kubectl logs job/<release-name>-db-migrate-<revision> -n <namespace>
+kubectl get pods -n rulebricks
+kubectl describe pod <pod-name> -n rulebricks
+kubectl logs <pod-name> -n rulebricks
 ```
+
+</details>

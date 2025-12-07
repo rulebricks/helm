@@ -1,6 +1,6 @@
 {{- if not .Values.global.tlsEnabled }}
 =============================================================================
-RULEBRICKS INSTALLATION - PHASE 1 COMPLETE
+RULEBRICKS INSTALLATION - 1/2 – DNS SETUP REQUIRED
 =============================================================================
 
 Your Rulebricks cluster is provisioned!
@@ -20,7 +20,8 @@ NEXT STEPS TO ENABLE SSL/TLS:
 3. Enable TLS (Phase 2):
    Run the following command to secure your cluster:
 
-   helm upgrade {{ .Release.Name }} helm/ \
+   helm upgrade {{ .Release.Name }} rulebricks-enterprise/rulebricks-enterprise \
+     --namespace {{ .Release.Namespace }} \
      --reuse-values \
      --set global.tlsEnabled=true \
      --set rulebricks.app.tlsEnabled=true
@@ -28,7 +29,7 @@ NEXT STEPS TO ENABLE SSL/TLS:
 =============================================================================
 {{- else }}
 =============================================================================
-RULEBRICKS INSTALLATION COMPLETE
+RULEBRICKS INSTALLATION – 2/2 – COMPLETE
 =============================================================================
 
 TLS is enabled! Your cluster should be secure shortly.
