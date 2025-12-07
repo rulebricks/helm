@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  CHART_NAME: rulebricks/stack
+  CHART_NAME: rulebricks/enterprise
 
 jobs:
   release:
@@ -41,7 +41,7 @@ jobs:
           helm package .
 
           # Push to GHCR
-          helm push stack-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }}
+          helm push rulebricks-enterprise-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }}
 
           echo "✅ Pushed oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }}:${VERSION}"
 
