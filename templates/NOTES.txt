@@ -18,13 +18,12 @@ NEXT STEPS TO ENABLE SSL/TLS:
    Wait a few minutes for DNS to propagate.
 
 3. Enable TLS (Phase 2):
-   Run the following command to secure your cluster:
+   Run the following command to secure your cluster and finish installation:
 
-   helm upgrade {{ .Release.Name }} rulebricks-enterprise/rulebricks-enterprise \
+   helm upgrade {{ .Release.Name }} oci://ghcr.io/rulebricks/enterprise \
      --namespace {{ .Release.Namespace }} \
      --reuse-values \
-     --set global.tlsEnabled=true \
-     --set rulebricks.app.tlsEnabled=true
+     --set global.tlsEnabled=true
 
 =============================================================================
 {{- else }}
@@ -32,7 +31,7 @@ NEXT STEPS TO ENABLE SSL/TLS:
 RULEBRICKS INSTALLATION – 2/2 – COMPLETE
 =============================================================================
 
-TLS is enabled! Your cluster should be secure shortly.
+Rulebricks should be available shortly.
 
 Access your application at:
   https://{{ .Values.global.domain }}

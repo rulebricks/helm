@@ -38,12 +38,8 @@ See [Minimum Cluster Requirements](example-min-cluster.yaml) for an example EKS 
 ## Quick Start
 
 ```bash
-# Add the Helm repository
-helm repo add rulebricks-enterprise https://github.com/rulebricks/helm/releases/latest/download
-helm repo update
-
-# Install (follow the on-screen instructions for DNS & TLS setup)
-helm install rulebricks rulebricks-enterprise/rulebricks-enterprise \
+# Install from OCI registry (follow on-screen instructions for DNS & TLS setup)
+helm install rulebricks oci://ghcr.io/rulebricks/enterprise \
   --namespace rulebricks \
   --create-namespace \
   -f values.yaml \
@@ -73,6 +69,8 @@ After installation, Helm will display instructions for configuring DNS and enabl
 | `global.supabase.anonKey`    | Supabase anonymous/public key                       | _(demo key)_              |
 | `global.supabase.serviceKey` | Supabase service role key                           | _(demo key)_              |
 | `global.supabase.jwtSecret`  | JWT signing secret (self-hosted only)               | _(demo secret)_           |
+| `global.ai.enabled`          | Enable AI-powered rule generation                   | `false`                   |
+| `global.ai.openaiApiKey`     | OpenAI API key for AI features                      | `""`                      |
 
 ### Storage Class (AWS)
 

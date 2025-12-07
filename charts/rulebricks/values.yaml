@@ -18,6 +18,7 @@
 app:
   image:
     repository: index.docker.io/rulebricks/app
+    tag: "latest"
     pullPolicy: IfNotPresent
   replicas: 2
   resources:
@@ -111,11 +112,10 @@ ingress:
     traefik.ingress.kubernetes.io/headers.customrequestheaders.Access-Control-Allow-Methods: "GET,OPTIONS,PUT,POST,DELETE,PATCH"
     traefik.ingress.kubernetes.io/headers.customrequestheaders.Access-Control-Allow-Origin: "*"
     traefik.ingress.kubernetes.io/headers.customrequestheaders.Access-Control-Allow-Headers: "*"
-  hosts:
-    - host: "localhost"
-      paths:
-        - path: /
-          pathType: Prefix
+  # hosts: configured automatically from global.domain
+  paths:
+    - path: /
+      pathType: Prefix
 
 service:
   type: ClusterIP

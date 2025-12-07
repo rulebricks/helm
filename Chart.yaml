@@ -3,11 +3,11 @@ name: rulebricks-enterprise
 description: A unified Helm chart for deploying Rulebricks and its dependencies (Kafka, Supabase, Traefik, etc.)
 type: application
 version: 0.1.0
-appVersion: "0.0.1"
+appVersion: "0.1.0"
 icon: https://d1zic6dm9txw4h.cloudfront.net/rulebricks-docs-assets/static/images/application/logo.png
 dependencies:
   - name: rulebricks
-    version: 0.0.1
+    version: 0.1.0
     repository: file://charts/rulebricks
   - name: kafka
     version: 32.4.4

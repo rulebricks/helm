@@ -6,9 +6,9 @@ description: A Helm chart for privately deploying Rulebricks via Kubernetes
 
 type: application
 
-version: 0.0.1
+version: 0.1.0
 
-appVersion: "0.0.1"
+appVersion: "1.0.0"
 
 home: https://rulebricks.com
 

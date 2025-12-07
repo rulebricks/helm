@@ -1,7 +1,7 @@
 dependencies:
 - name: rulebricks
   repository: file://charts/rulebricks
-  version: 0.0.1
+  version: 0.1.0
 - name: kafka
   repository: file://charts/kafka
   version: 32.4.4
@@ -23,5 +23,5 @@ dependencies:
 - name: vector
   repository: https://helm.vector.dev
   version: 0.40.0
-digest: sha256:574924d9399e8962f9ca71f10e3844aa6c613f1869f53e7f5d7846ffa51eb7a4
-generated: "2025-12-05T16:14:42.146977-08:00"
+digest: sha256:08ccab1d6844bbf557928e7a2d75b95ef9ffeb62315a600d80b58ab9620ec475
+generated: "2025-12-06T21:51:31.533996-08:00"

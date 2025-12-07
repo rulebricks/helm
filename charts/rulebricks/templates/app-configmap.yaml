@@ -1,4 +1,4 @@
-{{- $host0 := index .Values.ingress.hosts 0 -}}
+{{- $domain := .Values.global.domain | default "localhost" -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,7 +11,7 @@ data:
   {{- $protocol := ternary "https" "http" $tlsEnabled }}
   {{- $routerEntrypoint := ternary "websecure" "web" $tlsEnabled }}
   PROTOCOL: {{ $protocol | quote }}
-  DOMAIN_NAME: {{ $host0.host | quote }}
+  DOMAIN_NAME: {{ $domain | quote }}
   ROUTER_ENTRYPOINT: {{ $routerEntrypoint | quote }}
   # Supabase configuration - prefer global.supabase.*, fallback to app.* for backward compatibility
   {{- $supabaseUrl := "" }}
@@ -36,7 +36,7 @@ data:
   SUPABASE_URL: {{ $supabaseUrl | quote }}
   NEXT_PUBLIC_EMAIL: {{ .Values.global.email | default .Values.app.email | default "" | quote }}
   NEXT_PUBLIC_PROTOCOL: {{ $protocol | quote }}
-  NEXT_PUBLIC_DOMAIN_NAME: {{ $host0.host | quote }}
+  NEXT_PUBLIC_DOMAIN_NAME: {{ $domain | quote }}
   NEXT_PUBLIC_SUPABASE_URL: {{ $supabaseUrl | quote }}
   NEXT_PUBLIC_SUPABASE_PUBLIC_KEY: {{ $supabaseAnonKey | quote }}
   SELF_HOSTED: "1"
@@ -65,11 +65,19 @@ data:
   SMTP_FROM: {{ .Values.app.smtp.from | default "" | quote }}
   SMTP_FROM_NAME: {{ .Values.app.smtp.fromName | default "" | quote }}
   {{- end }}
-  {{- if .Values.app.ai }}
-  {{- if .Values.app.ai.enabled }}
-  NEXT_PUBLIC_AI_ENABLED: "1"
-  OPENAI_API_KEY: {{ .Values.app.ai.openaiApiKey | default "" | quote }}
+  # AI Features - prefer global.ai, fallback to app.ai
+  {{- $aiEnabled := false }}
+  {{- $openaiApiKey := "" }}
+  {{- if and .Values.global .Values.global.ai .Values.global.ai.enabled }}
+    {{- $aiEnabled = true }}
+    {{- $openaiApiKey = .Values.global.ai.openaiApiKey | default "" }}
+  {{- else if and .Values.app.ai .Values.app.ai.enabled }}
+    {{- $aiEnabled = true }}
+    {{- $openaiApiKey = .Values.app.ai.openaiApiKey | default "" }}
   {{- end }}
+  {{- if $aiEnabled }}
+  NEXT_PUBLIC_AI_ENABLED: "1"
+  OPENAI_API_KEY: {{ $openaiApiKey | quote }}
   {{- end }}
   {{- if .Values.app.logging }}
   {{- if .Values.app.logging.enabled }}

@@ -14,10 +14,6 @@ spec:
     name: {{ .Release.Name }}-letsencrypt
     kind: ClusterIssuer
   dnsNames:
-  {{- range .Values.rulebricks.ingress.hosts }}
-    - {{ .host }}
-  {{- end }}
-  # Optional: Add common name
-  commonName: {{ (index .Values.rulebricks.ingress.hosts 0).host }}
+    - {{ .Values.global.domain }}
+  commonName: {{ .Values.global.domain }}
 {{- end }}
-

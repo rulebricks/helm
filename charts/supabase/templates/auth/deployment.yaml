@@ -70,8 +70,18 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
-            {{- /* Override SMTP settings from global.smtp if defined */ -}}
+            {{- /* Override settings from global values */ -}}
             {{- if .Values.global }}
+            {{- if .Values.global.domain }}
+            {{- $domain := .Values.global.domain }}
+            {{- $protocol := ternary "https" "http" (eq (.Values.global.tlsEnabled | toString) "true") }}
+            - name: GOTRUE_SITE_URL
+              value: {{ printf "%s://%s" $protocol $domain | quote }}
+            - name: API_EXTERNAL_URL
+              value: {{ printf "%s://supabase.%s" $protocol $domain | quote }}
+            - name: GOTRUE_URI_ALLOW_LIST
+              value: {{ printf "%s://%s,%s://%s/*,%s://%s/auth/changepass,%s://%s/settings/password,%s://%s/dashboard" $protocol $domain $protocol $domain $protocol $domain $protocol $domain $protocol $domain | quote }}
+            {{- end }}
             {{- if .Values.global.smtp }}
             - name: GOTRUE_SMTP_HOST
               value: {{ .Values.global.smtp.host | quote }}

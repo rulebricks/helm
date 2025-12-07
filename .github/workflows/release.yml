@@ -1,373 +1,56 @@
-name: Release Charts
+name: Release Chart
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to release (e.g., 1.2.3)"
-        required: false
-        type: string
-      bump_type:
-        description: "Type of version bump (major, minor, patch)"
-        required: false
-        type: string
-        default: "patch"
+
+env:
+  REGISTRY: ghcr.io
+  CHART_NAME: rulebricks/enterprise
 
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       packages: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Configure Git
-        run: |
-          git config user.name "$GITHUB_ACTOR"
-          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
       - name: Install Helm
         uses: azure/setup-helm@v3
         with:
           version: "v3.13.0"
 
-      - name: Get next chart version
-        id: next_version
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Package and Push
         run: |
-          # Function to get latest release with retries
-          get_latest_release() {
-            local max_retries=5
-            local retry_delay=2
-            local attempt=1
+          # Get version from Chart.yaml
+          VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
+          echo "📦 Packaging chart version ${VERSION}"
 
-            while [ $attempt -le $max_retries ]; do
-              echo "🔍 Attempt $attempt to fetch latest release..." >&2
-
-              RESPONSE=$(curl -s -w "\n%{http_code}" -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/releases/latest")
-              HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-              BODY=$(echo "$RESPONSE" | head -n-1)
-
-              if [ "$HTTP_CODE" = "200" ]; then
-                TAG_NAME=$(echo "$BODY" | jq -r '.tag_name // empty')
-                if [ -n "$TAG_NAME" ] && [ "$TAG_NAME" != "null" ]; then
-                  echo "$TAG_NAME"
-                  return 0
-                fi
-              elif [ "$HTTP_CODE" = "404" ]; then
-                # No releases yet
-                echo "v0.0.0"
-                return 0
-              fi
-
-              echo "⚠️  Failed attempt $attempt (HTTP $HTTP_CODE)" >&2
-              if [ $attempt -lt $max_retries ]; then
-                echo "⏳ Retrying in $retry_delay seconds..." >&2
-                sleep $retry_delay
-                retry_delay=$((retry_delay * 2))
-              fi
-
-              attempt=$((attempt + 1))
-            done
-
-            echo "❌ Failed to fetch latest release after $max_retries attempts" >&2
-            return 1
-          }
-
-          # Determine workflow trigger type
-          echo "🎯 Workflow triggered by: ${{ github.event_name }}"
-
-          # Check if version was provided as input (from app workflow)
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            # Use provided version from app workflow
-            NEXT_VERSION="${{ github.event.inputs.version }}"
-            echo "📦 Using version provided by app workflow: ${NEXT_VERSION}"
-          elif [ "${{ github.event_name }}" == "push" ]; then
-            # Direct push to repo - rebuild current version without incrementing
-            echo "🔄 Direct repository update detected - rebuilding current version"
-
-            # Get latest release with retries
-            LATEST_RELEASE=$(get_latest_release)
-            if [ $? -ne 0 ]; then
-              echo "::error::Failed to get latest release after all retry attempts"
-              echo "❌ Cannot proceed without knowing the current version"
-              exit 1
-            fi
-
-            CURRENT_VERSION=${LATEST_RELEASE#v}
-            NEXT_VERSION="${CURRENT_VERSION}"
-            echo "📌 Rebuilding charts for version: ${NEXT_VERSION}"
-            echo "ℹ️  Version number unchanged - updating chart contents only"
-          else
-            # Manual workflow_dispatch without version - allow version bump
-            echo "🚀 Manual workflow dispatch - calculating new version"
-
-            # Get latest release with retries
-            LATEST_RELEASE=$(get_latest_release)
-            if [ $? -ne 0 ]; then
-              echo "::error::Failed to get latest release after all retry attempts"
-              echo "❌ Cannot proceed without knowing the current version"
-              exit 1
-            fi
-
-            CURRENT_VERSION=${LATEST_RELEASE#v}
-            echo "📌 Current chart version: ${CURRENT_VERSION}"
-
-            # Parse version components
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-
-            # Ensure numeric values
-            MAJOR=${MAJOR:-0}
-            MINOR=${MINOR:-0}
-            PATCH=${PATCH:-0}
-
-            # Get bump type from input or default to patch
-            BUMP_TYPE="${{ github.event.inputs.bump_type || 'patch' }}"
-
-            # Increment based on bump type
-            case "$BUMP_TYPE" in
-              major)
-                MAJOR=$((MAJOR + 1))
-                MINOR=0
-                PATCH=0
-                ;;
-              minor)
-                MINOR=$((MINOR + 1))
-                PATCH=0
-                ;;
-              patch)
-                PATCH=$((PATCH + 1))
-                ;;
-            esac
-
-            NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-            echo "📈 Next chart version: ${NEXT_VERSION} (bump type: ${BUMP_TYPE})"
-          fi
-
-          echo "NEXT_VERSION=${NEXT_VERSION}" >> $GITHUB_OUTPUT
-
-      - name: Validate version format
-        run: |
-          VERSION="${{ steps.next_version.outputs.NEXT_VERSION }}"
-
-          # Validate semantic version format
-          if ! echo "$VERSION" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' > /dev/null; then
-            echo "::error::Invalid version format: $VERSION"
-            echo "Version must be in semantic version format (e.g., 1.2.3)"
-            exit 1
-          fi
-
-          echo "✅ Version format validated: $VERSION"
-
-      - name: Update Chart Version
-        run: |
-          VERSION="${{ steps.next_version.outputs.NEXT_VERSION }}"
-
-          # Update rulebricks subchart
-          sed -i "s/^version:.*/version: ${VERSION}/" charts/rulebricks/Chart.yaml
-          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" charts/rulebricks/Chart.yaml
-
-          # Update rulebricks-enterprise chart (umbrella)
-          sed -i "s/^version:.*/version: ${VERSION}/" Chart.yaml
-          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" Chart.yaml
-
-          # Update rulebricks dependency version in umbrella Chart.yaml
-          sed -i "/name: rulebricks/,/repository:/ s/version:.*/version: ${VERSION}/" Chart.yaml
-
-          # Verify updates
-          echo "📋 Updated Chart versions:"
-          echo "Subchart:"
-          grep -E "^(version|appVersion):" charts/rulebricks/Chart.yaml
-          echo "Umbrella:"
-          grep -E "^(version|appVersion):" Chart.yaml
-          echo "Dependency:"
-          grep -A 2 "name: rulebricks" Chart.yaml
-
-      - name: Package Chart
-        run: |
-          VERSION="${{ steps.next_version.outputs.NEXT_VERSION }}"
-
-          # Create build directory
-          mkdir -p build
-
-          # Fetch dependencies and build
-          echo "📦 Updating dependencies..."
+          # Update dependencies
           helm dependency update .
 
-          echo "📦 Packaging chart..."
-          helm package . --destination build
+          # Package
+          helm package .
 
-          # Create checksums
-          cd build
-          for chart in *.tgz; do
-            sha256sum "$chart" > "$chart.sha256"
-          done
-          cd ..
+          # Push to GHCR
+          helm push rulebricks-enterprise-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }}
 
-          # List built artifacts
-          echo "📦 Built charts:"
-          ls -la build/
-
-      - name: Create Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ steps.next_version.outputs.NEXT_VERSION }}"
-
-          # Create release notes
-          cat > release-notes.md << EOF
-          # Release ${VERSION}
-
-          ## 📦 Charts
-
-          - rulebricks-enterprise-${VERSION}.tgz
-
-          ## 🚀 Installation
-
-          \`\`\`bash
-          # Using Helm directly
-          helm repo add rulebricks-enterprise https://github.com/${{ github.repository }}/releases/download/v${VERSION}
-          helm repo update
-          helm install rulebricks rulebricks-enterprise/rulebricks-enterprise --version ${VERSION}
-          \`\`\`
-
-          ## 📋 Checksums
-
-          Verify downloaded files with the provided .sha256 files.
-          EOF
-
-          # Function to create release with retries
-          create_release() {
-            local max_retries=3
-            local retry_delay=2
-            local attempt=1
-
-            while [ $attempt -le $max_retries ]; do
-              echo "🚀 Attempt $attempt to create/update release..."
-
-              # Delete existing release if it exists
-              if gh release view "v${VERSION}" &>/dev/null; then
-                echo "🗑️  Deleting existing release v${VERSION}..."
-                gh release delete "v${VERSION}" --yes || true
-                sleep 2
-              fi
-
-              # Create new release
-              if gh release create "v${VERSION}" \
-                --title "Charts v${VERSION}" \
-                --notes-file release-notes.md \
-                build/*.tgz \
-                build/*.sha256; then
-                echo "✅ Successfully created release v${VERSION}"
-                return 0
-              fi
-
-              echo "⚠️  Failed attempt $attempt"
-              if [ $attempt -lt $max_retries ]; then
-                echo "⏳ Retrying in $retry_delay seconds..."
-                sleep $retry_delay
-                retry_delay=$((retry_delay * 2))
-              fi
-
-              attempt=$((attempt + 1))
-            done
-
-            echo "❌ Failed to create release after $max_retries attempts"
-            return 1
-          }
-
-          if ! create_release; then
-            echo "::error::Failed to create GitHub release"
-            exit 1
-          fi
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: charts-${{ steps.next_version.outputs.NEXT_VERSION }}
-          path: |
-            build/*.tgz
-            build/*.sha256
-          retention-days: 90
-
-      - name: Create Helm Repository Index
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ steps.next_version.outputs.NEXT_VERSION }}"
-
-          # Create repo directory
-          mkdir -p repo
-          cp build/*.tgz repo/
-
-          # Generate index.yaml
-          helm repo index repo --url "https://github.com/${{ github.repository }}/releases/download/v${VERSION}"
-
-          # Function to upload index with retries
-          upload_index() {
-            local max_retries=3
-            local retry_delay=2
-            local attempt=1
-
-            while [ $attempt -le $max_retries ]; do
-              echo "📤 Attempt $attempt to upload index.yaml..."
-
-              if gh release upload "v${VERSION}" repo/index.yaml --clobber; then
-                echo "✅ Successfully uploaded index.yaml"
-                return 0
-              fi
-
-              echo "⚠️  Failed attempt $attempt"
-              if [ $attempt -lt $max_retries ]; then
-                echo "⏳ Retrying in $retry_delay seconds..."
-                sleep $retry_delay
-                retry_delay=$((retry_delay * 2))
-              fi
-
-              attempt=$((attempt + 1))
-            done
-
-            echo "❌ Failed to upload index.yaml after $max_retries attempts"
-            return 1
-          }
-
-          if ! upload_index; then
-            echo "::error::Failed to upload index.yaml"
-            exit 1
-          fi
+          echo "✅ Pushed oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }}:${VERSION}"
 
       - name: Summary
         run: |
-          VERSION="${{ steps.next_version.outputs.NEXT_VERSION }}"
-
-          echo "## 🎉 Release Summary" >> $GITHUB_STEP_SUMMARY
+          VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
+          echo "## 🎉 Published Chart" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version**: ${VERSION}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tag**: v${VERSION}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Release URL**: https://github.com/${{ github.repository }}/releases/tag/v${VERSION}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Triggered by**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "- **Version source**: Provided by app workflow" >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ github.event_name }}" == "push" ]; then
-            echo "- **Version source**: Rebuilt current version (infrastructure update)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **Version source**: Auto-calculated (manual trigger)" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Chart | Size |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|------|" >> $GITHUB_STEP_SUMMARY
-          for chart in build/*.tgz; do
-            name=$(basename "$chart")
-            size=$(du -h "$chart" | cut -f1)
-            echo "| $name | $size |" >> $GITHUB_STEP_SUMMARY
-          done
-
+          echo "**Install:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "helm install rulebricks oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }} --version ${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

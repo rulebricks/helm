@@ -1,38 +1,18 @@
 # =============================================================================
-# STORAGE CLASS (AWS EBS gp3)
-# Creates a gp3 StorageClass if it doesn't exist
-# =============================================================================
-storageClass:
-  create: true
-  name: gp3
-  provisioner: ebs.csi.aws.com
-  type: gp3
-  fsType: ext4
-  reclaimPolicy: Delete
-  volumeBindingMode: WaitForFirstConsumer
-  allowVolumeExpansion: true
-
-# =============================================================================
 # GLOBAL SETTINGS
 # These values are used across multiple components and should be set here
 # =============================================================================
 global:
   # Domain for ingress and TLS certificate generation
-  domain: "helmtest.rulebricks.com"
+  domain: "<rulebricks-subdomain>.<domain-you-control>"
   # Email for TLS certificate registration (required for cert-manager)
   email: "support@rulebricks.com"
-  # License Key for Rulebricks Enterprise
+  # License Key for Rulebricks Enterprise (provided in your onboarding space)
   licenseKey: "evaluation"
-  # 2 Phase TLS setup– keep this `false` initially
   # You will automatically be prompted to upgrade with `true` after you install the chart
+  # Keep this `false` initially!
   tlsEnabled: false
-
-  # Automated Database Migrations
-  # Set to false if using an external Supabase instance (you must run migrations manually)
-  migrations:
-    enabled: true
-
-  # SMTP Configuration (Required for user invitations and password resets)
+  # SMTP Configuration (Vital for instance access and admin)
   smtp:
     host: "smtp.mailtrap.io"
     port: 2525
@@ -40,11 +20,14 @@ global:
     pass: "demo-password"
     from: "no-reply@rulebricks.com"
     fromName: "Rulebricks"
-
-  # Supabase Configuration (used by both Rulebricks app and self-hosted Supabase)
-  # JWTs must be valid HS256 tokens signed with the jwtSecret below.
-  # These are demo tokens signed with "super-secret-jwt-token-change-me".
-  # REPLACE THESE for production!
+  # Automated Database Migrations
+  # Set to false if using an external Supabase instance (you must run migrations manually)
+  migrations:
+    enabled: true
+  # Supabase Configuration (used by both Rulebricks app and optional self-hosted Supabase)
+  # [Self-hosted] JWTs must be valid HS256 tokens signed with the jwtSecret below.
+  # [Self-hosted] These are demo tokens signed with "super-secret-jwt-token-change-me".
+  # [Self-hosted] REPLACE THESE for production!
   supabase:
     # Leave empty to auto-discover from the supabase subchart (recommended)
     # Only set explicitly if using an external Supabase instance
@@ -53,6 +36,11 @@ global:
     serviceKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q"
     # JWT signing secret (only needed for self-hosted Supabase)
     jwtSecret: "your-super-secret-jwt-token-with-at-least-32-characters-long"
+  # AI Features (Optional)
+  # Enables AI-powered rule generation and suggestions
+  ai:
+    enabled: false
+    openaiApiKey: "" # Your OpenAI API key
 
 # =============================================================================
 # RULEBRICKS APPLICATION
@@ -61,6 +49,7 @@ rulebricks:
   app:
     image:
       repository: index.docker.io/rulebricks/app
+      tag: "1.2.7" # https://hub.docker.com/repository/docker/rulebricks/app/tags
       pullPolicy: IfNotPresent
 
     logging:
@@ -69,6 +58,7 @@ rulebricks:
       # Only set explicitly if using an external Kafka cluster
       kafkaBrokers: ""
       kafkaTopic: "logs"
+      # Label to display in App UI – does not change the logging destination
       loggingDestination: "Console (stdout)"
 
   ingress:
@@ -114,6 +104,7 @@ rulebricks:
 supabase:
   enabled: true
   secret:
+    # SMTP credentials are sourced from global.smtp.user and global.smtp.pass
     # JWT keys are sourced from global.supabase.* (anonKey, serviceKey, jwtSecret)
     db:
       username: "postgres"
@@ -122,7 +113,6 @@ supabase:
     dashboard:
       username: "supabase"
       password: "dashboard-password-change-me"
-    # SMTP credentials are sourced from global.smtp.user and global.smtp.pass
   # Database resource and storage configuration (for self-hosted)
   db:
     resources:
@@ -157,7 +147,7 @@ kafka:
       size: 10Gi
       storageClass: gp3
     # JVM heap options for optimal performance
-    # Note: Worth trying ZGC if you make the heap larger than 4GB
+    # Note: Worth trying ZGC if you make the heap larger
     heapOpts: "-Xmx1g -Xms1g -XX:+UseG1GC -XX:+AlwaysPreTouch"
     extraEnvVars:
       - name: KAFKA_CFG_QUEUED_MAX_REQUESTS
@@ -183,6 +173,8 @@ kafka:
 # Ingress Controller (Traefik)
 traefik:
   enabled: true
+  ingressClass:
+    name: traefik # Must match ingress.className in rulebricks and supabase
   autoscaling:
     enabled: true
     minReplicas: 1
@@ -216,7 +208,8 @@ cert-manager:
   installCRDs: false # CRDs are managed in parent chart crds/ directory
 
 # =============================================================================
-# LOGGING (Vector)
+# RULE EXECUTION/DECISION LOGS (Vector)
+# Aggregates and forwards rule execution logs to one or more configurable sinks (console, S3, etc.)
 # Note: The bootstrap_servers will need to match your release name.
 # If your release is named "rulebricks", use "rulebricks-kafka:9092"
 # If using a different release name, update accordingly.
@@ -281,10 +274,12 @@ vector:
       #   #   access_key_id: "${AWS_ACCESS_KEY_ID}"
       #   #   secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
 
-# Monitoring (Prometheus only)
+# =============================================================================
+# MONITORING (Prometheus only)
+# Controls cluster metrics and alerting via Prometheus (optional)
+# =============================================================================
 monitoring:
   enabled: false
-
 kube-prometheus-stack:
   alertmanager:
     enabled: false
@@ -303,3 +298,17 @@ kube-prometheus-stack:
               requests:
                 storage: 50Gi
       remoteWrite: []
+
+# =============================================================================
+# STORAGE CLASS (AWS EBS gp3)
+# Creates a gp3 StorageClass if it doesn't exist
+# =============================================================================
+storageClass:
+  create: true
+  name: gp3
+  provisioner: ebs.csi.aws.com
+  type: gp3
+  fsType: ext4
+  reclaimPolicy: Delete
+  volumeBindingMode: WaitForFirstConsumer
+  allowVolumeExpansion: true
