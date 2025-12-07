@@ -7,10 +7,11 @@ metadata:
   labels:
     {{- include "rulebricks-chart.labels" . | nindent 4 }}
 data:
+  {{- /* App always expects HTTPS - no dependency on global.tlsEnabled */ -}}
+  {{- $protocol := "https" }}
   {{- $tlsEnabled := eq (include "rulebricks-chart.tlsEnabled" .) "true" }}
-  {{- $protocol := ternary "https" "http" $tlsEnabled }}
   {{- $routerEntrypoint := ternary "websecure" "web" $tlsEnabled }}
-  PROTOCOL: {{ $protocol | quote }}
+  PROTOCOL: "https"
   DOMAIN_NAME: {{ $domain | quote }}
   ROUTER_ENTRYPOINT: {{ $routerEntrypoint | quote }}
   # Supabase configuration
@@ -35,7 +36,7 @@ data:
   SUPABASE_SECRET_KEY: {{ $supabaseServiceKey | quote }}
   SUPABASE_URL: {{ $supabaseUrl | quote }}
   NEXT_PUBLIC_EMAIL: {{ .Values.global.email | default .Values.app.email | default "" | quote }}
-  NEXT_PUBLIC_PROTOCOL: {{ $protocol | quote }}
+  NEXT_PUBLIC_PROTOCOL: "https"
   NEXT_PUBLIC_DOMAIN_NAME: {{ $domain | quote }}
   NEXT_PUBLIC_SUPABASE_URL: {{ $supabaseUrl | quote }}
   NEXT_PUBLIC_SUPABASE_PUBLIC_KEY: {{ $supabaseAnonKey | quote }}

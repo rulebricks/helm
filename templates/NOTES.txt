@@ -25,13 +25,9 @@ RULEBRICKS INSTALLATION - 1/2 – DNS SETUP REQUIRED
 RULEBRICKS INSTALLATION – 2/2 – COMPLETE
 =============================================================================
 
-Rulebricks should be available shortly.
+Welcome to Rulebricks.
 
-Access your application at:
-  https://{{ .Values.global.domain }}
-
-Supabase Dashboard/API:
-  https://supabase.{{ .Values.global.domain }}
+https://{{ .Values.global.domain }}/auth/signup
 
 =============================================================================
 {{- end }}
