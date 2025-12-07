@@ -91,7 +91,7 @@ db:
   image:
     repository: supabase/postgres
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "15.1.0.147"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -177,7 +177,7 @@ studio:
   image:
     repository: supabase/studio
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "20231123-64a766a"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -252,7 +252,7 @@ auth:
   image:
     repository: supabase/gotrue
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "v2.132.3"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -353,7 +353,7 @@ rest:
   image:
     repository: postgrest/postgrest
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "v12.0.1"
   imagePullSecrets: []
   nameOverride: ""
   fullnameOverride: ""
@@ -430,7 +430,7 @@ realtime:
   image:
     repository: supabase/realtime
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "v2.25.50"
   imagePullSecrets: []
   nameOverride: ""
   fullnameOverride: ""
@@ -512,7 +512,7 @@ meta:
   image:
     repository: supabase/postgres-meta
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "v0.75.0"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -583,11 +583,11 @@ meta:
 # Storage Service
 storage:
   # Enable storage provisioning
-  enabled: true
+  enabled: false
   image:
     repository: supabase/storage-api
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "v0.46.4"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -678,11 +678,11 @@ storage:
 # imgproxy
 imgproxy:
   # Enable imgproxy provisioning
-  enabled: true
+  enabled: false
   image:
     repository: darthsim/imgproxy
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "v3.8.0"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -762,7 +762,7 @@ kong:
   image:
     repository: kong
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "2.8.1"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -853,11 +853,11 @@ kong:
 # Analytics
 analytics:
   # Enable analytics provisioning
-  enabled: true
+  enabled: false
   image:
     repository: supabase/logflare
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "1.4.0"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -937,11 +937,11 @@ analytics:
 # Vector
 vector:
   # Enable vector provisioning
-  enabled: true
+  enabled: false
   image:
     repository: timberio/vector
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "0.28.1-alpine"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -1004,11 +1004,11 @@ vector:
 # Functions
 functions:
   # Enable functions provisioning
-  enabled: true
+  enabled: false
   image:
     repository: supabase/edge-runtime
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "v1.29.1"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -1082,7 +1082,7 @@ minio:
   image:
     repository: minio/minio
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: "RELEASE.2023-09-04T19-57-37Z"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""

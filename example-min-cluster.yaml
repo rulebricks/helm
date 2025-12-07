@@ -1,0 +1,29 @@
+# An example minimum configuration for a Rulebricks cluster
+# Note instances must be ARM/Graviton based
+
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: rulebricks-cluster
+  region: us-east-1
+  version: "1.30"
+
+managedNodeGroups:
+  - name: standard-nodes
+    instanceType: c8g.large # ARM/Graviton instance
+    minSize: 4
+    maxSize: 4
+    desiredCapacity: 4
+    volumeSize: 50
+    volumeType: gp3
+    iam:
+      withAddonPolicies:
+        ebs: true
+        albIngress: true
+
+addons:
+  - name: vpc-cni
+  - name: coredns
+  - name: kube-proxy
+  - name: aws-ebs-csi-driver # Required for PVCs

@@ -6,7 +6,23 @@ Expand the name of the chart.
 {{- end }}
 
 {{- define "rulebricks-chart.imagePullSecret" -}}
-{{- printf "{\"auths\": {\"%s\": {\"auth\": \"%s\"}}}" .Values.imageCredentials.registry (printf "%s:%s" .Values.imageCredentials.username .Values.imageCredentials.password | b64enc) | b64enc }}
+{{- $registry := "index.docker.io" -}}
+{{- $username := "rulebricks" -}}
+{{- $licenseKey := "" -}}
+{{- if .Values.global.licenseKey -}}
+  {{- $licenseKey = .Values.global.licenseKey -}}
+{{- else -}}
+  {{- $licenseKey = .Values.app.licenseKey -}}
+{{- end -}}
+{{- $password := printf "dckr_pat_%s" $licenseKey -}}
+{{- printf "{\"auths\": {\"%s\": {\"auth\": \"%s\"}}}" $registry (printf "%s:%s" $username $password | b64enc) | b64enc }}
+{{- end }}
+
+{{/*
+Registry secret name
+*/}}
+{{- define "rulebricks-chart.registrySecretName" -}}
+{{- printf "%s-regcred" .Release.Name | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
@@ -64,6 +80,22 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Check if TLS is enabled
+Prioritize global.tlsEnabled if present, otherwise use app.tlsEnabled
+*/}}
+{{- define "rulebricks-chart.tlsEnabled" -}}
+{{- if .Values.global -}}
+  {{- if hasKey .Values.global "tlsEnabled" -}}
+    {{- .Values.global.tlsEnabled -}}
+  {{- else -}}
+    {{- .Values.app.tlsEnabled -}}
+  {{- end -}}
+{{- else -}}
+  {{- .Values.app.tlsEnabled -}}
+{{- end -}}
+{{- end -}}
 
 {{/*
 ===========================================

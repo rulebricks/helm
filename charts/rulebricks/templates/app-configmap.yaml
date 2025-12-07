@@ -7,21 +7,38 @@ metadata:
   labels:
     {{- include "rulebricks-chart.labels" . | nindent 4 }}
 data:
-  {{- $protocol := ternary "https" "http" .Values.app.tlsEnabled }}
-  {{- $routerEntrypoint := ternary "websecure" "web" .Values.app.tlsEnabled }}
+  {{- $tlsEnabled := eq (include "rulebricks-chart.tlsEnabled" .) "true" }}
+  {{- $protocol := ternary "https" "http" $tlsEnabled }}
+  {{- $routerEntrypoint := ternary "websecure" "web" $tlsEnabled }}
   PROTOCOL: {{ $protocol | quote }}
   DOMAIN_NAME: {{ $host0.host | quote }}
   ROUTER_ENTRYPOINT: {{ $routerEntrypoint | quote }}
-  # Supabase configuration - use templated URL if not explicitly set
-  {{- $supabaseUrl := .Values.app.supabaseUrl | default (include "rulebricks-chart.supabase.kongUrl" .) }}
-  SUPABASE_PUBLIC_KEY: {{ .Values.app.supabaseAnonKey | default "" | quote }}
-  SUPABASE_SECRET_KEY: {{ .Values.app.supabaseServiceKey | default "" | quote }}
+  # Supabase configuration - prefer global.supabase.*, fallback to app.* for backward compatibility
+  {{- $supabaseUrl := "" }}
+  {{- $supabaseAnonKey := "" }}
+  {{- $supabaseServiceKey := "" }}
+  {{- if and .Values.global .Values.global.supabase }}
+    {{- $supabaseUrl = .Values.global.supabase.url | default "" }}
+    {{- $supabaseAnonKey = .Values.global.supabase.anonKey | default "" }}
+    {{- $supabaseServiceKey = .Values.global.supabase.serviceKey | default "" }}
+  {{- end }}
+  {{- if not $supabaseUrl }}
+    {{- $supabaseUrl = .Values.app.supabaseUrl | default (include "rulebricks-chart.supabase.kongUrl" .) }}
+  {{- end }}
+  {{- if not $supabaseAnonKey }}
+    {{- $supabaseAnonKey = .Values.app.supabaseAnonKey | default "" }}
+  {{- end }}
+  {{- if not $supabaseServiceKey }}
+    {{- $supabaseServiceKey = .Values.app.supabaseServiceKey | default "" }}
+  {{- end }}
+  SUPABASE_PUBLIC_KEY: {{ $supabaseAnonKey | quote }}
+  SUPABASE_SECRET_KEY: {{ $supabaseServiceKey | quote }}
   SUPABASE_URL: {{ $supabaseUrl | quote }}
-  NEXT_PUBLIC_EMAIL: {{ .Values.app.email | default "" | quote }}
+  NEXT_PUBLIC_EMAIL: {{ .Values.global.email | default .Values.app.email | default "" | quote }}
   NEXT_PUBLIC_PROTOCOL: {{ $protocol | quote }}
   NEXT_PUBLIC_DOMAIN_NAME: {{ $host0.host | quote }}
   NEXT_PUBLIC_SUPABASE_URL: {{ $supabaseUrl | quote }}
-  NEXT_PUBLIC_SUPABASE_PUBLIC_KEY: {{ .Values.app.supabaseAnonKey | default "" | quote }}
+  NEXT_PUBLIC_SUPABASE_PUBLIC_KEY: {{ $supabaseAnonKey | quote }}
   SELF_HOSTED: "1"
   NEXT_PUBLIC_SELF_HOSTED: "1"
   NEXT_PUBLIC_SANITY_PROJECT_ID: "0tthc473"
@@ -33,7 +50,14 @@ data:
   NODE_ENV: "production"
   ENVIRONMENT: "production"
   NODE_OPTIONS: "--dns-result-order=ipv4first"
-  {{- if .Values.app.smtp }}
+  {{- if .Values.global.smtp }}
+  SMTP_HOST: {{ .Values.global.smtp.host | default "" | quote }}
+  SMTP_PORT: {{ .Values.global.smtp.port | default "" | quote }}
+  SMTP_USER: {{ .Values.global.smtp.user | default "" | quote }}
+  SMTP_PASS: {{ .Values.global.smtp.pass | default "" | quote }}
+  SMTP_FROM: {{ .Values.global.smtp.from | default "" | quote }}
+  SMTP_FROM_NAME: {{ .Values.global.smtp.fromName | default "" | quote }}
+  {{- else if .Values.app.smtp }}
   SMTP_HOST: {{ .Values.app.smtp.host | default "" | quote }}
   SMTP_PORT: {{ .Values.app.smtp.port | default "" | quote }}
   SMTP_USER: {{ .Values.app.smtp.user | default "" | quote }}

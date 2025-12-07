@@ -1,4 +1,4 @@
-{{- if .Values.migrations.enabled -}}
+{{- if .Values.global.migrations.enabled -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -21,10 +21,12 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: {{ .Release.Name }}-regcred
       initContainers:
         - name: extract-assets
           # Use the configured migration image or fallback to app image
-          image: "{{ .Values.migrations.image.repository }}:{{ .Values.migrations.image.tag }}"
+          image: "{{ .Values.rulebricks.app.image.repository }}:{{ .Values.rulebricks.app.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:

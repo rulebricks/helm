@@ -1,0 +1,44 @@
+{{- if not .Values.global.tlsEnabled }}
+=============================================================================
+RULEBRICKS INSTALLATION - PHASE 1 COMPLETE
+=============================================================================
+
+Your Rulebricks cluster is provisioned!
+
+NEXT STEPS TO ENABLE SSL/TLS:
+
+1. Get your LoadBalancer Address:
+   kubectl get svc -n {{ .Release.Namespace }} -l app.kubernetes.io/name=traefik -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'
+
+2. Configure DNS Records:
+   Point the following CNAME records to the LoadBalancer address above:
+   - {{ .Values.global.domain }}
+   - supabase.{{ .Values.global.domain }}
+
+   Wait a few minutes for DNS to propagate.
+
+3. Enable TLS (Phase 2):
+   Run the following command to secure your cluster:
+
+   helm upgrade {{ .Release.Name }} helm/ \
+     --reuse-values \
+     --set global.tlsEnabled=true \
+     --set rulebricks.app.tlsEnabled=true
+
+=============================================================================
+{{- else }}
+=============================================================================
+RULEBRICKS INSTALLATION COMPLETE
+=============================================================================
+
+TLS is enabled! Your cluster should be secure shortly.
+
+Access your application at:
+  https://{{ .Values.global.domain }}
+
+Supabase Dashboard/API:
+  https://supabase.{{ .Values.global.domain }}
+
+=============================================================================
+{{- end }}
+

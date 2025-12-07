@@ -1,4 +1,4 @@
-# Rulebricks Enterprise Helm Chart
+# Rulebricks Helm Charts
 
 This chart deploys Rulebricks and its dependencies (Supabase, Kafka, etc.) to a Kubernetes cluster. It is designed to be a self-contained "umbrella" chart that can be used to spin up a full stack, or configured to connect to existing external infrastructure.
 
@@ -7,9 +7,13 @@ This chart deploys Rulebricks and its dependencies (Supabase, Kafka, etc.) to a 
 - Kubernetes 1.19+
 - Helm 3.2.0+
 - PV provisioner support in the underlying infrastructure
-- A domain name pointing to your cluster's ingress (for TLS)
+- A domain name you control (for TLS)
 
 ## Installation
+
+We recommend a **Two-Phase Installation** to ensure DNS is correctly configured before attempting to provision TLS certificates. This prevents rate-limiting issues with Let's Encrypt.
+
+### Phase 1: Bootstrap (HTTP only)
 
 1.  **Add the Rulebricks Enterprise Helm Repository**:
 
@@ -19,59 +23,59 @@ This chart deploys Rulebricks and its dependencies (Supabase, Kafka, etc.) to a 
     ```
 
 2.  **Configure `values.yaml`**:
-    Download the default [values.yaml](https://github.com/rulebricks/helm/blob/main/values.yaml) and edit it to set your domain, license key, and secrets.
-
-    **CRITICAL**: You must change the default passwords and keys in `supabase.secret` before deploying to production.
+    Download the default [values.yaml](https://github.com/rulebricks/helm/blob/main/values.yaml) and edit `global.domain` and your secrets.
 
 3.  **Install**:
+
     ```bash
     helm install rulebricks rulebricks-enterprise/rulebricks-enterprise \
       --namespace rulebricks \
       --create-namespace \
-      -f values.yaml
+      -f values.yaml \
+      --set rulebricks.app.licenseKey=<YOUR_LICENSE_KEY>
     ```
 
-## TLS Certificate Management
+4.  **Get LoadBalancer Address**:
+    After installation, wait a minute for the LoadBalancer to be provisioned, then run:
 
-**TLS is mandatory for Rulebricks.** This chart integrates with **cert-manager** for automatic TLS certificate provisioning via Let's Encrypt.
-
-### Setup Guide
-
-1.  **Configure Global Settings**:
-    Set your email address (required for Let's Encrypt) and your domain in `values.yaml`:
-
-    ```yaml
-    global:
-      domain: "rulebricks.example.com"
-      email: "admin@example.com"
+    ```bash
+    kubectl get svc -n rulebricks -l app.kubernetes.io/name=traefik -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'
     ```
 
-2.  **DNS Configuration**:
-    Ensure your domain points to the LoadBalancer IP of the Traefik service.
-    - If installing on a new cluster, run the install first, get the LoadBalancer IP (`kubectl get svc -n rulebricks`), update your DNS A record, and then wait for propagation.
-    - **cert-manager** will automatically attempt to provision a certificate once the DNS resolves.
+5.  **Configure DNS**:
+    Create CNAME records for the following domains pointing to the address retrieved above:
 
-### Using Existing Cert Manager
+    - `your-domain.com` (Main App)
+    - `supabase.your-domain.com` (Backend Services)
 
-If you already have `cert-manager` installed in your cluster:
+    _Wait a few minutes for DNS to propagate._
 
-1.  Disable the bundled installation:
+### Phase 2: Secure (Enable TLS)
 
-    ```yaml
-    cert-manager:
-      enabled: false
+Once DNS is pointing to your cluster, enable TLS. This will automatically provision production certificates via Let's Encrypt.
+
+1.  **Upgrade**:
+
+    ```bash
+    helm upgrade rulebricks rulebricks-enterprise/rulebricks-enterprise \
+      --namespace rulebricks \
+      --reuse-values \
+      --set global.tlsEnabled=true \
+      --set rulebricks.app.tlsEnabled=true
     ```
 
-2.  Ensure your existing `cert-manager` can satisfy the `Certificate` resources created by this chart, or configure the chart to use your existing `ClusterIssuer` if applicable (refer to chart templates for issuer details).
+2.  **Verify**:
+    Check that your site is now accessible via `https://`.
 
-### Using Existing Traefik / Ingress
+## Configuration
 
-Rulebricks relies heavily on Traefik's middleware and routing capabilities. If you have an existing ingress controller (even Traefik), it is **strongly recommended** to let Rulebricks deploy its own dedicated Traefik instance to avoid configuration conflicts.
+### Global Settings
 
-If you must use an existing ingress:
-
-1.  Disable Traefik: `traefik.enabled: false`.
-2.  You will need to manually create Ingress resources that match the routing logic provided by the chart. This is an advanced configuration and not fully supported out-of-the-box.
+| Parameter           | Description                                 | Default                |
+| ------------------- | ------------------------------------------- | ---------------------- |
+| `global.domain`     | The base domain for the deployment          | `rulebricks.local`     |
+| `global.email`      | Admin email (required for TLS certificates) | `admin@rulebricks.com` |
+| `global.tlsEnabled` | Enable TLS/SSL (Phase 2)                    | `false`                |
 
 ## Automated Database Migrations
 
@@ -83,15 +87,6 @@ This chart includes a Helm hook that automatically runs database migrations on i
 You can disable this automation by setting `migrations.enabled: false` in `values.yaml`.
 
 > **Note**: If you are using an external or managed Supabase instance, you **must** disable this job and run migrations manually (see below).
-
-## Configuration
-
-### Global Settings
-
-| Parameter       | Description                                 | Default                |
-| --------------- | ------------------------------------------- | ---------------------- |
-| `global.domain` | The base domain for the deployment          | `rulebricks.local`     |
-| `global.email`  | Admin email (required for TLS certificates) | `admin@rulebricks.com` |
 
 ## Using External Services
 
@@ -178,6 +173,76 @@ To use an external Kafka cluster:
 
 1.  Set `kafka.enabled: false`.
 2.  Configure `rulebricks.app.logging.kafkaBrokers` with your Kafka bootstrap servers.
+
+### S3 Log Storage (AWS)
+
+To send rule execution logs to S3 instead of (or in addition to) the console, you need to:
+
+1.  **Create an S3 bucket** for your logs.
+
+2.  **Create an IAM policy** with permissions to write to the bucket:
+
+    ```json
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": ["s3:PutObject", "s3:PutObjectAcl"],
+          "Resource": "arn:aws:s3:::YOUR_BUCKET/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": ["s3:ListBucket", "s3:GetBucketLocation"],
+          "Resource": "arn:aws:s3:::YOUR_BUCKET"
+        }
+      ]
+    }
+    ```
+
+3.  **Set up IRSA (IAM Roles for Service Accounts)** on EKS:
+
+    ```bash
+    # Create OIDC provider (if not exists)
+    eksctl utils associate-iam-oidc-provider --cluster=YOUR_CLUSTER --approve
+
+    # Create IAM policy
+    aws iam create-policy \
+      --policy-name VectorS3Access \
+      --policy-document file://policy.json
+
+    # Create service account with IRSA
+    eksctl create iamserviceaccount \
+      --cluster=YOUR_CLUSTER \
+      --namespace=rulebricks \
+      --name=vector-s3-access \
+      --attach-policy-arn=arn:aws:iam::YOUR_ACCOUNT:policy/VectorS3Access \
+      --approve
+    ```
+
+4.  **Configure Vector** in your `values.yaml`:
+
+    ```yaml
+    vector:
+      serviceAccount:
+        name: vector-s3-access
+      customConfig:
+        sinks:
+          s3:
+            type: aws_s3
+            inputs:
+              - kafka
+            bucket: "your-logs-bucket"
+            region: "us-east-1"
+            key_prefix: "rulebricks/logs/%Y/%m/%d/"
+            compression: gzip
+            encoding:
+              codec: json
+    ```
+
+5.  **Upgrade** your Helm release to apply the changes.
+
+> **Note**: For GCS or Azure Blob Storage, similar patterns apply using Workload Identity (GCP) or Managed Identity (Azure). See the [Vector documentation](https://vector.dev/docs/reference/configuration/sinks/) for sink-specific configuration.
 
 ## Architecture
 

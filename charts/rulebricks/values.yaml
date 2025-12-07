@@ -19,32 +19,14 @@ app:
   image:
     repository: index.docker.io/rulebricks/app
     pullPolicy: IfNotPresent
+  replicas: 2
   resources:
     requests:
-      cpu: "512m"
-      memory: "512Mi"
+      cpu: 100m
+      memory: 256Mi
     limits:
-      cpu: "1150m"
-      memory: "1Gi"
-  autoscaling:
-    enabled: true
-    minReplicas: 1
-    maxReplicas: 6
-    targetCPUUtilizationPercentage: 50
-    targetMemoryUtilizationPercentage: 80
-    behavior:
-      scaleUp:
-        stabilizationWindowSeconds: 0 # Instant response to traffic spikes
-        policies:
-          - type: Percent
-            value: 100
-            periodSeconds: 10
-      scaleDown:
-        stabilizationWindowSeconds: 30
-        policies:
-          - type: Pods
-            value: 1
-            periodSeconds: 5
+      cpu: 500m
+      memory: 512Mi
   livenessProbe:
     httpGet:
       path: /
@@ -63,20 +45,19 @@ app:
     failureThreshold: 6
   tlsEnabled: true
   email: "support@rulebricks.com"
-  licenseKey: "evaluation"
+  licenseKey: ""
   supabaseUrl: ""
   supabaseServiceKey: ""
   supabaseAnonKey: ""
 
 hps:
   enabled: true
-  replicas: 1
   image:
     repository: index.docker.io/rulebricks/hps
     pullPolicy: Always
     tag: "latest"
     workerTag: "worker-latest"
-
+  replicas: 1
   resources:
     requests:
       cpu: "500m"
@@ -85,29 +66,9 @@ hps:
       cpu: "1000m"
       memory: "1Gi"
 
-  autoscaling:
-    enabled: true
-    minReplicas: 1
-    maxReplicas: 6
-    targetCPUUtilizationPercentage: 50
-    targetMemoryUtilizationPercentage: 80
-    behavior:
-      scaleUp:
-        stabilizationWindowSeconds: 0 # Instant response to traffic spikes
-        policies:
-          - type: Percent
-            value: 100
-            periodSeconds: 10
-      scaleDown:
-        stabilizationWindowSeconds: 30
-        policies:
-          - type: Pods
-            value: 1
-            periodSeconds: 5
-
   workers:
     enabled: true
-    replicas: 3  # Starting replicas
+    replicas: 3 # Starting replicas
     topics: "solution"
     resources:
       requests:
@@ -122,18 +83,18 @@ hps:
       enabled: true
       minReplicaCount: 3
       maxReplicaCount: 50
-      lagThreshold: 100  # Scale up when lag > 100 messages
-      cpuThreshold: 75   # Backup: scale on CPU
+      lagThreshold: 100 # Scale up when lag > 100 messages
+      cpuThreshold: 75 # Backup: scale on CPU
       memoryThreshold: 80
-      pollingInterval: 15  # How often to check metrics (seconds)
-      cooldownPeriod: 300  # Wait before scaling down (seconds)
+      pollingInterval: 15 # How often to check metrics (seconds)
+      cooldownPeriod: 300 # Wait before scaling down (seconds)
 
 redis:
   tag: "7.2"
   persistence:
     enabled: true
     size: "4Gi"
-    storageClass: "gp2"
+    storageClass: "gp3"
   resources:
     requests:
       cpu: "200m"
@@ -155,12 +116,6 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
-
-imageCredentials:
-  name: regcred
-  registry: index.docker.io
-  username: rulebricks
-  password: ""
 
 service:
   type: ClusterIP

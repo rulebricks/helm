@@ -1,70 +1,67 @@
 # =============================================================================
+# STORAGE CLASS (AWS EBS gp3)
+# Creates a gp3 StorageClass if it doesn't exist
+# =============================================================================
+storageClass:
+  create: true
+  name: gp3
+  provisioner: ebs.csi.aws.com
+  type: gp3
+  fsType: ext4
+  reclaimPolicy: Delete
+  volumeBindingMode: WaitForFirstConsumer
+  allowVolumeExpansion: true
+
+# =============================================================================
 # GLOBAL SETTINGS
 # These values are used across multiple components and should be set here
 # =============================================================================
 global:
   # Domain for ingress and TLS certificate generation
-  domain: "rulebricks.local"
+  domain: "helmtest.rulebricks.com"
   # Email for TLS certificate registration (required for cert-manager)
-  email: "admin@rulebricks.com"
+  email: "support@rulebricks.com"
+  # License Key for Rulebricks Enterprise
+  licenseKey: "evaluation"
+  # 2 Phase TLS setup– keep this `false` initially
+  # You will automatically be prompted to upgrade with `true` after you install the chart
+  tlsEnabled: false
+
+  # Automated Database Migrations
+  # Set to false if using an external Supabase instance (you must run migrations manually)
+  migrations:
+    enabled: true
+
+  # SMTP Configuration (Required for user invitations and password resets)
+  smtp:
+    host: "smtp.mailtrap.io"
+    port: 2525
+    user: "demo-user"
+    pass: "demo-password"
+    from: "no-reply@rulebricks.com"
+    fromName: "Rulebricks"
+
+  # Supabase Configuration (used by both Rulebricks app and self-hosted Supabase)
+  # JWTs must be valid HS256 tokens signed with the jwtSecret below.
+  # These are demo tokens signed with "super-secret-jwt-token-change-me".
+  # REPLACE THESE for production!
+  supabase:
+    # Leave empty to auto-discover from the supabase subchart (recommended)
+    # Only set explicitly if using an external Supabase instance
+    url: ""
+    anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE"
+    serviceKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q"
+    # JWT signing secret (only needed for self-hosted Supabase)
+    jwtSecret: "your-super-secret-jwt-token-with-at-least-32-characters-long"
 
 # =============================================================================
 # RULEBRICKS APPLICATION
 # =============================================================================
 rulebricks:
-  imageCredentials:
-    registry: index.docker.io
-    username: rulebricks
-    password: "dckr_pat_<license-key>"
-
   app:
     image:
       repository: index.docker.io/rulebricks/app
       pullPolicy: IfNotPresent
-      tag: "latest"
-
-    # License and contact
-    licenseKey: "<license-key>"
-    email: "support@rulebricks.com"
-
-    # TLS Configuration - when enabled, cert-manager will provision certificates
-    tlsEnabled: true
-
-    # Supabase Connection
-    # Leave empty to auto-discover from the supabase subchart (recommended)
-    # Only set explicitly if using an external Supabase instance
-    supabaseUrl: ""
-
-    # JWTs must be valid HS256 tokens signed with the JWT secret below.
-    # These are demo tokens signed with "super-secret-jwt-token-change-me".
-    # REPLACE THESE for production!
-    supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE"
-    supabaseServiceKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q"
-
-    replicas: 2
-    resources:
-      requests:
-        cpu: "512m"
-        memory: "512Mi"
-      limits:
-        cpu: "1150m"
-        memory: "1Gi"
-
-    # Autoscaling configuration
-    autoscaling:
-      enabled: true
-      minReplicas: 1
-      maxReplicas: 6
-      targetCPUUtilizationPercentage: 50
-      targetMemoryUtilizationPercentage: 80
-
-    smtp:
-      host: "smtp.mailtrap.io"
-      port: 2525
-      user: "demo-user"
-      pass: "demo-password"
-      from: "no-reply@rulebricks.com"
-      fromName: "Rulebricks"
 
     logging:
       enabled: true
@@ -77,40 +74,47 @@ rulebricks:
   ingress:
     enabled: true
     className: traefik
-    hosts:
-      - host: "rulebricks.local"
-        paths:
-          - path: /
-            pathType: Prefix
+    # Host is automatically configured from global.domain
+    paths:
+      - path: /
+        pathType: Prefix
+
   redis:
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "4Gi"
     persistence:
-      storageClass: gp2
+      enabled: true
+      size: "4Gi"
+      storageClass: gp3
 
   hps:
     enabled: true
-    replicas: 1
+    replicas: 2
     workers:
       enabled: true
-      replicas: 3
+      replicas: 4
       keda:
         enabled: true
-        minReplicaCount: 3
-        maxReplicaCount: 50
-        pollingInterval: 15
+        minReplicaCount: 4
+        maxReplicaCount: 8
+        pollingInterval: 10
         cooldownPeriod: 300
-        lagThreshold: 100
+        lagThreshold: 8
         cpuThreshold: 25
 
-# Database (Supabase)
+# =============================================================================
+# SELF-HOSTED DATABASE SETTINGS (Supabase)
+# Set enabled: false to use an external Supabase instance instead
+# =============================================================================
 supabase:
   enabled: true
   secret:
-    jwt:
-      # This secret MUST match the signature of the tokens above.
-      # Generate new tokens if you change this!
-      secret: "your-super-secret-jwt-token-with-at-least-32-characters-long"
-      anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE"
-      serviceKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q"
+    # JWT keys are sourced from global.supabase.* (anonKey, serviceKey, jwtSecret)
     db:
       username: "postgres"
       password: "postgres-password-change-me"
@@ -118,16 +122,9 @@ supabase:
     dashboard:
       username: "supabase"
       password: "dashboard-password-change-me"
-    smtp:
-      username: "demo-user"
-      password: "demo-password"
-    analytics:
-      apiKey: "example-analytics-key"
+    # SMTP credentials are sourced from global.smtp.user and global.smtp.pass
+  # Database resource and storage configuration (for self-hosted)
   db:
-    enabled: true
-    image:
-      repository: supabase/postgres
-      tag: "15.1.0.147"
     resources:
       requests:
         cpu: "500m"
@@ -135,67 +132,13 @@ supabase:
     persistence:
       enabled: true
       size: 10Gi
-      storageClassName: gp2
-  studio:
-    enabled: true
-    image:
-      repository: supabase/studio
-      tag: "20231123-64a766a"
-  auth:
-    enabled: true
-    image:
-      repository: supabase/gotrue
-      tag: "v2.132.3"
-    environment:
-      GOTRUE_SMTP_HOST: "smtp.mailtrap.io"
-      GOTRUE_SMTP_PORT: "2525"
-      GOTRUE_SMTP_ADMIN_EMAIL: "admin@rulebricks.com"
-      GOTRUE_SMTP_SENDER_NAME: "Rulebricks"
-  rest:
-    enabled: true
-    image:
-      repository: postgrest/postgrest
-      tag: "v12.0.1"
-  realtime:
-    enabled: true
-    image:
-      repository: supabase/realtime
-      tag: "v2.25.50"
-  functions:
-    enabled: false
-    image:
-      repository: supabase/edge-runtime
-      tag: "v1.29.1"
-  storage:
-    enabled: false
-    image:
-      repository: supabase/storage-api
-      tag: "v0.46.4"
-  meta:
-    enabled: true
-    image:
-      repository: supabase/postgres-meta
-      tag: "v0.75.0"
+      storageClassName: gp3
+  # Kong API Gateway ingress configuration
   kong:
-    enabled: true
-    image:
-      repository: kong
-      tag: "2.8.1"
-  imgproxy:
-    enabled: false
-    image:
-      repository: darthsim/imgproxy
-      tag: "v3.8.0"
-  analytics:
-    enabled: false
-    image:
-      repository: supabase/logflare
-      tag: "1.4.0"
-  vector:
-    enabled: false
-    image:
-      repository: timberio/vector
-      tag: "0.28.1-alpine"
+    ingress:
+      enabled: true
+      className: traefik
+      annotations: {}
 
 # Message Queue (Kafka)
 kafka:
@@ -205,11 +148,34 @@ kafka:
     resources:
       requests:
         cpu: "500m"
-        memory: "1Gi"
+        memory: "2Gi"
+      limits:
+        cpu: "2000m"
+        memory: "3Gi"
     persistence:
       enabled: true
       size: 10Gi
-      storageClass: gp2
+      storageClass: gp3
+    # JVM heap options for optimal performance
+    # Note: Worth trying ZGC if you make the heap larger than 4GB
+    heapOpts: "-Xmx1g -Xms1g -XX:+UseG1GC -XX:+AlwaysPreTouch"
+    extraEnvVars:
+      - name: KAFKA_CFG_QUEUED_MAX_REQUESTS
+        value: "10000"
+      - name: KAFKA_CFG_NUM_NETWORK_THREADS
+        value: "8"
+      - name: KAFKA_CFG_NUM_IO_THREADS
+        value: "8"
+      - name: KAFKA_CFG_SOCKET_SEND_BUFFER_BYTES
+        value: "1048576"
+      - name: KAFKA_CFG_SOCKET_RECEIVE_BUFFER_BYTES
+        value: "1048576"
+      - name: KAFKA_CFG_SOCKET_REQUEST_MAX_BYTES
+        value: "209715200"
+      - name: KAFKA_CFG_LOG_RETENTION_BYTES
+        value: "4294967296"
+      - name: KAFKA_CFG_LOG_SEGMENT_BYTES
+        value: "1073741824"
   listeners:
     client:
       protocol: PLAINTEXT
@@ -217,6 +183,17 @@ kafka:
 # Ingress Controller (Traefik)
 traefik:
   enabled: true
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 2
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
   ports:
     web:
       port: 8000
@@ -247,7 +224,14 @@ cert-manager:
 vector:
   enabled: true
   role: "Stateless-Aggregator"
-  replicas: 1
+  replicas: 2
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "200m"
+      memory: "256Mi"
   service:
     enabled: true
     ports:
@@ -275,10 +259,31 @@ vector:
           - kafka
         encoding:
           codec: json
+      # ==== S3 Sink Example ====
+      # To send logs to S3, uncomment and configure the following:
+      # Requires IRSA (IAM Roles for Service Accounts) - see README.md for setup
+      #
+      # s3:
+      #   type: aws_s3
+      #   inputs:
+      #     - kafka
+      #   bucket: "your-logs-bucket"
+      #   region: "us-east-1"
+      #   key_prefix: "rulebricks/logs/%Y/%m/%d/"
+      #   compression: gzip
+      #   encoding:
+      #     codec: json
+      #   # Authentication via IRSA (recommended) - no credentials needed in config
+      #   # Vector will use the IAM role attached to its service account
+      #   #
+      #   # Alternative: use static credentials (not recommended for production)
+      #   # auth:
+      #   #   access_key_id: "${AWS_ACCESS_KEY_ID}"
+      #   #   secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
 
 # Monitoring (Prometheus only)
 monitoring:
-  enabled: true
+  enabled: false
 
 kube-prometheus-stack:
   alertmanager:
@@ -287,21 +292,14 @@ kube-prometheus-stack:
     enabled: false
   prometheus:
     prometheusSpec:
-      retention: 7d
+      retention: 30d
       storageSpec:
         volumeClaimTemplate:
           spec:
-            storageClassName: gp2
+            storageClassName: gp3
             accessModes:
               - ReadWriteOnce
             resources:
               requests:
-                storage: 20Gi
+                storage: 50Gi
       remoteWrite: []
-
-# Automated Migrations
-migrations:
-  enabled: true
-  image:
-    repository: index.docker.io/rulebricks/app
-    tag: "latest"

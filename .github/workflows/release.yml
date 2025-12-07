@@ -170,13 +170,25 @@ jobs:
         run: |
           VERSION="${{ steps.next_version.outputs.NEXT_VERSION }}"
 
+          # Update rulebricks subchart
+          sed -i "s/^version:.*/version: ${VERSION}/" charts/rulebricks/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" charts/rulebricks/Chart.yaml
+
           # Update rulebricks-enterprise chart (umbrella)
           sed -i "s/^version:.*/version: ${VERSION}/" Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" Chart.yaml
 
+          # Update rulebricks dependency version in umbrella Chart.yaml
+          sed -i "/name: rulebricks/,/repository:/ s/version:.*/version: ${VERSION}/" Chart.yaml
+
           # Verify updates
-          echo "📋 Updated Chart version:"
+          echo "📋 Updated Chart versions:"
+          echo "Subchart:"
+          grep -E "^(version|appVersion):" charts/rulebricks/Chart.yaml
+          echo "Umbrella:"
           grep -E "^(version|appVersion):" Chart.yaml
+          echo "Dependency:"
+          grep -A 2 "name: rulebricks" Chart.yaml
 
       - name: Package Chart
         run: |

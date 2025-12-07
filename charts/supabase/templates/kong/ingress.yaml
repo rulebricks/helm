@@ -14,6 +14,9 @@ metadata:
   labels:
     {{- include "supabase.labels" . | nindent 4 }}
   annotations:
+    {{- if .Values.global.tlsEnabled }}
+    cert-manager.io/cluster-issuer: {{ .Release.Name }}-letsencrypt
+    {{- end }}
     {{- range $key, $value := .Values.kong.ingress.annotations }}
     {{- if not (hasPrefix "nginx.ingress.kubernetes.io" $key) }}
     {{ $key }}: {{ $value | quote }}
@@ -23,8 +26,13 @@ spec:
   {{- if and .Values.kong.ingress.className (semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion) }}
   ingressClassName: {{ .Values.kong.ingress.className }}
   {{- end }}
-  {{- if .Values.kong.ingress.tls }}
+  {{- if or .Values.kong.ingress.tls .Values.global.tlsEnabled }}
   tls:
+    {{- if .Values.global.tlsEnabled }}
+    - hosts:
+      - {{ printf "supabase.%s" .Values.global.domain | quote }}
+      secretName: {{ include "supabase.kong.fullname" . }}-tls
+    {{- end }}
     {{- range .Values.kong.ingress.tls }}
     - hosts:
         {{- range .hosts }}
@@ -34,7 +42,12 @@ spec:
     {{- end }}
   {{- end }}
   rules:
-    {{- range .Values.kong.ingress.hosts }}
+    {{- $hosts := .Values.kong.ingress.hosts }}
+    {{- if .Values.global.domain }}
+    {{- $paths := (index $hosts 0).paths }}
+    {{- $hosts = list (dict "host" (printf "supabase.%s" .Values.global.domain) "paths" $paths) }}
+    {{- end }}
+    {{- range $hosts }}
     - host: {{ .host | quote }}
       http:
         paths:

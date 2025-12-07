@@ -40,7 +40,7 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       imagePullSecrets:
-        - name: regcred
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
       {{- with .Values.hps.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -70,6 +70,19 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- /* Override SMTP settings from global.smtp if defined */ -}}
+            {{- if .Values.global }}
+            {{- if .Values.global.smtp }}
+            - name: GOTRUE_SMTP_HOST
+              value: {{ .Values.global.smtp.host | quote }}
+            - name: GOTRUE_SMTP_PORT
+              value: {{ .Values.global.smtp.port | quote }}
+            - name: GOTRUE_SMTP_ADMIN_EMAIL
+              value: {{ .Values.global.smtp.from | quote }}
+            - name: GOTRUE_SMTP_SENDER_NAME
+              value: {{ .Values.global.smtp.fromName | quote }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.db.enabled }}
             - name: DB_HOST
               value: {{ include "supabase.db.fullname" . }}

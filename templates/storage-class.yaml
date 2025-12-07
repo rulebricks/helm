@@ -1,0 +1,22 @@
+{{- if and .Values.storageClass .Values.storageClass.create }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storageClass.name | default "gp3" }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+provisioner: {{ .Values.storageClass.provisioner | default "ebs.csi.aws.com" }}
+parameters:
+  {{- if eq .Values.storageClass.provisioner "ebs.csi.aws.com" }}
+  type: {{ .Values.storageClass.type | default "gp3" }}
+  fsType: {{ .Values.storageClass.fsType | default "ext4" }}
+  {{- else }}
+  {{- toYaml .Values.storageClass.parameters | nindent 2 }}
+  {{- end }}
+reclaimPolicy: {{ .Values.storageClass.reclaimPolicy | default "Delete" }}
+volumeBindingMode: {{ .Values.storageClass.volumeBindingMode | default "WaitForFirstConsumer" }}
+allowVolumeExpansion: {{ .Values.storageClass.allowVolumeExpansion | default true }}
+{{- end }}
+

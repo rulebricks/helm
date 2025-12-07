@@ -4,9 +4,16 @@ Ingress resource for Rulebricks
 {{- $name := include "rulebricks-chart.fullname" . -}}
 {{- $labels := include "rulebricks-chart.labels" . | nindent 4 -}}
 {{- $ingress := .Values.ingress | default dict -}}
-{{- $hosts := $ingress.hosts | default list -}}
+{{- $hosts := list -}}
+{{- if $ingress.hosts -}}
+  {{- $hosts = $ingress.hosts -}}
+{{- else if .Values.global.domain -}}
+  {{- $paths := $ingress.paths | default (list (dict "path" "/" "pathType" "Prefix")) -}}
+  {{- $hosts = list (dict "host" .Values.global.domain "paths" $paths) -}}
+{{- end -}}
+
 {{- if eq (len $hosts) 0 }}
-{{- fail "No hosts defined in .Values.ingress.hosts" }}
+{{- fail "No hosts defined. Configure global.domain or ingress.hosts" }}
 {{- end }}
 
 apiVersion: networking.k8s.io/v1
@@ -22,7 +29,7 @@ metadata:
     {{- if and .Values.security .Values.security.network .Values.security.network.allowedIPs }}
     traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ .Release.Name }}-ip-whitelist@kubernetescrd
     {{- end }}
-    {{- if .Values.app.tlsEnabled }}
+    {{- if eq (include "rulebricks-chart.tlsEnabled" .) "true" }}
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
     {{- else }}
@@ -34,16 +41,16 @@ metadata:
     {{- end }}
 spec:
   ingressClassName: traefik
-  {{- if .Values.app.tlsEnabled }}
+  {{- if eq (include "rulebricks-chart.tlsEnabled" .) "true" }}
   tls:
     - hosts:
-      {{- range .Values.ingress.hosts }}
+      {{- range $hosts }}
         - {{ .host }}
       {{- end }}
       secretName: {{ include "rulebricks-chart.tls.secretName" . }}
   {{- end }}
   rules:
-    {{- range .Values.ingress.hosts }}
+    {{- range $hosts }}
     - host: {{ .host | quote }}
       http:
         paths:
