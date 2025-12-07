@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  CHART_NAME: rulebricks/enterprise
+  CHART_NAMESPACE: rulebricks/charts
 
 jobs:
   release:
@@ -30,27 +30,13 @@ jobs:
 
       - name: Package and Push
         run: |
-          # Get version from Chart.yaml
+          # Get chart name and version from Chart.yaml
+          CHART_NAME=$(grep '^name:' Chart.yaml | awk '{print $2}')
           VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
-          echo "📦 Packaging chart version ${VERSION}"
+          echo "📦 Packaging ${CHART_NAME} version ${VERSION}"
 
-          # Update dependencies
           helm dependency update .
-
-          # Package
           helm package .
+          helm push ${CHART_NAME}-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_NAMESPACE }}
 
-          # Push to GHCR
-          helm push rulebricks-enterprise-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }}
-
-          echo "✅ Pushed oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }}:${VERSION}"
-
-      - name: Summary
-        run: |
-          VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
-          echo "## 🎉 Published Chart" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Install:**" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "helm install rulebricks oci://${{ env.REGISTRY }}/${{ env.CHART_NAME }} --version ${VERSION}" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Pushed oci://${{ env.REGISTRY }}/${{ env.CHART_NAMESPACE }}/${CHART_NAME}:${VERSION}"
