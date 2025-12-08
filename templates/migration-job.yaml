@@ -16,8 +16,9 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
+  ttlSecondsAfterFinished: 600
   template:
     metadata:
       labels:
@@ -157,8 +158,9 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-delete-policy": before-hook-creation
 spec:
+  ttlSecondsAfterFinished: 600
   template:
     metadata:
       labels:
@@ -249,13 +251,13 @@ spec:
                 mkdir -p ./templates
                 echo "Downloading email templates..."
                 curl -sSL "$EMAIL_TEMPLATES_INVITE" -o ./templates/invite.html && \
-                  sed -i "s|$EMAIL_TEMPLATES_INVITE|./templates/invite.html|g" supabase/config.toml
+                  sed -i "s|env(EMAIL_TEMPLATES_INVITE)|./templates/invite.html|g" supabase/config.toml
                 curl -sSL "$EMAIL_TEMPLATES_CONFIRMATION" -o ./templates/verify.html && \
-                  sed -i "s|$EMAIL_TEMPLATES_CONFIRMATION|./templates/verify.html|g" supabase/config.toml
+                  sed -i "s|env(EMAIL_TEMPLATES_CONFIRMATION)|./templates/verify.html|g" supabase/config.toml
                 curl -sSL "$EMAIL_TEMPLATES_RECOVERY" -o ./templates/password_change.html && \
-                  sed -i "s|$EMAIL_TEMPLATES_RECOVERY|./templates/password_change.html|g" supabase/config.toml
+                  sed -i "s|env(EMAIL_TEMPLATES_RECOVERY)|./templates/password_change.html|g" supabase/config.toml
                 curl -sSL "$EMAIL_TEMPLATES_EMAIL_CHANGE" -o ./templates/email_change.html && \
-                  sed -i "s|$EMAIL_TEMPLATES_EMAIL_CHANGE|./templates/email_change.html|g" supabase/config.toml
+                  sed -i "s|env(EMAIL_TEMPLATES_EMAIL_CHANGE)|./templates/email_change.html|g" supabase/config.toml
                 
                 # Replace SMTP configuration placeholders
                 sed -i "s|env(SMTP_HOST)|${SMTP_HOST}|g" supabase/config.toml
