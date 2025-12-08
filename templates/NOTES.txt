@@ -7,9 +7,11 @@ RULEBRICKS INSTALLATION - 1/2 – DNS SETUP REQUIRED
    kubectl get svc -n {{ .Release.Namespace }} -l app.kubernetes.io/name=traefik -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}'
 
 2. Configure DNS Records:
-   Point the following CNAME records to the LoadBalancer address above:
+   Point the following CNAME record(s) to the LoadBalancer address above:
    - {{ .Values.global.domain }}
-   - supabase.{{ .Values.global.domain }} (If self-hosting Supabase)
+   {{- if .Values.supabase.enabled }}
+   - supabase.{{ .Values.global.domain }}
+   {{- end }}
 
 3. Enable TLS (Phase 2):
    Run the following command to secure your cluster and finish installation:

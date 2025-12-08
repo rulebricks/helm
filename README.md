@@ -302,24 +302,16 @@ kubectl describe certificate rulebricks-tls -n rulebricks
 kubectl describe clusterissuer rulebricks-letsencrypt
 ```
 
-### Database Migration Issues (Self-Hosted)
+### Supabase Setup/Migration Issues
 
-```bash
-kubectl logs job/rulebricks-db-migrate-1 -n rulebricks
-```
-
-### Managed Supabase Setup Issues
+These are usually caused by inaccurate values, or the Supabase Cloud project not being created yet.
 
 ```bash
 kubectl logs job/rulebricks-managed-supabase-setup-1 -n rulebricks
 ```
 
-### Pod Issues
-
 ```bash
-kubectl get pods -n rulebricks
-kubectl describe pod <pod-name> -n rulebricks
-kubectl logs <pod-name> -n rulebricks
+kubectl logs job/rulebricks-db-migrate-1 -n rulebricks
 ```
 
 </details>
