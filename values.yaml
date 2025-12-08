@@ -9,9 +9,12 @@ global:
   email: "support@rulebricks.com"
   # License Key for Rulebricks Enterprise (provided in your onboarding space)
   licenseKey: "evaluation"
-  # You will automatically be prompted to upgrade with `true` after you install the chart
-  # Keep this `false` initially!
+  # Enable TLS/HTTPS - requires DNS records to be configured first
+  # Set to `true` when using external-dns OR after manually creating DNS records
   tlsEnabled: false
+  # Enable external-dns integration for automatic DNS record management
+  # Works with either: the external-dns subchart below, OR an existing cluster-wide external-dns
+  externalDnsEnabled: false
   # SMTP Configuration (Vital for instance access and admin)
   smtp:
     host: "smtp.mailtrap.io"
@@ -382,3 +385,49 @@ storageClass:
   reclaimPolicy: Delete
   volumeBindingMode: WaitForFirstConsumer
   allowVolumeExpansion: true
+
+# =============================================================================
+# AUTOMATIC DNS MANAGEMENT (External-DNS)
+# Deploys external-dns to automatically create DNS records for your domain.
+# This enables single-phase installation with TLS from the start.
+#
+# Two usage modes:
+#   1. Deploy external-dns with this chart:
+#      Set external-dns.enabled=true AND global.externalDnsEnabled=true
+#
+#   2. Use existing cluster-wide external-dns:
+#      Set only global.externalDnsEnabled=true (external-dns.enabled=false)
+#      Your existing external-dns will pick up the ingress annotations
+# =============================================================================
+external-dns:
+  enabled: false
+  # Provider: route53, cloudflare, google, azure
+  provider: route53
+  # Sources to watch for DNS records (ingress is the default)
+  sources:
+    - ingress
+  # Domain filter - restricts external-dns to your domain only
+  domainFilters: []
+  # Policy: sync (create & delete), upsert-only (create only)
+  policy: upsert-only
+  # --- Provider-specific configuration ---
+  # For AWS Route53: uses IRSA by default (recommended)
+  # Ensure your EKS cluster has IRSA configured and the service account
+  # has the appropriate IAM role attached.
+  #
+  # For Cloudflare: set env variables
+  # extraEnvVars:
+  #   - name: CF_API_TOKEN
+  #     valueFrom:
+  #       secretKeyRef:
+  #         name: cloudflare-api-token
+  #         key: api-token
+  #
+  # For Google Cloud DNS: uses workload identity by default
+  # google:
+  #   project: "your-gcp-project"
+  #
+  # For Azure DNS:
+  # azure:
+  #   resourceGroup: "your-resource-group"
+  #   subscriptionId: "your-subscription-id"

@@ -18,7 +18,7 @@
   <p>
     <a href="https://rulebricks.com">Website</a> •
     <a href="https://rulebricks.com/docs">Documentation</a> •
-    <a href="#support">Support</a>
+    <a href="mailto:support@rulebricks.com">Support</a>
   </p>
 </div>
 
@@ -56,7 +56,8 @@ After installation, Helm will display instructions for configuring DNS and enabl
 | `global.domain`                      | Base domain for the deployment                                            |
 | `global.email`                       | Admin email (required for TLS certificates)                               |
 | `global.licenseKey`                  | Rulebricks Enterprise license key                                         |
-| `global.tlsEnabled`                  | Enable TLS/HTTPS (set after DNS is configured)                            |
+| `global.tlsEnabled`                  | Enable TLS/HTTPS (set after DNS is configured or with external-dns)       |
+| `global.externalDnsEnabled`          | Add external-dns annotations to ingresses for automatic DNS management    |
 | `global.smtp.host`                   | SMTP server hostname                                                      |
 | `global.smtp.port`                   | SMTP server port                                                          |
 | `global.smtp.user`                   | SMTP username                                                             |
@@ -142,6 +143,59 @@ global:
 ```
 
 ---
+
+<details>
+<summary><strong>Automatic DNS with External-DNS</strong></summary>
+
+For single-phase installation without manual DNS configuration, you can use external-dns to automatically create DNS records.
+
+#### Option 1: Deploy external-dns with this chart
+
+```bash
+helm install rulebricks oci://ghcr.io/rulebricks/charts/stack \
+  --namespace rulebricks \
+  --create-namespace \
+  -f your-values.yaml \
+  --set external-dns.enabled=true \
+  --set global.externalDnsEnabled=true \
+  --set global.tlsEnabled=true
+```
+
+Configure provider-specific settings in your values file:
+
+```yaml
+external-dns:
+  enabled: true
+  provider: route53 # or: cloudflare, google, azure
+
+global:
+  externalDnsEnabled: true
+  tlsEnabled: true
+```
+
+#### Option 2: Use existing cluster-wide external-dns
+
+If external-dns is already installed in your cluster:
+
+```bash
+helm install rulebricks oci://ghcr.io/rulebricks/charts/stack \
+  --namespace rulebricks \
+  --create-namespace \
+  -f your-values.yaml \
+  --set global.externalDnsEnabled=true \
+  --set global.tlsEnabled=true
+```
+
+This adds the necessary annotations to ingresses for your existing external-dns to discover.
+
+#### DNS Records Created
+
+When `global.externalDnsEnabled=true`, the following records are configured:
+
+- `<global.domain>` → Traefik LoadBalancer
+- `supabase.<global.domain>` → Traefik LoadBalancer (if self-hosting Supabase)
+
+</details>
 
 <details>
 <summary><strong>Using Supabase Cloud - Automatic Setup</strong></summary>
@@ -272,6 +326,7 @@ chart will try to automate all configuration and migration work for you.
 | **cert-manager**          | Let's Encrypt certificate provisioning             |    ✓    |
 | **keda**                  | Event-driven autoscaling for HPS workers           |    ✓    |
 | **vector**                | Log aggregation and forwarding                     |    ✓    |
+| **external-dns**          | Automatic DNS record management                    |    ✗    |
 | **kube-prometheus-stack** | Metrics collection (Prometheus)                    |    ✗    |
 
 ---

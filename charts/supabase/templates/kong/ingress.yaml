@@ -17,6 +17,10 @@ metadata:
     {{- if .Values.global.tlsEnabled }}
     cert-manager.io/cluster-issuer: {{ .Release.Name }}-letsencrypt
     {{- end }}
+    {{- if and .Values.global .Values.global.externalDnsEnabled }}
+    external-dns.alpha.kubernetes.io/hostname: {{ printf "supabase.%s" .Values.global.domain }}
+    external-dns.alpha.kubernetes.io/ttl: "300"
+    {{- end }}
     {{- range $key, $value := .Values.kong.ingress.annotations }}
     {{- if not (hasPrefix "nginx.ingress.kubernetes.io" $key) }}
     {{ $key }}: {{ $value | quote }}

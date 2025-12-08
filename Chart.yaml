@@ -5,6 +5,19 @@ type: application
 version: 0.1.0
 appVersion: "0.1.0"
 icon: https://d1zic6dm9txw4h.cloudfront.net/rulebricks-docs-assets/static/images/application/logo.png
+home: https://rulebricks.com
+sources:
+  - https://github.com/rulebricks/charts
+maintainers:
+  - name: Rulebricks
+    email: support@rulebricks.com
+    url: https://rulebricks.com
+keywords:
+  - rulebricks
+  - rules-engine
+  - business-rules
+  - decision-engine
+  - enterprise
 dependencies:
   - name: rulebricks
     version: 0.1.0
@@ -37,3 +50,7 @@ dependencies:
     version: 0.40.0
     repository: https://helm.vector.dev
     condition: vector.enabled
+  - name: external-dns
+    version: 1.14.5
+    repository: https://kubernetes-sigs.github.io/external-dns/
+    condition: external-dns.enabled

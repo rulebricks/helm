@@ -1,4 +1,60 @@
-{{- if not .Values.global.tlsEnabled }}
+{{- if and .Values.global.tlsEnabled .Values.global.externalDnsEnabled }}
+=============================================================================
+RULEBRICKS INSTALLATION – COMPLETE (Automatic DNS)
+=============================================================================
+
+External-DNS is managing your DNS records automatically.
+Certificates are being provisioned via Let's Encrypt.
+
+DNS records being created:
+  - {{ .Values.global.domain }}
+  {{- if .Values.supabase.enabled }}
+  - supabase.{{ .Values.global.domain }}
+  {{- end }}
+
+Once DNS propagates and certificates are ready:
+
+  https://{{ .Values.global.domain }}/auth/signup
+
+To check certificate status:
+  kubectl get certificates -n {{ .Release.Namespace }}
+
+=============================================================================
+{{- else if .Values.global.tlsEnabled }}
+=============================================================================
+RULEBRICKS INSTALLATION – 2/2 – COMPLETE
+=============================================================================
+
+Welcome to Rulebricks.
+
+https://{{ .Values.global.domain }}/auth/signup
+
+=============================================================================
+{{- else if .Values.global.externalDnsEnabled }}
+=============================================================================
+RULEBRICKS INSTALLATION – ALMOST THERE
+=============================================================================
+
+External-DNS is creating your DNS records automatically.
+
+DNS records being created:
+  - {{ .Values.global.domain }}
+  {{- if .Values.supabase.enabled }}
+  - supabase.{{ .Values.global.domain }}
+  {{- end }}
+
+Since you're using external-dns, you can enable TLS right away:
+
+  helm upgrade {{ .Release.Name }} oci://ghcr.io/rulebricks/charts/stack \
+    --namespace {{ .Release.Namespace }} \
+    --reuse-values \
+    --set global.tlsEnabled=true
+
+TIP: Next time, install with both flags for single-phase setup:
+  --set global.externalDnsEnabled=true --set global.tlsEnabled=true
+
+=============================================================================
+{{- else }}
 =============================================================================
 RULEBRICKS INSTALLATION - 1/2 – DNS SETUP REQUIRED
 =============================================================================
@@ -22,15 +78,4 @@ RULEBRICKS INSTALLATION - 1/2 – DNS SETUP REQUIRED
      --set global.tlsEnabled=true
 
 =============================================================================
-{{- else }}
-=============================================================================
-RULEBRICKS INSTALLATION – 2/2 – COMPLETE
-=============================================================================
-
-Welcome to Rulebricks.
-
-https://{{ .Values.global.domain }}/auth/signup
-
-=============================================================================
 {{- end }}
-
