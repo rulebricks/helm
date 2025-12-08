@@ -9,7 +9,7 @@ RULEBRICKS INSTALLATION - 1/2 – DNS SETUP REQUIRED
 2. Configure DNS Records:
    Point the following CNAME records to the LoadBalancer address above:
    - {{ .Values.global.domain }}
-   - supabase.{{ .Values.global.domain }}
+   - supabase.{{ .Values.global.domain }} (If self-hosting Supabase)
 
 3. Enable TLS (Phase 2):
    Run the following command to secure your cluster and finish installation:

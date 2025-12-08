@@ -81,7 +81,9 @@ Sensitive values are stored in Kubernetes Secrets, not ConfigMaps. You have two 
 
 #### Option 1: Inline Values (Default)
 
-Provide sensitive values directly in `values.yaml` or via `--set`. The chart creates the necessary secrets automatically.
+`global.secrets.secretRef == ""`
+
+Provide sensitive values directly in `values.yaml` or via `--set`.
 
 ```bash
 # Using --set with environment variables (recommended for CI/CD)
@@ -98,7 +100,9 @@ helm install rulebricks ./helm \
 
 #### Option 2: External Secret (Enterprise)
 
-For enterprise deployments using external secret management (Vault, AWS Secrets Manager, etc.), create a Kubernetes secret first and reference it. This applies to the Rulebricks application secrets only.
+`global.secrets.secretRef != ""`
+
+For enterprise deployments using external secret management (Vault, AWS Secrets Manager, etc.), create a Kubernetes secret first and reference it. This is all-or-nothing– you cannot mix and match inline values and external secrets.
 
 > **Note:** Self-hosted Supabase internal secrets (JWT, DB password, dashboard) are configured via `values.yaml` and stored in separate Kubernetes secrets managed by the Supabase subchart.
 
@@ -137,16 +141,12 @@ global:
       openaiApiKey: "MY_OPENAI_KEY" # default: OPENAI_API_KEY
 ```
 
-### Storage Class (AWS)
-
-The chart automatically creates a `gp3` StorageClass for AWS EBS. Disable with `storageClass.create: false` if you have your own.
-
 ---
 
 <details>
-<summary><strong>Using Managed Supabase (Cloud) - Automatic Setup</strong></summary>
+<summary><strong>Using Supabase Cloud - Automatic Setup</strong></summary>
 
-If you prefer Supabase Cloud instead of self-hosting, the Helm chart can automatically configure your managed Supabase project:
+Even if you use Supabase Cloud instead of self-hosting, this chart will automatically configure your project. You will need to find and provide certain information from your newly created account/project as values.
 
 1. **Create a Supabase project** at [supabase.com](https://supabase.com) if you haven't already.
 
@@ -180,44 +180,6 @@ The migration job will:
 - Link to your project
 - Push the database schema via `supabase db push`
 - Configure auth settings based on your domain
-
-</details>
-
-<details>
-<summary><strong>Using Managed Supabase (Cloud) - Manual Setup</strong></summary>
-
-If you prefer to analyze or run database migrations manually:
-
-1. **Extract migration files** from the app image:
-
-   ```bash
-   docker create --name temp-rb rulebricks/app:latest
-   docker cp temp-rb:/opt/rulebricks/assets/supabase ./supabase
-   docker rm temp-rb
-   ```
-
-2. **Push schema to your Supabase project**:
-
-   ```bash
-   cd supabase
-   supabase login
-   supabase link --project-ref <your-project-ref>
-   supabase db push --include-all
-   ```
-
-3. **Configure Helm values**:
-
-   ```yaml
-   supabase:
-     enabled: false
-
-   global:
-     supabase:
-       url: "https://<project-ref>.supabase.co"
-       anonKey: "<your-anon-key>"
-       serviceKey: "<your-service-role-key>"
-       # Note: Don't set accessToken when running migrations manually
-   ```
 
 </details>
 
@@ -296,6 +258,11 @@ To send rule execution logs to S3:
 
 ## Architecture
 
+There are two major components here– our core stack, and Supabase, our db/auth provider.
+
+You can choose to self-host Supabase, or create a project in Supabase Cloud– either way, this
+chart will try to automate all configuration and migration work for you.
+
 | Component                 | Description                                        | Enabled |
 | ------------------------- | -------------------------------------------------- | :-----: |
 | **rulebricks**            | Core application and high-performance solver (HPS) |    ✓    |
@@ -311,6 +278,15 @@ To send rule execution logs to S3:
 
 <details>
 <summary><strong>Troubleshooting</strong></summary>
+
+### Retry Installation
+
+```bash
+helm uninstall rulebricks -n rulebricks
+# Clear PVCs
+kubectl delete pvc --all -n rulebricks
+helm install rulebricks oci://ghcr.io/rulebricks/charts/stack -n rulebricks -f your-values.yaml
+```
 
 ### TLS Certificate Issues
 

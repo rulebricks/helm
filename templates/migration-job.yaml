@@ -180,7 +180,7 @@ spec:
               # Copy the assets from the image to the shared volume
               # Path based on CLI logic: /opt/rulebricks/assets/supabase
               if [ -d "/opt/rulebricks/assets/supabase" ]; then
-                cp -r /opt/rulebricks/assets/supabase/* /assets/
+                cp -r /opt/rulebricks/assets/supabase /assets/
                 echo "Assets extracted successfully."
               else
                 echo "Error: /opt/rulebricks/assets/supabase not found in image."
@@ -201,8 +201,17 @@ spec:
               set -e
               
               echo "=== Managed Supabase Setup ==="
-              echo "Installing Supabase CLI..."
-              npm install -g supabase --unsafe-perm
+              
+              # Install CA certificates for SSL connections and curl for downloading templates
+              echo "Installing CA certificates and curl..."
+              apk add --no-cache ca-certificates curl
+              
+              echo "Installing Supabase CLI locally..."
+              npm init -y
+              npm install supabase --save-dev
+              
+              # Create templates directory
+              mkdir -p supabase/templates
               
               # Derive PROJECT_REF from URL if not explicitly provided
               PROJECT_REF="${SUPABASE_PROJECT_REF}"
@@ -219,69 +228,68 @@ spec:
               
               # Authenticate with Supabase CLI
               echo "Authenticating with Supabase..."
-              supabase login --token "$SUPABASE_ACCESS_TOKEN"
+              npx supabase login --token "$SUPABASE_ACCESS_TOKEN"
               
-              # Initialize supabase project structure if needed
-              if [ ! -f "config.toml" ]; then
-                echo "Initializing Supabase project structure..."
-                # Create config.toml from template with variable replacements
-                TEMPLATE_FILE=""
-                if [ -f "config.example.toml" ]; then
-                  TEMPLATE_FILE="config.example.toml"
-                elif [ -f "config/config.example.toml" ]; then
-                  TEMPLATE_FILE="config/config.example.toml"
-                fi
+              # Create config.toml from template with variable replacements
+              TEMPLATE_FILE="supabase/config.example.toml"
+              if [ -n "$TEMPLATE_FILE" ]; then
+                echo "Creating config.toml from template..."
+                cp "$TEMPLATE_FILE" supabase/config.toml
                 
-                if [ -n "$TEMPLATE_FILE" ]; then
-                  echo "Creating config.toml from template..."
-                  cp "$TEMPLATE_FILE" config.toml
-                  
-                  # Replace URL placeholder
-                  sed -i "s|env(FULL_URL)|https://${SITE_DOMAIN}|g" config.toml
-                  
-                  # Replace email subject placeholders
-                  sed -i "s|env(EMAIL_SUBJECTS_INVITE)|${EMAIL_SUBJECTS_INVITE}|g" config.toml
-                  sed -i "s|env(EMAIL_SUBJECTS_CONFIRMATION)|${EMAIL_SUBJECTS_CONFIRMATION}|g" config.toml
-                  sed -i "s|env(EMAIL_SUBJECTS_RECOVERY)|${EMAIL_SUBJECTS_RECOVERY}|g" config.toml
-                  sed -i "s|env(EMAIL_SUBJECTS_EMAIL_CHANGE)|${EMAIL_SUBJECTS_EMAIL_CHANGE}|g" config.toml
-                  
-                  # Replace email template URL placeholders
-                  sed -i "s|env(EMAIL_TEMPLATES_INVITE)|${EMAIL_TEMPLATES_INVITE}|g" config.toml
-                  sed -i "s|env(EMAIL_TEMPLATES_CONFIRMATION)|${EMAIL_TEMPLATES_CONFIRMATION}|g" config.toml
-                  sed -i "s|env(EMAIL_TEMPLATES_RECOVERY)|${EMAIL_TEMPLATES_RECOVERY}|g" config.toml
-                  sed -i "s|env(EMAIL_TEMPLATES_EMAIL_CHANGE)|${EMAIL_TEMPLATES_EMAIL_CHANGE}|g" config.toml
-                  
-                  # Replace SMTP configuration placeholders
-                  sed -i "s|env(SMTP_HOST)|${SMTP_HOST}|g" config.toml
-                  sed -i "s|env(SMTP_PORT)|${SMTP_PORT}|g" config.toml
-                  sed -i "s|env(SMTP_USER)|${SMTP_USER}|g" config.toml
-                  sed -i "s|env(SMTP_PASS)|${SMTP_PASS}|g" config.toml
-                  sed -i "s|env(SMTP_FROM)|${SMTP_FROM}|g" config.toml
-                  sed -i "s|env(SMTP_FROM_NAME)|${SMTP_FROM_NAME}|g" config.toml
-                  
-                  echo "Config.toml created with all replacements applied."
-                fi
+                # Replace URL placeholder
+                sed -i "s|env(FULL_URL)|https://${SITE_DOMAIN}|g" supabase/config.toml
+                
+                # Replace email subject placeholders
+                sed -i "s|env(EMAIL_SUBJECTS_INVITE)|${EMAIL_SUBJECTS_INVITE}|g" supabase/config.toml
+                sed -i "s|env(EMAIL_SUBJECTS_CONFIRMATION)|${EMAIL_SUBJECTS_CONFIRMATION}|g" supabase/config.toml
+                sed -i "s|env(EMAIL_SUBJECTS_RECOVERY)|${EMAIL_SUBJECTS_RECOVERY}|g" supabase/config.toml
+                sed -i "s|env(EMAIL_SUBJECTS_EMAIL_CHANGE)|${EMAIL_SUBJECTS_EMAIL_CHANGE}|g" supabase/config.toml
+                
+                # Download email templates and replace URLs with local paths
+                mkdir -p ./templates
+                echo "Downloading email templates..."
+                curl -sSL "$EMAIL_TEMPLATES_INVITE" -o ./templates/invite.html && \
+                  sed -i "s|$EMAIL_TEMPLATES_INVITE|./templates/invite.html|g" supabase/config.toml
+                curl -sSL "$EMAIL_TEMPLATES_CONFIRMATION" -o ./templates/verify.html && \
+                  sed -i "s|$EMAIL_TEMPLATES_CONFIRMATION|./templates/verify.html|g" supabase/config.toml
+                curl -sSL "$EMAIL_TEMPLATES_RECOVERY" -o ./templates/password_change.html && \
+                  sed -i "s|$EMAIL_TEMPLATES_RECOVERY|./templates/password_change.html|g" supabase/config.toml
+                curl -sSL "$EMAIL_TEMPLATES_EMAIL_CHANGE" -o ./templates/email_change.html && \
+                  sed -i "s|$EMAIL_TEMPLATES_EMAIL_CHANGE|./templates/email_change.html|g" supabase/config.toml
+                
+                # Replace SMTP configuration placeholders
+                sed -i "s|env(SMTP_HOST)|${SMTP_HOST}|g" supabase/config.toml
+                sed -i "s|env(SMTP_PORT)|${SMTP_PORT}|g" supabase/config.toml
+                sed -i "s|env(SMTP_USER)|${SMTP_USER}|g" supabase/config.toml
+                sed -i "s|env(SMTP_PASS)|${SMTP_PASS}|g" supabase/config.toml
+                sed -i "s|env(SMTP_FROM)|${SMTP_FROM}|g" supabase/config.toml
+                sed -i "s|env(SMTP_FROM_NAME)|${SMTP_FROM_NAME}|g" supabase/config.toml
+                
+                echo "Config.toml created with all replacements applied."
               fi
               
               # Link to the existing Supabase project
               echo "Linking to Supabase project: $PROJECT_REF"
-              supabase link --project-ref "$PROJECT_REF"
+              npx supabase link --project-ref "$PROJECT_REF" || {
+                echo "ERROR: supabase link failed"
+                exit 1
+              }
               
               # Push configuration if config.toml exists
-              if [ -f "config.toml" ]; then
+              if [ -f "supabase/config.toml" ]; then
                 echo "Pushing configuration to Supabase..."
-                echo "Y" | supabase config push --project-ref "$PROJECT_REF" || {
+                echo "Y" | npx supabase config push --project-ref "$PROJECT_REF" || {
                   echo "Warning: Config push failed (non-fatal)"
                 }
               fi
               
               # Push database schema
-              echo "Pushing database schema..."
-              echo "Y" | supabase db push --include-all
+              echo "Applying database migrations..."
+              echo "Y" | npx supabase db push --include-all
               
               # Enable SSL enforcement (optional, non-fatal)
               echo "Enabling SSL enforcement..."
-              supabase ssl-enforcement update \
+              npx supabase ssl-enforcement update \
                 --enable-db-ssl-enforcement \
                 --project-ref "$PROJECT_REF" \
                 --experimental || {
