@@ -131,6 +131,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "rulebricks-chart.app.configmap" . }}
+            - secretRef:
+                name: {{ include "rulebricks-chart.app.secretName" . | trim }}
           env:
             - name: HPS_REPLICAS
               value: "{{ .Values.hps.replicas }}"

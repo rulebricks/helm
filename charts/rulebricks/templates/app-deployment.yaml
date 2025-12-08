@@ -60,16 +60,49 @@ spec:
             timeoutSeconds: {{ .Values.app.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.app.readinessProbe.failureThreshold }}
           env:
+            # License and contact (from secret)
             - name: LICENSE_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "rulebricks-chart.app.secret" . }}
-                  key: LICENSE_KEY
+                  name: {{ include "rulebricks-chart.app.secretName" . | trim }}
+                  key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "licenseKey" "default" "LICENSE_KEY") | trim }}
             - name: EMAIL
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "rulebricks-chart.app.secret" . }}
+                  name: {{ include "rulebricks-chart.app.secretName" . | trim }}
                   key: EMAIL
+            # SMTP credentials (from secret)
+            - name: SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rulebricks-chart.app.secretName" . | trim }}
+                  key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "smtpUser" "default" "SMTP_USER") | trim }}
+            - name: SMTP_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rulebricks-chart.app.secretName" . | trim }}
+                  key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "smtpPass" "default" "SMTP_PASS") | trim }}
+            # Supabase keys (from secret)
+            - name: SUPABASE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rulebricks-chart.app.secretName" . | trim }}
+                  key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "supabaseServiceKey" "default" "SUPABASE_SERVICE_KEY") | trim }}
+            # AI API key (from secret, optional)
+            {{- $aiEnabled := false }}
+            {{- if and .Values.global .Values.global.ai .Values.global.ai.enabled }}
+              {{- $aiEnabled = true }}
+            {{- else if and .Values.app.ai .Values.app.ai.enabled }}
+              {{- $aiEnabled = true }}
+            {{- end }}
+            {{- if $aiEnabled }}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rulebricks-chart.app.secretName" . | trim }}
+                  key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "openaiApiKey" "default" "OPENAI_API_KEY") | trim }}
+            {{- end }}
+            # Redis (from configmap)
             - name: UPSTASH_REDIS_REST_URL
               valueFrom:
                 configMapKeyRef:
@@ -81,7 +114,9 @@ spec:
                   name: {{ include "rulebricks-chart.app.configmap" . }}
                   key: KV_REST_API_TOKEN
           envFrom:
+            # Load all non-sensitive config from ConfigMap
             - configMapRef:
                 name: {{ include "rulebricks-chart.app.configmap" . }}
+            # Load all secrets (this provides remaining sensitive values)
             - secretRef:
-                name: {{ include "rulebricks-chart.app.secret" . }}
+                name: {{ include "rulebricks-chart.app.secretName" . | trim }}

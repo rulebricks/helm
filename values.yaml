@@ -20,21 +20,33 @@ global:
     pass: "demo-password"
     from: "no-reply@rulebricks.com"
     fromName: "Rulebricks"
-  # Automated Database Migrations
-  # Set to false if using an external Supabase instance (you must run migrations manually)
-  migrations:
-    enabled: true
-  # Supabase Configuration (used by both Rulebricks app and optional self-hosted Supabase)
-  # [Self-hosted] JWTs must be valid HS256 tokens signed with the jwtSecret below.
-  # [Self-hosted] These are demo tokens signed with "super-secret-jwt-token-change-me".
-  # [Self-hosted] REPLACE THESE for production!
+  # Auth/Database Configuration
+
   supabase:
-    # Leave empty to auto-discover from the supabase subchart (recommended)
-    # Only set explicitly if using an external Supabase instance
-    url: ""
     anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE"
     serviceKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q"
-    # JWT signing secret (only needed for self-hosted Supabase)
+    # Email Customization (subjects and templates for auth emails)
+    emails:
+      subjects:
+        invite: "Join your team on Rulebricks"
+        confirmation: "Confirm Your Email"
+        recovery: "Reset Your Password"
+        emailChange: "Confirm Email Change"
+      templates:
+        # HTML templates hosted on S3 (or any public URL)
+        invite: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/invite.html"
+        confirmation: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/verify.html"
+        recovery: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/password_change.html"
+        emailChange: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/email_change.html"
+    # [Managed Supabase] Leave URL empty if self-hosting
+    url: ""
+    # [Managed Supabase] Project reference (e.g., "abcdefghijkl")
+    projectRef: ""
+    # [Managed Supabase] Access token for headless CLI authentication
+    # Generate from Supabase Dashboard: Account Settings > Access Tokens
+    # Required when using managed Supabase (supabase.enabled=false)
+    accessToken: ""
+    # [Self-hosted Supabase] JWT signing secret (only needed for self-hosted Supabase)
     jwtSecret: "your-super-secret-jwt-token-with-at-least-32-characters-long"
   # AI Features (Optional)
   # Enables AI-powered rule generation and suggestions
@@ -42,8 +54,37 @@ global:
     enabled: false
     openaiApiKey: "" # Your OpenAI API key
 
+  # =============================================================================
+  # SECRETS CONFIGURATION (Optional)
+  # Enterprise users can reference a pre-existing Kubernetes secret instead of
+  # specifying sensitive values in this file. When secretRef is set, the chart
+  # will use the external secret instead of creating its own.
+  #
+  # Note: This only affects the Rulebricks application secrets, not self-hosted
+  # Supabase internal secrets (JWT, DB password, dashboard) which remain as values.
+  # =============================================================================
+  secrets:
+    # Optional: reference an existing Kubernetes secret for all sensitive values
+    # When set, the chart will NOT create its own secret and will use this instead
+    # Example: "rulebricks-secrets"
+    secretRef: ""
+    # Key mappings for the external secret (customize if your secret uses different keys)
+    secretRefKeys:
+      licenseKey: "LICENSE_KEY"
+      smtpUser: "SMTP_USER"
+      smtpPass: "SMTP_PASS"
+      supabaseAnonKey: "SUPABASE_ANON_KEY"
+      supabaseServiceKey: "SUPABASE_SERVICE_KEY"
+      supabaseAccessToken: "SUPABASE_ACCESS_TOKEN"
+      openaiApiKey: "OPENAI_API_KEY"
+
 # =============================================================================
 # RULEBRICKS APPLICATION STACK
+# This is the core Rulebricks application stack. It is preconfigured to run as-
+# is, but you will likely need to manually tune component resources and
+# other configurations to your business's performance requirements.
+# We highly recommend you keep Traefik and Kafka internal to the cluster– our
+# solver directly depends on their configurations.
 # =============================================================================
 rulebricks:
   app:
@@ -205,7 +246,7 @@ cert-manager:
   installCRDs: false # CRDs are managed in parent chart crds/ directory
 
 # =============================================================================
-# RULE EXECUTION/DECISION LOGS (Vector)
+# DECISION LOGS (Vector)
 # Aggregates and forwards rule execution logs to one or more configurable sinks (console, S3, etc.)
 # Note: The bootstrap_servers will need to match your release name.
 # If your release is named "rulebricks", use "rulebricks-kafka:9092"
@@ -303,22 +344,9 @@ supabase:
       enabled: true
       className: traefik
       annotations: {}
-  # Email Customization (subjects and templates for self-hosted auth emails)
-  emails:
-    subjects:
-      invite: "Join your team on Rulebricks"
-      confirmation: "Confirm Your Email"
-      recovery: "Reset Your Password"
-      emailChange: "Confirm Email Change"
-    templates:
-      # HTML templates hosted on S3 (or any public URL)
-      invite: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/invite.html"
-      confirmation: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/verify.html"
-      recovery: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/password_change.html"
-      emailChange: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/email_change.html"
 
 # =============================================================================
-# MONITORING (Prometheus only)
+# MONITORING & ALERTING
 # Controls cluster metrics and alerting via Prometheus (optional)
 # =============================================================================
 monitoring:

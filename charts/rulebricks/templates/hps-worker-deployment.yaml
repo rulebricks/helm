@@ -114,6 +114,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "rulebricks-chart.app.configmap" . }}
+            - secretRef:
+                name: {{ include "rulebricks-chart.app.secretName" . | trim }}
           env:
             - name: WORKER_TOPICS
               value: {{ .Values.hps.workers.topics | default "solution" | quote }}

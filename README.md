@@ -42,8 +42,7 @@ See [Minimum Cluster Requirements](example-min-cluster.yaml) for an example EKS 
 helm install rulebricks oci://ghcr.io/rulebricks/charts/stack \
   --namespace rulebricks \
   --create-namespace \
-  -f values.yaml \
-  --set global.licenseKey=<YOUR_LICENSE_KEY>
+  -f your-values.yaml
 ```
 
 After installation, Helm will display instructions for configuring DNS and enabling TLS.
@@ -52,25 +51,91 @@ After installation, Helm will display instructions for configuring DNS and enabl
 
 ### Global Settings
 
-| Parameter                    | Description                                         | Default                   |
-| ---------------------------- | --------------------------------------------------- | ------------------------- |
-| `global.domain`              | Base domain for the deployment                      | `rulebricks.local`        |
-| `global.email`               | Admin email (required for TLS certificates)         | `admin@rulebricks.com`    |
-| `global.licenseKey`          | Rulebricks Enterprise license key                   | `evaluation`              |
-| `global.tlsEnabled`          | Enable TLS/HTTPS (set after DNS is configured)      | `false`                   |
-| `global.migrations.enabled`  | Run database migrations automatically               | `true`                    |
-| `global.smtp.host`           | SMTP server hostname                                | `smtp.mailtrap.io`        |
-| `global.smtp.port`           | SMTP server port                                    | `2525`                    |
-| `global.smtp.user`           | SMTP username                                       | —                         |
-| `global.smtp.pass`           | SMTP password                                       | —                         |
-| `global.smtp.from`           | Sender email address                                | `no-reply@rulebricks.com` |
-| `global.smtp.fromName`       | Sender display name                                 | `Rulebricks`              |
-| `global.supabase.url`        | External Supabase URL (leave empty for self-hosted) | `""`                      |
-| `global.supabase.anonKey`    | Supabase anonymous/public key                       | _(demo key)_              |
-| `global.supabase.serviceKey` | Supabase service role key                           | _(demo key)_              |
-| `global.supabase.jwtSecret`  | JWT signing secret (self-hosted only)               | _(demo secret)_           |
-| `global.ai.enabled`          | Enable AI-powered rule generation                   | `false`                   |
-| `global.ai.openaiApiKey`     | OpenAI API key for AI features                      | `""`                      |
+| Parameter                            | Description                                                               |
+| ------------------------------------ | ------------------------------------------------------------------------- |
+| `global.domain`                      | Base domain for the deployment                                            |
+| `global.email`                       | Admin email (required for TLS certificates)                               |
+| `global.licenseKey`                  | Rulebricks Enterprise license key                                         |
+| `global.tlsEnabled`                  | Enable TLS/HTTPS (set after DNS is configured)                            |
+| `global.smtp.host`                   | SMTP server hostname                                                      |
+| `global.smtp.port`                   | SMTP server port                                                          |
+| `global.smtp.user`                   | SMTP username                                                             |
+| `global.smtp.pass`                   | SMTP password                                                             |
+| `global.smtp.from`                   | Sender email address                                                      |
+| `global.smtp.fromName`               | Sender display name                                                       |
+| `global.supabase.anonKey`            | Supabase anonymous/public key                                             |
+| `global.supabase.serviceKey`         | Supabase service role key                                                 |
+| `global.supabase.emails.subjects.*`  | Email subject customization (invite, confirmation, recovery, emailChange) |
+| `global.supabase.emails.templates.*` | Email template URLs (invite, confirmation, recovery, emailChange)         |
+| `global.supabase.url`                | External Supabase URL (leave empty for self-hosted)                       |
+| `global.supabase.projectRef`         | Project reference for managed Supabase (optional)                         |
+| `global.supabase.accessToken`        | Access token for Supabase CLI (managed only)                              |
+| `global.supabase.jwtSecret`          | JWT signing secret (self-hosted only)                                     |
+| `global.ai.enabled`                  | Enable AI-powered rule generation                                         |
+| `global.ai.openaiApiKey`             | OpenAI API key for AI features                                            |
+| `global.secrets.secretRef`           | Reference to existing K8s secret (optional)                               |
+
+### Secrets Management
+
+Sensitive values are stored in Kubernetes Secrets, not ConfigMaps. You have two options:
+
+#### Option 1: Inline Values (Default)
+
+Provide sensitive values directly in `values.yaml` or via `--set`. The chart creates the necessary secrets automatically.
+
+```bash
+# Using --set with environment variables (recommended for CI/CD)
+helm install rulebricks ./helm \
+  --namespace rulebricks \
+  --create-namespace \
+  -f values.yaml \
+  --set global.licenseKey=$LICENSE_KEY \
+  --set global.smtp.user=$SMTP_USER \
+  --set global.smtp.pass=$SMTP_PASS \
+  --set global.supabase.serviceKey=$SUPABASE_SERVICE_KEY \
+  --set global.ai.openaiApiKey=$OPENAI_API_KEY
+```
+
+#### Option 2: External Secret (Enterprise)
+
+For enterprise deployments using external secret management (Vault, AWS Secrets Manager, etc.), create a Kubernetes secret first and reference it. This applies to the Rulebricks application secrets only.
+
+> **Note:** Self-hosted Supabase internal secrets (JWT, DB password, dashboard) are configured via `values.yaml` and stored in separate Kubernetes secrets managed by the Supabase subchart.
+
+```bash
+# Create the secret manually or via your secret management tool
+kubectl create secret generic rulebricks-secrets \
+  --namespace rulebricks \
+  --from-literal=LICENSE_KEY="your-license-key" \
+  --from-literal=SMTP_USER="smtp-username" \
+  --from-literal=SMTP_PASS="smtp-password" \
+  --from-literal=SUPABASE_ANON_KEY="your-anon-key" \
+  --from-literal=SUPABASE_SERVICE_KEY="your-service-key" \
+  --from-literal=SUPABASE_ACCESS_TOKEN="your-access-token" \
+  --from-literal=OPENAI_API_KEY="your-openai-key"
+
+# Reference it in Helm
+helm install rulebricks ./helm \
+  --namespace rulebricks \
+  -f values.yaml \
+  --set global.secrets.secretRef=rulebricks-secrets
+```
+
+You can customize the key names in the external secret via `global.secrets.secretRefKeys`:
+
+```yaml
+global:
+  secrets:
+    secretRef: "my-external-secret"
+    secretRefKeys:
+      licenseKey: "MY_LICENSE_KEY" # default: LICENSE_KEY
+      smtpUser: "MY_SMTP_USER" # default: SMTP_USER
+      smtpPass: "MY_SMTP_PASS" # default: SMTP_PASS
+      supabaseAnonKey: "MY_ANON_KEY" # default: SUPABASE_ANON_KEY
+      supabaseServiceKey: "MY_SVC_KEY" # default: SUPABASE_SERVICE_KEY
+      supabaseAccessToken: "MY_TOKEN" # default: SUPABASE_ACCESS_TOKEN
+      openaiApiKey: "MY_OPENAI_KEY" # default: OPENAI_API_KEY
+```
 
 ### Storage Class (AWS)
 
@@ -79,9 +144,49 @@ The chart automatically creates a `gp3` StorageClass for AWS EBS. Disable with `
 ---
 
 <details>
-<summary><strong>Using Managed Supabase (Cloud)</strong></summary>
+<summary><strong>Using Managed Supabase (Cloud) - Automatic Setup</strong></summary>
 
-If you prefer Supabase Cloud instead of self-hosting:
+If you prefer Supabase Cloud instead of self-hosting, the Helm chart can automatically configure your managed Supabase project:
+
+1. **Create a Supabase project** at [supabase.com](https://supabase.com) if you haven't already.
+
+2. **Generate an access token** from Supabase Dashboard: Account Settings > Access Tokens.
+
+3. **Get your project details** from the Supabase Dashboard:
+
+   - Project URL (e.g., `https://abcdefghijkl.supabase.co`)
+   - Anon (public) key
+   - Service role key
+
+4. **Configure Helm values**:
+
+   ```yaml
+   supabase:
+     enabled: false
+
+   global:
+     supabase:
+       url: "https://<project-ref>.supabase.co"
+       anonKey: "<your-anon-key>"
+       serviceKey: "<your-service-role-key>"
+       accessToken: "<your-supabase-access-token>"
+       # Optional: explicitly set project ref (derived from URL if empty)
+       projectRef: ""
+   ```
+
+The migration job will:
+
+- Authenticate with your Supabase account using the access token
+- Link to your project
+- Push the database schema via `supabase db push`
+- Configure auth settings based on your domain
+
+</details>
+
+<details>
+<summary><strong>Using Managed Supabase (Cloud) - Manual Setup</strong></summary>
+
+If you prefer to analyze or run database migrations manually:
 
 1. **Extract migration files** from the app image:
 
@@ -107,35 +212,21 @@ If you prefer Supabase Cloud instead of self-hosting:
      enabled: false
 
    global:
-     migrations:
-       enabled: false # Already ran manually
      supabase:
        url: "https://<project-ref>.supabase.co"
        anonKey: "<your-anon-key>"
        serviceKey: "<your-service-role-key>"
+       # Note: Don't set accessToken when running migrations manually
    ```
 
 </details>
 
 <details>
-<summary><strong>Using External Kafka</strong></summary>
+<summary><strong>Forwarding Decision Logs</strong></summary>
 
-To connect to an existing Kafka cluster:
+This is one example of forwarding rule execution (decision) logs to S3. Under the hood, we use Vector, which can be configured to forward logs to a wide variety of otherdestinations.
 
-```yaml
-kafka:
-  enabled: false
-
-rulebricks:
-  app:
-    logging:
-      kafkaBrokers: "kafka-1:9092,kafka-2:9092"
-```
-
-</details>
-
-<details>
-<summary><strong>S3 Log Storage (AWS)</strong></summary>
+See the [Vector documentation](https://vector.dev/docs/reference/configuration/sinks/) for more information.
 
 To send rule execution logs to S3:
 
@@ -235,10 +326,16 @@ kubectl describe certificate rulebricks-tls -n rulebricks
 kubectl describe clusterissuer rulebricks-letsencrypt
 ```
 
-### Database Migration Issues
+### Database Migration Issues (Self-Hosted)
 
 ```bash
 kubectl logs job/rulebricks-db-migrate-1 -n rulebricks
+```
+
+### Managed Supabase Setup Issues
+
+```bash
+kubectl logs job/rulebricks-managed-supabase-setup-1 -n rulebricks
 ```
 
 ### Pod Issues

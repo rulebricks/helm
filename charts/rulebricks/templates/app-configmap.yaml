@@ -14,15 +14,14 @@ data:
   PROTOCOL: "https"
   DOMAIN_NAME: {{ $domain | quote }}
   ROUTER_ENTRYPOINT: {{ $routerEntrypoint | quote }}
-  # Supabase configuration
+  # Supabase configuration (non-sensitive)
   # - Self-hosted (supabase.enabled: true): URL derived from global.domain
   # - External (supabase.enabled: false): URL from global.supabase.url
+  # Note: Sensitive keys (anonKey, serviceKey) are stored in the app secret
   {{- $supabaseAnonKey := "" }}
-  {{- $supabaseServiceKey := "" }}
   {{- $supabaseUrl := "" }}
   {{- if and .Values.global .Values.global.supabase }}
     {{- $supabaseAnonKey = .Values.global.supabase.anonKey | default "" }}
-    {{- $supabaseServiceKey = .Values.global.supabase.serviceKey | default "" }}
     {{- /* Check if external Supabase URL is explicitly provided */ -}}
     {{- if .Values.global.supabase.url }}
       {{- $supabaseUrl = .Values.global.supabase.url }}
@@ -32,8 +31,8 @@ data:
   {{- if not $supabaseUrl }}
     {{- $supabaseUrl = printf "%s://supabase.%s" $protocol $domain }}
   {{- end }}
+  # Public key is safe for ConfigMap (embedded in client bundle for Next.js)
   SUPABASE_PUBLIC_KEY: {{ $supabaseAnonKey | quote }}
-  SUPABASE_SECRET_KEY: {{ $supabaseServiceKey | quote }}
   SUPABASE_URL: {{ $supabaseUrl | quote }}
   NEXT_PUBLIC_EMAIL: {{ .Values.global.email | default .Values.app.email | default "" | quote }}
   NEXT_PUBLIC_PROTOCOL: "https"
@@ -51,35 +50,29 @@ data:
   NODE_ENV: "production"
   ENVIRONMENT: "production"
   NODE_OPTIONS: "--dns-result-order=ipv4first"
+  # SMTP configuration (non-sensitive only - credentials are in the app secret)
   {{- if .Values.global.smtp }}
   SMTP_HOST: {{ .Values.global.smtp.host | default "" | quote }}
   SMTP_PORT: {{ .Values.global.smtp.port | default "" | quote }}
-  SMTP_USER: {{ .Values.global.smtp.user | default "" | quote }}
-  SMTP_PASS: {{ .Values.global.smtp.pass | default "" | quote }}
   SMTP_FROM: {{ .Values.global.smtp.from | default "" | quote }}
   SMTP_FROM_NAME: {{ .Values.global.smtp.fromName | default "" | quote }}
   {{- else if .Values.app.smtp }}
   SMTP_HOST: {{ .Values.app.smtp.host | default "" | quote }}
   SMTP_PORT: {{ .Values.app.smtp.port | default "" | quote }}
-  SMTP_USER: {{ .Values.app.smtp.user | default "" | quote }}
-  SMTP_PASS: {{ .Values.app.smtp.pass | default "" | quote }}
   SMTP_FROM: {{ .Values.app.smtp.from | default "" | quote }}
   SMTP_FROM_NAME: {{ .Values.app.smtp.fromName | default "" | quote }}
   {{- end }}
-  # AI Features - prefer global.ai, fallback to app.ai
+  # AI Features - only the enabled flag (API key is in the app secret)
   {{- $aiEnabled := false }}
-  {{- $openaiApiKey := "" }}
   {{- if and .Values.global .Values.global.ai .Values.global.ai.enabled }}
     {{- $aiEnabled = true }}
-    {{- $openaiApiKey = .Values.global.ai.openaiApiKey | default "" }}
   {{- else if and .Values.app.ai .Values.app.ai.enabled }}
     {{- $aiEnabled = true }}
-    {{- $openaiApiKey = .Values.app.ai.openaiApiKey | default "" }}
   {{- end }}
   {{- if $aiEnabled }}
   NEXT_PUBLIC_AI_ENABLED: "1"
-  OPENAI_API_KEY: {{ $openaiApiKey | quote }}
   {{- end }}
+  # Kafka/Logging configuration
   {{- if .Values.app.logging }}
   {{- if .Values.app.logging.enabled }}
   KAFKA_ENABLED: "1"

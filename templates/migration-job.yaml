@@ -1,4 +1,8 @@
-{{- if .Values.global.migrations.enabled -}}
+{{/*
+Migration Job for Self-Hosted Supabase
+Uses psql to apply migrations directly to the self-hosted Postgres database
+*/}}
+{{- if .Values.supabase.enabled -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -116,6 +120,241 @@ spec:
                   # Supabase chart creates secret named: <release>-supabase-db
                   name: {{ .Release.Name }}-supabase-db
                   key: password
+          volumeMounts:
+            - name: assets
+              mountPath: /assets
+      volumes:
+        - name: assets
+          emptyDir: {}
+{{- end }}
+---
+{{/*
+Migration Job for Managed (External) Supabase
+Uses Supabase CLI to push schema and configuration to a managed Supabase project
+Requires either:
+  - global.supabase.accessToken to be set directly, OR
+  - global.secrets.secretRef pointing to a secret containing SUPABASE_ACCESS_TOKEN
+*/}}
+{{- $hasAccessToken := false }}
+{{- $useSecretRef := false }}
+{{- if and .Values.global .Values.global.secrets .Values.global.secrets.secretRef }}
+  {{- $useSecretRef = true }}
+  {{- $hasAccessToken = true }}
+{{- else if and .Values.global .Values.global.supabase .Values.global.supabase.accessToken }}
+  {{- $hasAccessToken = true }}
+{{- end }}
+{{- if and (not .Values.supabase.enabled) $hasAccessToken -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-managed-supabase-setup-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-managed-supabase-setup
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: managed-supabase-setup
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}-managed-supabase-setup
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: {{ .Release.Name }}-regcred
+      initContainers:
+        - name: extract-assets
+          # Use the configured migration image or fallback to app image
+          image: "{{ .Values.rulebricks.app.image.repository }}:{{ .Values.rulebricks.app.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Extracting Supabase assets..."
+              # Copy the assets from the image to the shared volume
+              # Path based on CLI logic: /opt/rulebricks/assets/supabase
+              if [ -d "/opt/rulebricks/assets/supabase" ]; then
+                cp -r /opt/rulebricks/assets/supabase/* /assets/
+                echo "Assets extracted successfully."
+              else
+                echo "Error: /opt/rulebricks/assets/supabase not found in image."
+                exit 1
+              fi
+          volumeMounts:
+            - name: assets
+              mountPath: /assets
+      containers:
+        - name: supabase-setup
+          # Use Node.js Alpine and install Supabase CLI at runtime
+          image: node:20-alpine
+          imagePullPolicy: IfNotPresent
+          workingDir: /assets
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              
+              echo "=== Managed Supabase Setup ==="
+              echo "Installing Supabase CLI..."
+              npm install -g supabase --unsafe-perm
+              
+              # Derive PROJECT_REF from URL if not explicitly provided
+              PROJECT_REF="${SUPABASE_PROJECT_REF}"
+              if [ -z "$PROJECT_REF" ] && [ -n "$SUPABASE_URL" ]; then
+                PROJECT_REF=$(echo "$SUPABASE_URL" | sed -n 's|https://\([^.]*\)\.supabase\.co.*|\1|p')
+                echo "Derived project ref from URL: $PROJECT_REF"
+              fi
+              
+              if [ -z "$PROJECT_REF" ]; then
+                echo "Error: Could not determine project reference."
+                echo "Please set global.supabase.projectRef or provide a valid global.supabase.url"
+                exit 1
+              fi
+              
+              # Authenticate with Supabase CLI
+              echo "Authenticating with Supabase..."
+              supabase login --token "$SUPABASE_ACCESS_TOKEN"
+              
+              # Initialize supabase project structure if needed
+              if [ ! -f "config.toml" ]; then
+                echo "Initializing Supabase project structure..."
+                # Create config.toml from template with variable replacements
+                TEMPLATE_FILE=""
+                if [ -f "config.example.toml" ]; then
+                  TEMPLATE_FILE="config.example.toml"
+                elif [ -f "config/config.example.toml" ]; then
+                  TEMPLATE_FILE="config/config.example.toml"
+                fi
+                
+                if [ -n "$TEMPLATE_FILE" ]; then
+                  echo "Creating config.toml from template..."
+                  cp "$TEMPLATE_FILE" config.toml
+                  
+                  # Replace URL placeholder
+                  sed -i "s|env(FULL_URL)|https://${SITE_DOMAIN}|g" config.toml
+                  
+                  # Replace email subject placeholders
+                  sed -i "s|env(EMAIL_SUBJECTS_INVITE)|${EMAIL_SUBJECTS_INVITE}|g" config.toml
+                  sed -i "s|env(EMAIL_SUBJECTS_CONFIRMATION)|${EMAIL_SUBJECTS_CONFIRMATION}|g" config.toml
+                  sed -i "s|env(EMAIL_SUBJECTS_RECOVERY)|${EMAIL_SUBJECTS_RECOVERY}|g" config.toml
+                  sed -i "s|env(EMAIL_SUBJECTS_EMAIL_CHANGE)|${EMAIL_SUBJECTS_EMAIL_CHANGE}|g" config.toml
+                  
+                  # Replace email template URL placeholders
+                  sed -i "s|env(EMAIL_TEMPLATES_INVITE)|${EMAIL_TEMPLATES_INVITE}|g" config.toml
+                  sed -i "s|env(EMAIL_TEMPLATES_CONFIRMATION)|${EMAIL_TEMPLATES_CONFIRMATION}|g" config.toml
+                  sed -i "s|env(EMAIL_TEMPLATES_RECOVERY)|${EMAIL_TEMPLATES_RECOVERY}|g" config.toml
+                  sed -i "s|env(EMAIL_TEMPLATES_EMAIL_CHANGE)|${EMAIL_TEMPLATES_EMAIL_CHANGE}|g" config.toml
+                  
+                  # Replace SMTP configuration placeholders
+                  sed -i "s|env(SMTP_HOST)|${SMTP_HOST}|g" config.toml
+                  sed -i "s|env(SMTP_PORT)|${SMTP_PORT}|g" config.toml
+                  sed -i "s|env(SMTP_USER)|${SMTP_USER}|g" config.toml
+                  sed -i "s|env(SMTP_PASS)|${SMTP_PASS}|g" config.toml
+                  sed -i "s|env(SMTP_FROM)|${SMTP_FROM}|g" config.toml
+                  sed -i "s|env(SMTP_FROM_NAME)|${SMTP_FROM_NAME}|g" config.toml
+                  
+                  echo "Config.toml created with all replacements applied."
+                fi
+              fi
+              
+              # Link to the existing Supabase project
+              echo "Linking to Supabase project: $PROJECT_REF"
+              supabase link --project-ref "$PROJECT_REF"
+              
+              # Push configuration if config.toml exists
+              if [ -f "config.toml" ]; then
+                echo "Pushing configuration to Supabase..."
+                echo "Y" | supabase config push --project-ref "$PROJECT_REF" || {
+                  echo "Warning: Config push failed (non-fatal)"
+                }
+              fi
+              
+              # Push database schema
+              echo "Pushing database schema..."
+              echo "Y" | supabase db push --include-all
+              
+              # Enable SSL enforcement (optional, non-fatal)
+              echo "Enabling SSL enforcement..."
+              supabase ssl-enforcement update \
+                --enable-db-ssl-enforcement \
+                --project-ref "$PROJECT_REF" \
+                --experimental || {
+                  echo "Warning: SSL enforcement update failed (non-fatal)"
+                }
+              
+              echo "=== Managed Supabase Setup Complete ==="
+          env:
+            - name: SUPABASE_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  {{- if and .Values.global .Values.global.secrets .Values.global.secrets.secretRef }}
+                  name: {{ .Values.global.secrets.secretRef }}
+                  key: {{ .Values.global.secrets.secretRefKeys.supabaseAccessToken | default "SUPABASE_ACCESS_TOKEN" }}
+                  {{- else }}
+                  # Use the rulebricks app secret (created by rulebricks subchart)
+                  name: {{ .Release.Name }}-app-secrets
+                  key: SUPABASE_ACCESS_TOKEN
+                  {{- end }}
+            - name: SUPABASE_PROJECT_REF
+              value: {{ .Values.global.supabase.projectRef | quote }}
+            - name: SUPABASE_URL
+              value: {{ .Values.global.supabase.url | quote }}
+            - name: SITE_DOMAIN
+              value: {{ .Values.global.domain | quote }}
+            # Email subject configuration
+            - name: EMAIL_SUBJECTS_INVITE
+              value: {{ .Values.global.supabase.emails.subjects.invite | quote }}
+            - name: EMAIL_SUBJECTS_CONFIRMATION
+              value: {{ .Values.global.supabase.emails.subjects.confirmation | quote }}
+            - name: EMAIL_SUBJECTS_RECOVERY
+              value: {{ .Values.global.supabase.emails.subjects.recovery | quote }}
+            - name: EMAIL_SUBJECTS_EMAIL_CHANGE
+              value: {{ .Values.global.supabase.emails.subjects.emailChange | quote }}
+            # Email template URL configuration
+            - name: EMAIL_TEMPLATES_INVITE
+              value: {{ .Values.global.supabase.emails.templates.invite | quote }}
+            - name: EMAIL_TEMPLATES_CONFIRMATION
+              value: {{ .Values.global.supabase.emails.templates.confirmation | quote }}
+            - name: EMAIL_TEMPLATES_RECOVERY
+              value: {{ .Values.global.supabase.emails.templates.recovery | quote }}
+            - name: EMAIL_TEMPLATES_EMAIL_CHANGE
+              value: {{ .Values.global.supabase.emails.templates.emailChange | quote }}
+            # SMTP configuration (non-sensitive values)
+            - name: SMTP_HOST
+              value: {{ .Values.global.smtp.host | quote }}
+            - name: SMTP_PORT
+              value: {{ .Values.global.smtp.port | quote }}
+            - name: SMTP_FROM
+              value: {{ .Values.global.smtp.from | quote }}
+            - name: SMTP_FROM_NAME
+              value: {{ .Values.global.smtp.fromName | quote }}
+            # SMTP credentials (sensitive - from secret)
+            - name: SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  {{- if and .Values.global .Values.global.secrets .Values.global.secrets.secretRef }}
+                  name: {{ .Values.global.secrets.secretRef }}
+                  key: {{ .Values.global.secrets.secretRefKeys.smtpUser | default "SMTP_USER" }}
+                  {{- else }}
+                  name: {{ .Release.Name }}-app-secrets
+                  key: SMTP_USER
+                  {{- end }}
+            - name: SMTP_PASS
+              valueFrom:
+                secretKeyRef:
+                  {{- if and .Values.global .Values.global.secrets .Values.global.secrets.secretRef }}
+                  name: {{ .Values.global.secrets.secretRef }}
+                  key: {{ .Values.global.secrets.secretRefKeys.smtpPass | default "SMTP_PASS" }}
+                  {{- else }}
+                  name: {{ .Release.Name }}-app-secrets
+                  key: SMTP_PASS
+                  {{- end }}
           volumeMounts:
             - name: assets
               mountPath: /assets

@@ -161,10 +161,44 @@ App ConfigMap name
 {{- end }}
 
 {{/*
-App Secret name
+App Secret name (internal chart secret)
 */}}
 {{- define "rulebricks-chart.app.secret" -}}
 {{- printf "%s-app-secrets" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+App Secret name resolver
+Returns the external secretRef if provided, otherwise returns the internal secret name.
+This allows enterprise users to provide their own pre-existing secret.
+*/}}
+{{- define "rulebricks-chart.app.secretName" -}}
+{{- if and .Values.global .Values.global.secrets .Values.global.secrets.secretRef }}
+  {{- .Values.global.secrets.secretRef }}
+{{- else }}
+  {{- include "rulebricks-chart.app.secret" . }}
+{{- end }}
+{{- end }}
+
+{{/*
+Get secret key name for a given field
+When using external secret, uses the configured key mapping; otherwise uses default key names.
+Usage: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "licenseKey" "default" "LICENSE_KEY") }}
+*/}}
+{{- define "rulebricks-chart.app.secretKey" -}}
+{{- $root := .root }}
+{{- $field := .field }}
+{{- $default := .default }}
+{{- if and $root.Values.global $root.Values.global.secrets $root.Values.global.secrets.secretRef $root.Values.global.secrets.secretRefKeys }}
+  {{- $key := index $root.Values.global.secrets.secretRefKeys $field }}
+  {{- if $key }}
+    {{- $key }}
+  {{- else }}
+    {{- $default }}
+  {{- end }}
+{{- else }}
+  {{- $default }}
+{{- end }}
 {{- end }}
 
 {{/*
