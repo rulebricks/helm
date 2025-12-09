@@ -1,28 +1,12 @@
-```
-
-
-           ⟋ ‾‾‾‾⟋|
-           ██████  |
-           ██████  |
-           ██████ ⟋ ‾‾‾⟋|
-         ⟋     ⟋██████  |
-        ██████   ██████  |
-        ██████   ██████⟋
-        ██████⟋
-
-            [Charts]
-
-```
+![Rulebricks Cloud Banner](https://d1zic6dm9txw4h.cloudfront.net/rulebricks-docs-assets/static/images/private-deployment/rb-cloud-banner.png)
 
 <div align="start">
   <p>
     <a href="https://rulebricks.com">Website</a> •
-    <a href="https://rulebricks.com/docs">Documentation</a> •
+    <a href="https://rulebricks.com/docs/private-deployment/quick-start">Full Documentation</a> •
     <a href="mailto:support@rulebricks.com">Support</a>
   </p>
 </div>
-
----
 
 Resources to deploy custom configurations of Rulebricks and its dependencies via Helm.
 

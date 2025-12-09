@@ -57,7 +57,6 @@ hps:
     repository: index.docker.io/rulebricks/hps
     pullPolicy: Always
     tag: "latest"
-    workerTag: "worker-latest"
   replicas: 1
   resources:
     requests:

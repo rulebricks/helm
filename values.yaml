@@ -102,7 +102,29 @@ rulebricks:
       kafkaBrokers: ""
       kafkaTopic: "logs"
       # Label to display in App UI – does not change the logging destination
+      # See Vector config below to configure log forwarding
       loggingDestination: "Console (stdout)"
+
+  # HPS (High Performance Server)
+  # HPS intercepts requests on solution endpoints via Traefik and processes them scalably
+  hps:
+    enabled: true
+    image:
+      repository: index.docker.io/rulebricks/hps
+      tag: "1.2.8" # also controls the worker image tag
+      pullPolicy: IfNotPresent
+    replicas: 2
+    workers:
+      enabled: true
+      replicas: 4
+      keda:
+        enabled: true
+        minReplicaCount: 4
+        maxReplicaCount: 8
+        pollingInterval: 10
+        cooldownPeriod: 300
+        lagThreshold: 8
+        cpuThreshold: 25
 
   ingress:
     enabled: true
@@ -125,23 +147,6 @@ rulebricks:
       enabled: true
       size: "4Gi"
       storageClass: gp3
-
-  # HPS (High Performance Server)
-  # HPS intercepts requests on solution endpoints via Traefik and processes them scalably
-  hps:
-    enabled: true
-    replicas: 2
-    workers:
-      enabled: true
-      replicas: 4
-      keda:
-        enabled: true
-        minReplicaCount: 4
-        maxReplicaCount: 8
-        pollingInterval: 10
-        cooldownPeriod: 300
-        lagThreshold: 8
-        cpuThreshold: 25
 
 # Message Queue (Kafka)
 kafka:

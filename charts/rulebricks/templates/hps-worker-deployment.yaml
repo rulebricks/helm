@@ -102,7 +102,7 @@ spec:
       {{- end }}
       containers:
         - name: hps-worker
-          image: {{ .Values.hps.image.repository }}:{{ .Values.hps.image.workerTag | default "worker-latest" }}
+          image: {{ .Values.hps.image.repository }}:worker-{{ .Values.hps.image.tag | default "latest" }}
           imagePullPolicy: {{ .Values.hps.image.pullPolicy }}
           resources:
             requests:
