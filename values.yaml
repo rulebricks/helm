@@ -255,9 +255,7 @@ cert-manager:
 # =============================================================================
 # DECISION LOGS (Vector)
 # Aggregates and forwards rule execution logs to one or more configurable sinks (console, S3, etc.)
-# Note: The bootstrap_servers will need to match your release name.
-# If your release is named "rulebricks", use "rulebricks-kafka:9092"
-# If using a different release name, update accordingly.
+# The Kafka broker address is automatically configured via the vector-env-configmap.yaml template.
 # =============================================================================
 vector:
   enabled: true
@@ -277,15 +275,21 @@ vector:
         port: 8686
         protocol: TCP
         targetPort: 8686
-  # IMPORTANT: Update bootstrap_servers to match your helm release name
-  # Format: <release-name>-kafka.<namespace>.svc.cluster.local:9092
-  # For local cluster DNS, short name also works: <release-name>-kafka:9092
+  # Load KAFKA_BOOTSTRAP_SERVERS from the templated ConfigMap (see templates/vector-env-configmap.yaml)
+  # Automatically constructs the correct internal Kafka service name based on your Helm release name.
+  env:
+    - name: KAFKA_BOOTSTRAP_SERVERS
+      valueFrom:
+        configMapKeyRef:
+          name: vector-kafka-env
+          key: KAFKA_BOOTSTRAP_SERVERS
   customConfig:
     sources:
       kafka:
         type: kafka
-        # This will be <release-name>-kafka:9092 - adjust if using different release name
-        bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-rulebricks-standalone-kafka:9092}"
+        # KAFKA_BOOTSTRAP_SERVERS is set automatically via env from the vector-env ConfigMap
+        # Fallback value is only used if the env var is somehow not set
+        bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-rulebricks-kafka:9092}"
         topics:
           - logs
         group_id: vector-consumers

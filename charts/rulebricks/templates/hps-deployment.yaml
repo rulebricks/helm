@@ -97,6 +97,19 @@ spec:
                   - kafka
               topologyKey: kubernetes.io/hostname
       {{- end }}
+      initContainers:
+        - name: wait-for-kafka
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Kafka to be ready..."
+              until nc -z {{ .Release.Name }}-kafka 9092; do
+                echo "Kafka not ready, waiting..."
+                sleep 2
+              done
+              echo "Kafka is ready!"
       containers:
         - name: hps
           image: {{ .Values.hps.image.repository }}:{{ .Values.hps.image.tag | default "latest" }}

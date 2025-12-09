@@ -1,0 +1,16 @@
+{{- if .Values.vector.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-kafka-env
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  # Dynamically constructed Kafka broker address based on Helm release name
+  # This ensures Vector can always find Kafka regardless of what the release is named
+  KAFKA_BOOTSTRAP_SERVERS: "{{ .Release.Name }}-kafka.{{ .Release.Namespace }}.svc.cluster.local:9092"
+{{- end }}
+
