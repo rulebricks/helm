@@ -112,18 +112,25 @@ rulebricks:
     image:
       repository: index.docker.io/rulebricks/hps
       tag: "1.2.8" # also controls the worker image tag
-      pullPolicy: IfNotPresent
-    replicas: 2
+      pullPolicy: Always # HPS image may receive more frequent updates
+    replicas: 3 # Minimum recommended
+    resources:
+      requests:
+        cpu: "1000m"
+        memory: "1Gi"
+      limits:
+        cpu: "2000m"
+        memory: "2Gi"
     workers:
       enabled: true
       replicas: 4
       keda:
         enabled: true
         minReplicaCount: 4
-        maxReplicaCount: 8
+        maxReplicaCount: 12 # Matched to Kafka partition count
         pollingInterval: 10
         cooldownPeriod: 300
-        lagThreshold: 8
+        lagThreshold: 50 # Scale when consumer lag exceeds this threshold
         cpuThreshold: 25
 
   ingress:
@@ -162,7 +169,7 @@ kafka:
     log.retention.hours: "24"
     default.replication.factor: "1"
     offsets.topic.replication.factor: "1"
-    num.partitions: "3"
+    num.partitions: "12" # Must be >= maxReplicaCount for workers to enable parallel consumption
   controller:
     replicaCount: 1
     resources:
