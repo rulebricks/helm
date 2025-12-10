@@ -316,7 +316,7 @@ chart will try to automate all configuration and migration work for you.
 ---
 
 <details>
-<summary><strong>Troubleshooting</strong></summary>
+<summary><strong>Deployment Troubleshooting</strong></summary>
 
 ### Retry Installation
 
@@ -354,3 +354,9 @@ kubectl logs job/rulebricks-db-migrate-1 -n rulebricks
 ```
 
 </details>
+
+---
+
+## Benchmarking
+
+Check out our [benchmarking toolkit](./benchmarks/README.md) to test application performance under load. It gives you a simple, but out-of-the-box way to evaluate the performance of your Rulebricks deployment and make informed decisions around configuration values.

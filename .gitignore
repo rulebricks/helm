@@ -3,3 +3,7 @@ charts/*.tgz
 
 # Development values file
 dev.values.yaml
+
+# Benchmarking reports
+benchmarks/*.html
+benchmarks/*.json
