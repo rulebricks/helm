@@ -1,0 +1,338 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Rulebricks Chart Values",
+  "description": "Configuration values for the Rulebricks umbrella chart.",
+  "type": "object",
+  "required": ["global"],
+  "properties": {
+    "global": {
+      "type": "object",
+      "required": ["domain", "email"],
+      "properties": {
+        "domain": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Base domain for the deployment (e.g., rb.example.com)"
+        },
+        "email": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Admin email (required for TLS certificates)"
+        },
+        "licenseKey": {
+          "type": "string",
+          "description": "Rulebricks license key"
+        },
+        "tlsEnabled": {
+          "type": "boolean",
+          "description": "Enable TLS/HTTPS"
+        },
+        "externalDnsEnabled": {
+          "type": "boolean",
+          "description": "Enable external-dns integration for automatic DNS record management"
+        },
+        "smtp": {
+          "type": "object",
+          "description": "SMTP Configuration",
+          "properties": {
+            "host": { "type": "string" },
+            "port": { "type": "integer" },
+            "user": { "type": "string" },
+            "pass": { "type": "string" },
+            "from": { "type": "string" },
+            "fromName": { "type": "string" }
+          }
+        },
+        "supabase": {
+          "type": "object",
+          "description": "Auth/Database Configuration",
+          "properties": {
+            "anonKey": { "type": "string" },
+            "serviceKey": { "type": "string" },
+            "url": { "type": "string" },
+            "projectRef": { "type": "string" },
+            "accessToken": { "type": "string" },
+            "jwtSecret": { "type": "string" },
+            "emails": {
+              "type": "object",
+              "properties": {
+                "subjects": { "type": "object" },
+                "templates": { "type": "object" }
+              }
+            }
+          }
+        },
+        "ai": {
+          "type": "object",
+          "description": "AI Features Configuration",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "openaiApiKey": { "type": "string" }
+          }
+        },
+        "secrets": {
+          "type": "object",
+          "description": "Secrets Configuration",
+          "properties": {
+            "secretRef": { "type": "string" },
+            "secretRefKeys": { "type": "object" }
+          }
+        }
+      }
+    },
+    "rulebricks": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "object",
+          "properties": {
+            "logging": {
+              "type": "object",
+              "properties": {
+                "kafkaBrokers": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "supabase": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "kafka": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "external-dns": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "title": "Managed Supabase Validation",
+      "description": "If Supabase subchart is disabled (managed mode), URL and Access Token are required and must not be empty.",
+      "if": {
+        "properties": {
+          "supabase": {
+            "type": "object",
+            "properties": {
+              "enabled": { "const": false }
+            },
+            "required": ["enabled"]
+          }
+        },
+        "required": ["supabase"]
+      },
+      "then": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "supabase": {
+                "type": "object",
+                "required": ["url", "accessToken"],
+                "properties": {
+                  "url": { "type": "string", "minLength": 1 },
+                  "accessToken": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Self-hosted Supabase Validation",
+      "description": "If Supabase subchart is enabled (self-hosted mode), JWT Secret is required and must not be empty.",
+      "if": {
+        "properties": {
+          "supabase": {
+            "type": "object",
+            "properties": {
+              "enabled": { "const": true }
+            },
+            "required": ["enabled"]
+          }
+        },
+        "required": ["supabase"]
+      },
+      "then": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "supabase": {
+                "type": "object",
+                "required": ["jwtSecret"],
+                "properties": {
+                  "jwtSecret": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "External Kafka Validation",
+      "description": "If Kafka subchart is disabled, external brokers must be specified in rulebricks.app.logging.kafkaBrokers and must not be empty.",
+      "if": {
+        "properties": {
+          "kafka": {
+            "type": "object",
+            "properties": {
+              "enabled": { "const": false }
+            },
+            "required": ["enabled"]
+          }
+        },
+        "required": ["kafka"]
+      },
+      "then": {
+        "properties": {
+          "rulebricks": {
+            "type": "object",
+            "required": ["app"],
+            "properties": {
+              "app": {
+                "type": "object",
+                "required": ["logging"],
+                "properties": {
+                  "logging": {
+                    "type": "object",
+                    "required": ["kafkaBrokers"],
+                    "properties": {
+                      "kafkaBrokers": { "type": "string", "minLength": 1 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "AI Feature Validation",
+      "description": "If AI is enabled, OpenAI API Key is required and must not be empty.",
+      "if": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "ai": {
+                "type": "object",
+                "properties": {
+                  "enabled": { "const": true }
+                },
+                "required": ["enabled"]
+              }
+            },
+            "required": ["ai"]
+          }
+        },
+        "required": ["global"]
+      },
+      "then": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "ai": {
+                "type": "object",
+                "required": ["openaiApiKey"],
+                "properties": {
+                  "openaiApiKey": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Inline Secrets Validation",
+      "description": "If no external secretRef is provided (empty string), sensitive values must be provided inline.",
+      "if": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "secrets": {
+                "type": "object",
+                "properties": {
+                  "secretRef": { "const": "" }
+                },
+                "required": ["secretRef"]
+              }
+            },
+            "required": ["secrets"]
+          }
+        },
+        "required": ["global"]
+      },
+      "then": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "required": ["licenseKey"],
+            "properties": {
+              "licenseKey": { "type": "string", "minLength": 1 },
+              "smtp": {
+                "type": "object",
+                "required": ["user", "pass"],
+                "properties": {
+                  "user": { "type": "string", "minLength": 1 },
+                  "pass": { "type": "string", "minLength": 1 }
+                }
+              },
+              "supabase": {
+                "type": "object",
+                "required": ["anonKey", "serviceKey"],
+                "properties": {
+                  "anonKey": { "type": "string", "minLength": 1 },
+                  "serviceKey": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "External DNS Consistency",
+      "description": "If external-dns subchart is enabled, global.externalDnsEnabled must also be true.",
+      "if": {
+        "properties": {
+          "external-dns": {
+            "type": "object",
+            "properties": {
+              "enabled": { "const": true }
+            },
+            "required": ["enabled"]
+          }
+        },
+        "required": ["external-dns"]
+      },
+      "then": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "externalDnsEnabled": { "const": true }
+            },
+            "required": ["externalDnsEnabled"]
+          }
+        }
+      }
+    }
+  ]
+}
