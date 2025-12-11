@@ -83,3 +83,26 @@ data:
   NEXT_PUBLIC_LOGGING_DESTINATION: {{ .Values.app.logging.loggingDestination | default "" | quote }}
   {{- end }}
   {{- end }}
+  # Enterprise SSO Configuration
+  # Tells the frontend which provider is configured and enables SSO login flow
+  {{- if and .Values.global .Values.global.sso .Values.global.sso.enabled .Values.global.sso.provider }}
+  NEXT_PUBLIC_SSO_ENABLED: "1"
+  {{- /* Map provider to Supabase provider name */ -}}
+  {{- $provider := .Values.global.sso.provider }}
+  {{- $nativeProviders := list "azure" "google" "okta" "keycloak" }}
+  {{- $isNative := has $provider $nativeProviders }}
+  {{- /* Okta uses WorkOS, custom providers use Keycloak as OIDC handler */ -}}
+  {{- $ssoProvider := $provider }}
+  {{- if eq $provider "okta" }}
+    {{- $ssoProvider = "workos" }}
+  {{- else if not $isNative }}
+    {{- $ssoProvider = "keycloak" }}
+  {{- end }}
+  NEXT_PUBLIC_SSO_PROVIDER: {{ $ssoProvider | quote }}
+  # Raw provider name for app proxy logic (ory, azure, etc.)
+  SSO_PROVIDER: {{ $provider | quote }}
+  {{- if .Values.global.sso.url }}
+  # IdP URL for app's built-in OIDC proxy (used for custom providers)
+  SSO_PROVIDER_URL: {{ .Values.global.sso.url | quote }}
+  {{- end }}
+  {{- end }}

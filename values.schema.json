@@ -77,6 +77,20 @@
             "secretRef": { "type": "string" },
             "secretRefKeys": { "type": "object" }
           }
+        },
+        "sso": {
+          "type": "object",
+          "description": "Enterprise SSO Configuration",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "provider": { 
+              "type": "string",
+              "enum": ["azure", "google", "okta", "keycloak", "ory", "other", ""]
+            },
+            "url": { "type": "string" },
+            "clientId": { "type": "string" },
+            "clientSecret": { "type": "string" }
+          }
         }
       }
     },
@@ -330,6 +344,46 @@
               "externalDnsEnabled": { "const": true }
             },
             "required": ["externalDnsEnabled"]
+          }
+        }
+      }
+    },
+    {
+      "title": "SSO Validation",
+      "description": "If SSO is enabled, provider, clientId, and clientSecret are required.",
+      "if": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "sso": {
+                "type": "object",
+                "properties": {
+                  "enabled": { "const": true }
+                },
+                "required": ["enabled"]
+              }
+            },
+            "required": ["sso"]
+          }
+        },
+        "required": ["global"]
+      },
+      "then": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "sso": {
+                "type": "object",
+                "required": ["provider", "clientId", "clientSecret"],
+                "properties": {
+                  "provider": { "type": "string", "minLength": 1 },
+                  "clientId": { "type": "string", "minLength": 1 },
+                  "clientSecret": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
           }
         }
       }

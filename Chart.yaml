@@ -22,6 +22,9 @@ dependencies:
   - name: rulebricks
     version: 0.1.0
     repository: file://charts/rulebricks
+  - name: common
+    version: 2.31.4
+    repository: file://charts/common
   - name: kafka
     version: 32.4.4
     repository: file://charts/kafka

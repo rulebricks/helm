@@ -55,30 +55,30 @@ global:
   ai:
     enabled: false
     openaiApiKey: "" # Your OpenAI API key
-
   # =============================================================================
-  # SECRETS CONFIGURATION (Optional)
-  # Enterprise users can reference a pre-existing Kubernetes secret instead of
-  # specifying sensitive values in this file. When secretRef is set, the chart
-  # will use the external secret instead of creating its own.
+  # SSO Configuration (Optional)
+  # Enables Single Sign-On via OIDC
   #
-  # Note: This only affects the Rulebricks application secrets, not self-hosted
-  # Supabase internal secrets (JWT, DB password, dashboard) which remain as values.
+  # NATIVE PROVIDERS (azure, google, okta, keycloak):
+  #   Supabase handles authentication directly.
+  #
+  # CUSTOM PROVIDERS (ory, other):
+  #   The app includes a built-in OIDC proxy that translates paths for your IdP.
   # =============================================================================
-  secrets:
-    # Optional: reference an existing Kubernetes secret for all sensitive values
-    # When set, the chart will NOT create its own secret and will use this instead
-    # Example: "rulebricks-secrets"
-    secretRef: ""
-    # Key mappings for the external secret (customize if your secret uses different keys)
-    secretRefKeys:
-      licenseKey: "LICENSE_KEY"
-      smtpUser: "SMTP_USER"
-      smtpPass: "SMTP_PASS"
-      supabaseAnonKey: "SUPABASE_ANON_KEY"
-      supabaseServiceKey: "SUPABASE_SERVICE_KEY"
-      supabaseAccessToken: "SUPABASE_ACCESS_TOKEN"
-      openaiApiKey: "OPENAI_API_KEY"
+  sso:
+    enabled: false
+    # Provider name: azure, google, okta, keycloak (native) | ory, other (custom)
+    provider: ""
+    # Provider URL - required for all providers except Google
+    # Examples:
+    #   Azure:    https://login.microsoftonline.com/{tenant-id}
+    #   Okta:     https://your-org.okta.com
+    #   Keycloak: https://keycloak.example.com/realms/your-realm
+    #   Ory:      https://your-org.projects.oryapis.com
+    url: ""
+    # OAuth client credentials from your identity provider
+    clientId: ""
+    clientSecret: ""
 
 # =============================================================================
 # RULEBRICKS APPLICATION STACK
@@ -92,7 +92,7 @@ rulebricks:
   app:
     image:
       repository: index.docker.io/rulebricks/app
-      tag: "1.2.9" # https://hub.docker.com/repository/docker/rulebricks/app/tags
+      tag: "1.2.13" # https://hub.docker.com/repository/docker/rulebricks/app/tags
       pullPolicy: IfNotPresent
 
     logging:

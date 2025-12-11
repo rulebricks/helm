@@ -16,7 +16,7 @@ secret:
     # Default SMTP credentials using Resend service
     # Users can override these with their own SMTP server
     username: "resend"
-    password: "re_XXXXXX"  # Replace with actual password
+    password: "re_XXXXXX" # Replace with actual password
 
   db:
     username: "postgres"
@@ -41,7 +41,7 @@ db:
   persistence:
     enabled: true
     size: 10Gi
-    storageClass: ""  # Uses default storage class
+    storageClass: "" # Uses default storage class
 
   service:
     type: ClusterIP
@@ -68,12 +68,12 @@ studio:
     pullPolicy: IfNotPresent
 
   environment:
-    STUDIO_PG_META_URL: "http://{{ include \"supabase.meta.fullname\" . }}:{{ .Values.meta.service.port }}"
+    STUDIO_PG_META_URL: 'http://{{ include "supabase.meta.fullname" . }}:{{ .Values.meta.service.port }}'
     POSTGRES_PASSWORD: "{{ .Values.secret.db.password }}"
     DEFAULT_ORGANIZATION_NAME: "Default Organization"
     DEFAULT_PROJECT_NAME: "Default Project"
-    SUPABASE_URL: "http://{{ include \"supabase.kong.fullname\" . }}:{{ .Values.kong.service.port }}"
-    SUPABASE_PUBLIC_URL: ""  # Will be set based on ingress
+    SUPABASE_URL: 'http://{{ include "supabase.kong.fullname" . }}:{{ .Values.kong.service.port }}'
+    SUPABASE_PUBLIC_URL: "" # Will be set based on ingress
 
 # Auth service
 auth:
@@ -83,11 +83,11 @@ auth:
     tag: "v2.132.3"
 
   environment:
-    GOTRUE_SITE_URL: ""  # Will be set based on ingress
+    GOTRUE_SITE_URL: "" # Will be set based on ingress
     GOTRUE_URI_ALLOW_LIST: "*"
     GOTRUE_DISABLE_SIGNUP: "false"
     GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
-    GOTRUE_MAILER_AUTOCONFIRM: "true"
+    GOTRUE_MAILER_AUTOCONFIRM: "false"
     GOTRUE_SMS_AUTOCONFIRM: "true"
     GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
     GOTRUE_EXTERNAL_PHONE_ENABLED: "true"
@@ -123,7 +123,7 @@ storage:
   persistence:
     enabled: true
     size: 10Gi
-    storageClass: ""  # Uses default storage class
+    storageClass: "" # Uses default storage class
 
   resources:
     requests:
@@ -156,7 +156,7 @@ kong:
     port: 8000
 
   ingress:
-    enabled: false  # Will be configured by setup script
+    enabled: false # Will be configured by setup script
     className: "traefik"
     annotations:
       traefik.ingress.kubernetes.io/router.middlewares: "default-headers@kubernetescrd"
@@ -191,14 +191,14 @@ vector:
 
 # Functions
 functions:
-  enabled: false  # Can be enabled if Edge Functions are needed
+  enabled: false # Can be enabled if Edge Functions are needed
   image:
     repository: supabase/edge-runtime
     tag: "v1.29.1"
 
 # MinIO for S3-compatible storage
 minio:
-  enabled: false  # Storage API uses local filesystem by default
+  enabled: false # Storage API uses local filesystem by default
   image:
     repository: quay.io/minio/minio
     tag: "RELEASE.2023-12-09T18-17-51Z"

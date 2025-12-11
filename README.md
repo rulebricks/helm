@@ -58,75 +58,40 @@ After installation, Helm will display instructions for configuring DNS and enabl
 | `global.supabase.jwtSecret`          | JWT signing secret (self-hosted only)                                     |
 | `global.ai.enabled`                  | Enable AI-powered rule generation                                         |
 | `global.ai.openaiApiKey`             | OpenAI API key for AI features                                            |
+| `global.sso.enabled`                 | Enable Enterprise SSO                                                     |
+| `global.sso.provider`                | SSO provider: `azure`, `google`, `okta`, `keycloak`, `ory`, `other`       |
+| `global.sso.url`                     | Identity provider URL (required except for Google)                        |
+| `global.sso.clientId`                | OAuth client ID from your IdP                                             |
+| `global.sso.clientSecret`            | OAuth client secret from your IdP                                         |
 | `global.secrets.secretRef`           | Reference to existing K8s secret (optional)                               |
 
-### Secrets Management
+---
 
-Sensitive values are stored in Kubernetes Secrets, not ConfigMaps. You have two options:
+### Configuration Choices
 
-#### Option 1: Inline Values (Default)
+<details>
+<summary><strong>Single Sign-On via OIDC</strong></summary>
 
-`global.secrets.secretRef == ""`
-
-Provide sensitive values directly in `values.yaml` or via `--set`.
-
-```bash
-# Using --set with environment variables (recommended for CI/CD)
-helm install rulebricks ./helm \
-  --namespace rulebricks \
-  --create-namespace \
-  -f values.yaml \
-  --set global.licenseKey=$LICENSE_KEY \
-  --set global.smtp.user=$SMTP_USER \
-  --set global.smtp.pass=$SMTP_PASS \
-  --set global.supabase.serviceKey=$SUPABASE_SERVICE_KEY \
-  --set global.ai.openaiApiKey=$OPENAI_API_KEY
-```
-
-#### Option 2: External Secret (Enterprise)
-
-`global.secrets.secretRef != ""`
-
-For enterprise deployments using external secret management (Vault, AWS Secrets Manager, etc.), create a Kubernetes secret first and reference it. This is all-or-nothing– you cannot mix and match inline values and external secrets.
-
-> **Note:** Self-hosted Supabase internal secrets (JWT, DB password, dashboard) are configured via `values.yaml` and stored in separate Kubernetes secrets managed by the Supabase subchart.
-
-```bash
-# Create the secret manually or via your secret management tool
-kubectl create secret generic rulebricks-secrets \
-  --namespace rulebricks \
-  --from-literal=LICENSE_KEY="your-license-key" \
-  --from-literal=SMTP_USER="smtp-username" \
-  --from-literal=SMTP_PASS="smtp-password" \
-  --from-literal=SUPABASE_ANON_KEY="your-anon-key" \
-  --from-literal=SUPABASE_SERVICE_KEY="your-service-key" \
-  --from-literal=SUPABASE_ACCESS_TOKEN="your-access-token" \
-  --from-literal=OPENAI_API_KEY="your-openai-key"
-
-# Reference it in Helm
-helm install rulebricks ./helm \
-  --namespace rulebricks \
-  -f values.yaml \
-  --set global.secrets.secretRef=rulebricks-secrets
-```
-
-You can customize the key names in the external secret via `global.secrets.secretRefKeys`:
+Enable Single Sign-On via OIDC with your identity provider:
 
 ```yaml
 global:
-  secrets:
-    secretRef: "my-external-secret"
-    secretRefKeys:
-      licenseKey: "MY_LICENSE_KEY" # default: LICENSE_KEY
-      smtpUser: "MY_SMTP_USER" # default: SMTP_USER
-      smtpPass: "MY_SMTP_PASS" # default: SMTP_PASS
-      supabaseAnonKey: "MY_ANON_KEY" # default: SUPABASE_ANON_KEY
-      supabaseServiceKey: "MY_SVC_KEY" # default: SUPABASE_SERVICE_KEY
-      supabaseAccessToken: "MY_TOKEN" # default: SUPABASE_ACCESS_TOKEN
-      openaiApiKey: "MY_OPENAI_KEY" # default: OPENAI_API_KEY
+  sso:
+    enabled: true
+    provider: "ory" # azure, google, okta, keycloak, ory, other
+    url: "https://your-org.projects.oryapis.com"
+    clientId: "<client-id>"
+    clientSecret: "<client-secret>"
 ```
 
----
+**Native providers** (`azure`, `google`, `okta`, `keycloak`) work directly with Supabase. For managed Supabase, configure the appropriate provider in the Supabase Dashboard.
+
+**Custom providers** (`ory`, `other`) use the app's built-in OIDC proxy to translate paths. For managed Supabase, configure _Keycloak_ in the Supabase Dashboard with:
+
+- **Realm URL**: `https://<your-domain>/api/sso-proxy`
+- **Client ID/Secret**: Same as your `values.yaml`
+
+</details>
 
 <details>
 <summary><strong>Automatic DNS with External-DNS</strong></summary>
@@ -182,7 +147,7 @@ When `global.externalDnsEnabled=true`, the following records are configured:
 </details>
 
 <details>
-<summary><strong>Using Supabase Cloud - Automatic Setup</strong></summary>
+<summary><strong>Using Supabase Cloud</strong></summary>
 
 Even if you use Supabase Cloud instead of self-hosting, this chart will automatically configure your project. You will need to find and provide certain information from your newly created account/project as values.
 
@@ -291,8 +256,6 @@ To send rule execution logs to S3:
 > For GCS or Azure Blob, see the [Vector sinks documentation](https://vector.dev/docs/reference/configuration/sinks/).
 
 </details>
-
----
 
 ## Architecture
 

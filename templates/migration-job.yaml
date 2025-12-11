@@ -267,6 +267,9 @@ spec:
                 sed -i "s|env(SMTP_FROM)|${SMTP_FROM}|g" supabase/config.toml
                 sed -i "s|env(SMTP_FROM_NAME)|${SMTP_FROM_NAME}|g" supabase/config.toml
                 
+                # Replace email confirmation setting (disabled when SSO is enabled)
+                sed -i "s|env(ENABLE_CONFIRMATIONS)|${ENABLE_CONFIRMATIONS}|g" supabase/config.toml
+                
                 echo "Config.toml created with all replacements applied."
               fi
               
@@ -335,6 +338,13 @@ spec:
               value: {{ .Values.global.supabase.emails.templates.recovery | quote }}
             - name: EMAIL_TEMPLATES_EMAIL_CHANGE
               value: {{ .Values.global.supabase.emails.templates.emailChange | quote }}
+            # Email confirmations - disabled when SSO is enabled (IdP handles auth)
+            - name: ENABLE_CONFIRMATIONS
+              {{- if and .Values.global .Values.global.sso .Values.global.sso.enabled }}
+              value: "false"
+              {{- else }}
+              value: "true"
+              {{- end }}
             # SMTP configuration (non-sensitive values)
             - name: SMTP_HOST
               value: {{ .Values.global.smtp.host | quote }}

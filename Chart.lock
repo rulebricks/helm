@@ -2,6 +2,9 @@ dependencies:
 - name: rulebricks
   repository: file://charts/rulebricks
   version: 0.1.0
+- name: common
+  repository: file://charts/common
+  version: 2.31.4
 - name: kafka
   repository: file://charts/kafka
   version: 32.4.4
@@ -26,5 +29,5 @@ dependencies:
 - name: external-dns
   repository: https://kubernetes-sigs.github.io/external-dns/
   version: 1.14.5
-digest: sha256:19f1379169435c8f2b9ee80bcfbd0378eeac4220cfeaf87425215d0c357e7fd6
-generated: "2025-12-09T00:19:21.163848-08:00"
+digest: sha256:da277d52d3459ce3acd507eb0ac8b2c6d82d4e1d553461f01dcff3d69b2eac01
+generated: "2025-12-11T12:12:08.994534-08:00"
