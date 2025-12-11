@@ -92,7 +92,7 @@ rulebricks:
   app:
     image:
       repository: index.docker.io/rulebricks/app
-      tag: "1.2.13" # https://hub.docker.com/repository/docker/rulebricks/app/tags
+      tag: "1.2.15" # https://hub.docker.com/repository/docker/rulebricks/app/tags
       pullPolicy: IfNotPresent
 
     logging:

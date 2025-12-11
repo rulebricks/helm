@@ -53,8 +53,8 @@ After installation, Helm will display instructions for configuring DNS and enabl
 | `global.supabase.emails.subjects.*`  | Email subject customization (invite, confirmation, recovery, emailChange) |
 | `global.supabase.emails.templates.*` | Email template URLs (invite, confirmation, recovery, emailChange)         |
 | `global.supabase.url`                | External Supabase URL (leave empty for self-hosted)                       |
-| `global.supabase.projectRef`         | Project reference for managed Supabase (optional)                         |
-| `global.supabase.accessToken`        | Access token for Supabase CLI (managed only)                              |
+| `global.supabase.projectRef`         | Project reference (Cloud Supabase)                                        |
+| `global.supabase.accessToken`        | Access token for Supabase CLI (Cloud Supabase)                            |
 | `global.supabase.jwtSecret`          | JWT signing secret (self-hosted only)                                     |
 | `global.ai.enabled`                  | Enable AI-powered rule generation                                         |
 | `global.ai.openaiApiKey`             | OpenAI API key for AI features                                            |
@@ -84,9 +84,9 @@ global:
     clientSecret: "<client-secret>"
 ```
 
-**Native providers** (`azure`, `google`, `okta`, `keycloak`) work directly with Supabase. For managed Supabase, configure the appropriate provider in the Supabase Dashboard.
+**Native providers** (`azure`, `google`, `okta`, `keycloak`) work directly with Supabase. If using Supabase Cloud, configure the appropriate provider in the Supabase Dashboard.
 
-**Custom providers** (`ory`, `other`) use the app's built-in OIDC proxy to translate paths. For managed Supabase, configure _Keycloak_ in the Supabase Dashboard with:
+**Custom providers** (`ory`, `other`) use the app's built-in OIDC proxy to translate paths. If using Supabase Cloud, configure _Keycloak_ in the Supabase Dashboard with:
 
 - **Realm URL**: `https://<your-domain>/api/sso-proxy`
 - **Client ID/Secret**: Same as your `values.yaml`

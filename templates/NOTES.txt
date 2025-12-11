@@ -14,7 +14,11 @@ DNS records being created:
 
 Once DNS propagates and certificates are ready:
 
+  {{- if and .Values.global.sso .Values.global.sso.enabled }}
+  https://{{ .Values.global.domain }}/auth/signin
+  {{- else }}
   https://{{ .Values.global.domain }}/auth/signup
+  {{- end }}
 
 To check certificate status:
   kubectl get certificates -n {{ .Release.Namespace }}
@@ -27,7 +31,11 @@ RULEBRICKS INSTALLATION – 2/2 – COMPLETE
 
 Welcome to Rulebricks.
 
+{{- if and .Values.global.sso .Values.global.sso.enabled }}
+https://{{ .Values.global.domain }}/auth/signin
+{{- else }}
 https://{{ .Values.global.domain }}/auth/signup
+{{- end }}
 
 =============================================================================
 {{- else if .Values.global.externalDnsEnabled }}
