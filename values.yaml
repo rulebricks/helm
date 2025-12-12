@@ -77,6 +77,14 @@ global:
     #   Ory:      https://your-org.projects.oryapis.com
     url: ""
     # OAuth client credentials from your identity provider
+    # You will need to setup the OAuth client in your identity provider with:
+    #   scopes: openid, email, profile
+    #   response_type: code
+    #   grant_types: authorization_code, refresh_token
+    #   authentication_method: http body
+    #   Redirect URI's:
+    #     1. https://<your-domain>/api/sso-proxy/callback
+    #     2. <your-supabase-url>/auth/v1/callback
     clientId: ""
     clientSecret: ""
 
@@ -92,7 +100,7 @@ rulebricks:
   app:
     image:
       repository: index.docker.io/rulebricks/app
-      tag: "1.2.15" # https://hub.docker.com/repository/docker/rulebricks/app/tags
+      tag: "1.2.17" # https://hub.docker.com/repository/docker/rulebricks/app/tags
       pullPolicy: IfNotPresent
 
     logging:
