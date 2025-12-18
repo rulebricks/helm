@@ -47,6 +47,8 @@ data:
   # Redis HTTP service - using templated service name
   KV_REST_API_URL: {{ printf "http://%s.%s.svc.cluster.local" (include "rulebricks-chart.serverless-redis-http.fullname" .) .Release.Namespace | quote }}
   KV_REST_API_TOKEN: "local_redis"
+  # Raw redis URL for direct solutions
+  REDIS_URL: {{ printf "redis://%s.%s.svc.cluster.local:6379" (include "rulebricks-chart.redis.fullname" .) .Release.Namespace | quote }}
   NODE_ENV: "production"
   ENVIRONMENT: "production"
   NODE_OPTIONS: "--dns-result-order=ipv4first"
