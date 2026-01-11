@@ -100,7 +100,7 @@ rulebricks:
   app:
     image:
       repository: index.docker.io/rulebricks/app
-      tag: "1.2.38" # https://hub.docker.com/repository/docker/rulebricks/app/tags
+      tag: "1.3.6" # https://hub.docker.com/repository/docker/rulebricks/app/tags
       pullPolicy: IfNotPresent
 
     logging:
@@ -119,7 +119,7 @@ rulebricks:
     enabled: true
     image:
       repository: index.docker.io/rulebricks/hps
-      tag: "1.2.37"
+      tag: "1.3.5"
       pullPolicy: Always # HPS image may receive silent updates
     replicas: 3 # Minimum recommended
     resources:
