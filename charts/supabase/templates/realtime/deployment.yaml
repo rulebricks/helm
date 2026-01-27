@@ -118,6 +118,8 @@ spec:
                   {{- end }}
             - name: SELF_HOST_TENANT_NAME
               value: {{ include "supabase.realtime.fullname" . }}
+            - name: APP_NAME
+              value: {{ include "supabase.realtime.fullname" . }}
           {{- with .Values.realtime.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}

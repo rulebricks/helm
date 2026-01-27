@@ -452,7 +452,7 @@ realtime:
   image:
     repository: supabase/realtime
     pullPolicy: IfNotPresent
-    tag: "v2.25.50"
+    tag: "v2.73.0"
   imagePullSecrets: []
   nameOverride: ""
   fullnameOverride: ""
@@ -486,7 +486,7 @@ realtime:
     # DB_HOST: DATABASE.NAMESPACE.svc.cluster.local
     DB_USER: supabase_admin
     DB_PORT: 5432
-    DB_SSL: disable # disable, allow, prefer, require, verify-ca, verify-full
+    DB_SSL: "false" # true or false (v2.73.0+ requires boolean)
     DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
     DB_ENC_KEY: supabaserealtime
     PORT: "4000"
