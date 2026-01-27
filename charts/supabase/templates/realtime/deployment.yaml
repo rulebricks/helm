@@ -116,6 +116,8 @@ spec:
                   name: {{ include "supabase.secret.jwt" . }}
                   key: secret
                   {{- end }}
+            - name: SELF_HOST_TENANT_NAME
+              value: {{ include "supabase.realtime.fullname" . }}
           {{- with .Values.realtime.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
