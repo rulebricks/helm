@@ -100,7 +100,7 @@ rulebricks:
   app:
     image:
       repository: index.docker.io/rulebricks/app
-      tag: "1.5.8" # https://hub.docker.com/repository/docker/rulebricks/app/tags
+      tag: "1.5.9" # https://hub.docker.com/repository/docker/rulebricks/app/tags
       pullPolicy: IfNotPresent
 
     logging:
