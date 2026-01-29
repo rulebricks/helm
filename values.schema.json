@@ -127,6 +127,26 @@
       "properties": {
         "enabled": { "type": "boolean" }
       }
+    },
+    "migrations": {
+      "type": "object",
+      "description": "Configuration for database migration jobs",
+      "properties": {
+        "tolerations": {
+          "type": "array",
+          "description": "Tolerations for migration job pods",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": { "type": "string" },
+              "operator": { "type": "string", "enum": ["Exists", "Equal"] },
+              "value": { "type": "string" },
+              "effect": { "type": "string", "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"] },
+              "tolerationSeconds": { "type": "integer" }
+            }
+          }
+        }
+      }
     }
   },
   "allOf": [

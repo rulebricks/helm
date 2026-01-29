@@ -411,6 +411,17 @@ storageClass:
   allowVolumeExpansion: true
 
 # =============================================================================
+# MIGRATION JOB SETTINGS
+# Configuration for database migration jobs (self-hosted and managed)
+# =============================================================================
+migrations:
+  tolerations:
+    - key: kubernetes.io/arch
+      operator: Equal
+      value: arm64
+      effect: NoSchedule
+
+# =============================================================================
 # AUTOMATIC DNS MANAGEMENT (External-DNS)
 # Deploys external-dns to automatically create DNS records for your domain.
 # This enables single-phase installation with TLS from the start.
