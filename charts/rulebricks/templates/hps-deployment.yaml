@@ -41,14 +41,25 @@ spec:
     spec:
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}
-      {{- with .Values.hps.nodeSelector }}
+      {{- /* Node selector: component-level overrides global */ -}}
+      {{- $nodeSelector := .Values.hps.nodeSelector | default dict }}
+      {{- if and (not $nodeSelector) .Values.global .Values.global.scheduling }}
+        {{- $nodeSelector = .Values.global.scheduling.nodeSelector | default dict }}
+      {{- end }}
+      {{- with $nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.hps.tolerations }}
+      {{- /* Tolerations: component-level overrides global */ -}}
+      {{- $tolerations := .Values.hps.tolerations | default list }}
+      {{- if and (not $tolerations) .Values.global .Values.global.scheduling }}
+        {{- $tolerations = .Values.global.scheduling.tolerations | default list }}
+      {{- end }}
+      {{- with $tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /* Affinity: component-level takes precedence, otherwise use default anti-affinity */ -}}
       {{- with .Values.hps.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
@@ -146,9 +157,17 @@ spec:
                 name: {{ include "rulebricks-chart.app.configmap" . }}
             - secretRef:
                 name: {{ include "rulebricks-chart.app.secretName" . | trim }}
+            {{- /* Extra envFrom references */ -}}
+            {{- with .Values.hps.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: HPS_REPLICAS
               value: "{{ .Values.hps.replicas }}"
             - name: MAX_WORKERS
               value: "{{ .Values.hps.workers.keda.maxReplicaCount | default 8 }}"
+            {{- /* Extra environment variables */ -}}
+            {{- with .Values.hps.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
 {{- end }}

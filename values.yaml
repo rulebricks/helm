@@ -15,6 +15,45 @@ global:
   # Enable external-dns integration for automatic DNS record management
   # Works with either: the external-dns subchart below, OR an existing cluster-wide external-dns
   externalDnsEnabled: false
+  # =============================================================================
+  # Global Labels and Annotations
+  # Applied to ALL resources rendered by this chart (useful for compliance)
+  # =============================================================================
+  labels: {}
+  # Example:
+  #   team: rulebricks
+  #   environment: production
+  
+  annotations: {}
+  # Example:
+  #   app.kubernetes.io/managed-by: helm
+  
+  # Labels applied only to pod templates (not metadata)
+  podLabels: {}
+  
+  # Annotations applied only to pod templates
+  podAnnotations: {}
+  # =============================================================================
+  # Global Scheduling Defaults
+  # Applied to all components unless overridden at the component level.
+  # Useful for clusters with specialized node pools (e.g., ARM64/Graviton).
+  # =============================================================================
+  scheduling:
+    # Node selector applied to all workloads
+    nodeSelector: {}
+    # Example for ARM64/Graviton nodes:
+    #   kubernetes.io/arch: arm64
+    
+    # Tolerations applied to all workloads
+    tolerations: []
+    # Example for dedicated node pools:
+    #   - key: "Dedicated"
+    #     operator: "Equal"
+    #     value: "rulebricks"
+    #     effect: "NoSchedule"
+    
+    # Affinity rules applied to all workloads
+    affinity: {}
   # SMTP Configuration (Vital for instance access and admin)
   smtp:
     host: "smtp.mailtrap.io"
@@ -55,6 +94,23 @@ global:
   ai:
     enabled: false
     openaiApiKey: "" # Your OpenAI API key
+  # =============================================================================
+  # Secret Reference (for external secret management)
+  # Use this to reference a pre-existing secret instead of inline values
+  # Works with External Secrets Operator, sealed-secrets, or manually created secrets
+  # =============================================================================
+  secrets:
+    # Name of an existing secret to use (created by ESO, sealed-secrets, or manually)
+    # When set, the chart will reference this secret instead of creating one
+    secretRef: ""
+    # Key mappings within the referenced secret
+    secretRefKeys:
+      licenseKey: "LICENSE_KEY"
+      smtpUser: "SMTP_USER"
+      smtpPass: "SMTP_PASS"
+      supabaseServiceKey: "SUPABASE_SERVICE_KEY"
+      openaiApiKey: "OPENAI_API_KEY"
+      supabaseAccessToken: "SUPABASE_ACCESS_TOKEN"
   # =============================================================================
   # SSO Configuration (Optional)
   # Enables Single Sign-On via OIDC
@@ -344,6 +400,20 @@ vector:
 # =============================================================================
 supabase:
   enabled: true
+  # Database options:
+  #   1. Self-hosted (default): Set db.enabled: true (below)
+  #   2. External PostgreSQL: Set db.enabled: false and configure auth/rest/etc environment
+  #
+  # For external PostgreSQL, each service needs DB_HOST configured in its environment:
+  #   auth:
+  #     environment:
+  #       DB_HOST: "your-external-postgres.example.com"
+  #   rest:
+  #     environment:
+  #       DB_HOST: "your-external-postgres.example.com"
+  #   ... (same for realtime, meta, storage, analytics, functions)
+  #
+  # Credentials should be set in secret.db (username, password, database)
   secret:
     # SMTP credentials are sourced from global.smtp.user and global.smtp.pass
     # JWT keys are sourced from global.supabase.* (anonKey, serviceKey, jwtSecret)
@@ -397,6 +467,37 @@ kube-prometheus-stack:
       remoteWrite: []
 
 # =============================================================================
+# EXTERNAL SECRETS OPERATOR INTEGRATION
+# Configure to use ESO for fetching secrets from external stores
+# (AWS Secrets Manager, HashiCorp Vault, Azure Key Vault, etc.)
+# =============================================================================
+externalSecrets:
+  # Enable External Secrets Operator integration
+  enabled: false
+  # SecretStore or ClusterSecretStore reference
+  secretStoreRef:
+    name: ""
+    kind: "ClusterSecretStore"  # or "SecretStore"
+  # Refresh interval for syncing secrets
+  refreshInterval: "1h"
+  # Remote key mappings - map local secret keys to remote paths
+  # Example for AWS Secrets Manager:
+  #   remoteRefs:
+  #     licenseKey: "rulebricks/prod/license-key"
+  #     jwtSecret: "rulebricks/prod/jwt-secret"
+  #     dbPassword: "rulebricks/prod/db-password"
+  remoteRefs:
+    licenseKey: ""
+    jwtSecret: ""
+    dbPassword: ""
+    smtpUser: ""
+    smtpPass: ""
+    supabaseAnonKey: ""
+    supabaseServiceKey: ""
+  # Target secret name (defaults to <release>-external-secrets)
+  targetSecretName: ""
+
+# =============================================================================
 # STORAGE CLASS (AWS EBS gp3)
 # Creates a gp3 StorageClass if it doesn't exist
 # =============================================================================
@@ -415,11 +516,36 @@ storageClass:
 # Configuration for database migration jobs (self-hosted and managed)
 # =============================================================================
 migrations:
+  # Strategy for migration job execution:
+  #   - "hook": Runs as Helm post-install/post-upgrade hook (default)
+  #   - "deployment": Creates job as regular resource (supports post-rendering)
+  #   - "manual": Renders template without hooks (apply separately)
+  strategy: "hook"
+  # Time to keep completed jobs (seconds)
+  ttlSecondsAfterFinished: 600
+  # Number of retries before marking job as failed
+  backoffLimit: 3
+  # Pod restart policy
+  restartPolicy: OnFailure
+  # Node selector for migration pods (inherits from global.scheduling if not set)
+  nodeSelector: {}
+  # Tolerations for migration pods (defaults to ARM64 if not set)
   tolerations:
     - key: kubernetes.io/arch
       operator: Equal
       value: arm64
       effect: NoSchedule
+  # Additional annotations for the job
+  annotations: {}
+  # External database configuration (used when supabase.db.enabled: false)
+  externalDb:
+    # Host of the external PostgreSQL server
+    host: ""
+    # Port (default: 5432)
+    port: "5432"
+    # Reference to existing secret containing password
+    existingSecret: ""
+    existingSecretKey: "password"
 
 # =============================================================================
 # AUTOMATIC DNS MANAGEMENT (External-DNS)

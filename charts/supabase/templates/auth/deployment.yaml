@@ -20,6 +20,9 @@ spec:
       {{- end }}
       labels:
         {{- include "supabase.auth.selectorLabels" . | nindent 8 }}
+        {{- with .Values.auth.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.auth.imagePullSecrets }}
       imagePullSecrets:
@@ -66,21 +69,45 @@ spec:
           image: "{{ .Values.auth.image.repository }}:{{ .Values.auth.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.auth.image.pullPolicy }}
           env:
+            {{- /* 
+              Environment variable rendering order:
+              1. Values from auth.environment (skip computed keys to avoid duplicates)
+              2. Computed URL values (with explicit override support)
+              3. Secrets and other required values
+              
+              Keys that are computed: GOTRUE_SITE_URL, API_EXTERNAL_URL, GOTRUE_URI_ALLOW_LIST
+              These can be overridden via auth.siteUrl, auth.externalUrl, auth.additionalRedirectUrls
+            */ -}}
+            {{- $computedKeys := list "GOTRUE_SITE_URL" "API_EXTERNAL_URL" "GOTRUE_URI_ALLOW_LIST" "GOTRUE_SMTP_HOST" "GOTRUE_SMTP_PORT" "GOTRUE_SMTP_ADMIN_EMAIL" "GOTRUE_SMTP_SENDER_NAME" -}}
             {{- range $key, $value := .Values.auth.environment }}
+            {{- if not (has $key $computedKeys) }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
-            {{- /* Override settings from global values */ -}}
+            {{- end }}
+            {{- /* URL configuration - explicit values take precedence over computed */ -}}
             {{- if .Values.global }}
             {{- if .Values.global.domain }}
             {{- $domain := .Values.global.domain }}
             {{- $protocol := ternary "https" "http" (eq (.Values.global.tlsEnabled | toString) "true") }}
+            {{- /* GOTRUE_SITE_URL - check auth.environment first, then auth.siteUrl, then compute */ -}}
+            {{- $siteUrl := index $.Values.auth.environment "GOTRUE_SITE_URL" | default (.Values.auth.siteUrl | default (printf "%s://%s" $protocol $domain)) }}
             - name: GOTRUE_SITE_URL
-              value: {{ printf "%s://%s" $protocol $domain | quote }}
+              value: {{ $siteUrl | quote }}
+            {{- /* API_EXTERNAL_URL - check auth.environment first, then auth.externalUrl, then compute */ -}}
+            {{- $externalUrl := index $.Values.auth.environment "API_EXTERNAL_URL" | default (.Values.auth.externalUrl | default (printf "%s://supabase.%s" $protocol $domain)) }}
             - name: API_EXTERNAL_URL
-              value: {{ printf "%s://supabase.%s" $protocol $domain | quote }}
+              value: {{ $externalUrl | quote }}
+            {{- /* GOTRUE_URI_ALLOW_LIST - compute base list then add any additional URLs */ -}}
+            {{- $baseAllowList := printf "%s://%s,%s://%s/*,%s://%s/auth/changepass,%s://%s/settings/password,%s://%s/dashboard" $protocol $domain $protocol $domain $protocol $domain $protocol $domain $protocol $domain }}
+            {{- $allowList := $baseAllowList }}
+            {{- if .Values.auth.additionalRedirectUrls }}
+            {{- $allowList = printf "%s,%s" $baseAllowList (join "," .Values.auth.additionalRedirectUrls) }}
+            {{- end }}
+            {{- /* Allow complete override via auth.environment */ -}}
+            {{- $allowList = index $.Values.auth.environment "GOTRUE_URI_ALLOW_LIST" | default $allowList }}
             - name: GOTRUE_URI_ALLOW_LIST
-              value: {{ printf "%s://%s,%s://%s/*,%s://%s/auth/changepass,%s://%s/settings/password,%s://%s/dashboard" $protocol $domain $protocol $domain $protocol $domain $protocol $domain $protocol $domain | quote }}
+              value: {{ $allowList | quote }}
             {{- end }}
             {{- if .Values.global.smtp }}
             - name: GOTRUE_SMTP_HOST

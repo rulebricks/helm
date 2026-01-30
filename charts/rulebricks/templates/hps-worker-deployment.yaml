@@ -39,14 +39,25 @@ spec:
     spec:
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}
-      {{- with .Values.hps.workers.nodeSelector }}
+      {{- /* Node selector: component-level overrides global */ -}}
+      {{- $workerNodeSelector := .Values.hps.workers.nodeSelector | default dict }}
+      {{- if and (not $workerNodeSelector) .Values.global .Values.global.scheduling }}
+        {{- $workerNodeSelector = .Values.global.scheduling.nodeSelector | default dict }}
+      {{- end }}
+      {{- with $workerNodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.hps.workers.tolerations }}
+      {{- /* Tolerations: component-level overrides global */ -}}
+      {{- $workerTolerations := .Values.hps.workers.tolerations | default list }}
+      {{- if and (not $workerTolerations) .Values.global .Values.global.scheduling }}
+        {{- $workerTolerations = .Values.global.scheduling.tolerations | default list }}
+      {{- end }}
+      {{- with $workerTolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /* Affinity: component-level takes precedence, otherwise use default anti-affinity */ -}}
       {{- with .Values.hps.workers.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
@@ -129,9 +140,17 @@ spec:
                 name: {{ include "rulebricks-chart.app.configmap" . }}
             - secretRef:
                 name: {{ include "rulebricks-chart.app.secretName" . | trim }}
+            {{- /* Extra envFrom references */ -}}
+            {{- with .Values.hps.workers.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: WORKER_TOPICS
               value: {{ .Values.hps.workers.topics | default "solution" | quote }}
             - name: NODE_ENV
               value: "production"
+            {{- /* Extra environment variables */ -}}
+            {{- with .Values.hps.workers.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
 {{- end }}

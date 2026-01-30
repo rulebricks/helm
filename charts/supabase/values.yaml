@@ -107,6 +107,7 @@ db:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000
@@ -196,6 +197,7 @@ studio:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000
@@ -274,6 +276,7 @@ auth:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000
@@ -288,6 +291,13 @@ auth:
   service:
     type: ClusterIP
     port: 9999
+  # URL overrides - if set, these take precedence over auto-computed values
+  # Use when app hostname differs from global.domain
+  siteUrl: ""          # Override GOTRUE_SITE_URL (e.g., "https://app.example.com")
+  externalUrl: ""      # Override API_EXTERNAL_URL (e.g., "https://supabase.example.com")
+  # Additional redirect URLs beyond the auto-computed list
+  additionalRedirectUrls: []
+
   environment:
     # Override the database hostname if using external database
     # DB_HOST: DATABASE.NAMESPACE.svc.cluster.local
@@ -295,8 +305,9 @@ auth:
     DB_PORT: 5432
     DB_DRIVER: postgres
     DB_SSL: disable # disable, allow, prefer, require, verify-ca, verify-full
-    # NOTE: API_EXTERNAL_URL, GOTRUE_SITE_URL, and GOTRUE_URI_ALLOW_LIST are set
-    # dynamically in the deployment template from global.domain and global.tlsEnabled
+    # NOTE: API_EXTERNAL_URL, GOTRUE_SITE_URL, and GOTRUE_URI_ALLOW_LIST are
+    # computed from global.domain and global.tlsEnabled, but can be overridden
+    # using auth.siteUrl and auth.externalUrl above
     GOTRUE_API_HOST: "0.0.0.0"
     GOTRUE_API_PORT: "9999"
     GOTRUE_DISABLE_SIGNUP: "false"
@@ -387,6 +398,7 @@ rest:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000
@@ -467,6 +479,7 @@ realtime:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000
@@ -553,6 +566,7 @@ meta:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000
@@ -631,6 +645,7 @@ storage:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000
@@ -729,6 +744,7 @@ imgproxy:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000
@@ -812,6 +828,7 @@ kong:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000
@@ -911,6 +928,7 @@ analytics:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000
@@ -998,6 +1016,7 @@ vector:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000
@@ -1068,6 +1087,7 @@ functions:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000
@@ -1145,6 +1165,7 @@ minio:
     # If not set and create is true, a name is generated using the fullname template
     name: ""
   podAnnotations: {}
+  podLabels: {}
   podSecurityContext:
     {}
     # fsGroup: 2000

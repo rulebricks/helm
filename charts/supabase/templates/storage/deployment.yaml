@@ -20,6 +20,9 @@ spec:
       {{- end }}
       labels:
         {{- include "supabase.storage.selectorLabels" . | nindent 8 }}
+        {{- with .Values.storage.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       restartPolicy: Always
       {{- with .Values.storage.imagePullSecrets }}

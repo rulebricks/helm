@@ -21,6 +21,14 @@ app:
     tag: "latest"
     pullPolicy: IfNotPresent
   replicas: 2
+  # Node scheduling configuration
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Additional labels for pods (merged with global.podLabels)
+  podLabels: {}
+  # Additional annotations for pods (merged with global.podAnnotations)
+  podAnnotations: {}
   resources:
     requests:
       cpu: 100m
@@ -28,6 +36,34 @@ app:
     limits:
       cpu: 500m
       memory: 512Mi
+  # Extra environment variables to inject (list of name/value or valueFrom objects)
+  # Example:
+  #   - name: HOSTNAME
+  #     value: "0.0.0.0"
+  #   - name: MY_SECRET
+  #     valueFrom:
+  #       secretKeyRef:
+  #         name: my-secret
+  #         key: value
+  extraEnv: []
+  # Extra envFrom references (additional ConfigMaps/Secrets to load)
+  # Example:
+  #   - configMapRef:
+  #       name: app-extra-config
+  #   - secretRef:
+  #       name: app-extra-secrets
+  extraEnvFrom: []
+  # Logging/Kafka configuration (optional)
+  logging:
+    enabled: false
+    kafkaBrokers: ""  # Override Kafka brokers URL, defaults to in-cluster Kafka
+    kafkaTopic: "logs"
+    loggingDestination: ""
+  # AI features (optional)
+  ai:
+    enabled: false
+  # SMTP configuration (optional, can also be set via global.smtp)
+  smtp: {}
   livenessProbe:
     httpGet:
       path: /
@@ -58,6 +94,16 @@ hps:
     pullPolicy: Always
     tag: "latest"
   replicas: 1
+  # Node scheduling configuration
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Pod labels/annotations
+  podLabels: {}
+  podAnnotations: {}
+  # Extra environment variables
+  extraEnv: []
+  extraEnvFrom: []
   resources:
     requests:
       cpu: "500m"
@@ -70,6 +116,16 @@ hps:
     enabled: true
     replicas: 3 # Starting replicas
     topics: "solution"
+    # Node scheduling configuration (inherits from hps if not set)
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    # Pod labels/annotations
+    podLabels: {}
+    podAnnotations: {}
+    # Extra environment variables
+    extraEnv: []
+    extraEnvFrom: []
     resources:
       requests:
         cpu: "100m"
@@ -90,11 +146,26 @@ hps:
       cooldownPeriod: 300 # Wait before scaling down (seconds)
 
 redis:
+  # Deploy internal Redis (set to false to use external)
+  enabled: true
   tag: "7.2"
   persistence:
     enabled: true
     size: "4Gi"
     storageClass: "gp3"
+  # Node scheduling configuration
+  nodeSelector: {}
+  tolerations: []
+  podLabels: {}
+  resources: {}
+  livenessProbe: {}
+  readinessProbe: {}
+  # Serverless Redis HTTP configuration
+  serverlessHttp:
+    resources: {}
+    livenessProbe: {}
+    readinessProbe: {}
+  affinity: {}
   resources:
     requests:
       cpu: "200m"
@@ -102,10 +173,38 @@ redis:
     limits:
       cpu: "500m"
       memory: "4Gi"
+  # External Redis configuration (used when redis.enabled: false)
+  external:
+    # Host of the external Redis server
+    host: ""
+    # Port (default: 6379)
+    port: 6379
+    # Password (leave empty for no auth)
+    password: ""
+    # Or reference an existing secret
+    existingSecret: ""
+    existingSecretKey: "redis-password"
+    # TLS configuration
+    tls:
+      enabled: false
+    # For Upstash/serverless Redis HTTP API
+    httpApi:
+      # If using Upstash or similar HTTP-based Redis
+      enabled: false
+      url: ""
+      token: ""
+      existingSecret: ""
+      existingSecretUrlKey: "redis-url"
+      existingSecretTokenKey: "redis-token"
 
 ingress:
   enabled: true
+  # Ingress type: "ingress" (standard K8s Ingress) or "gateway-api" (HTTPRoute)
+  type: "ingress"
+  # Ingress class name (used when type: "ingress")
   className: traefik
+  # Hostname override (defaults to global.domain if not set)
+  hostname: ""
   annotations:
     # CORS configuration using Traefik annotations
     traefik.ingress.kubernetes.io/headers.customrequestheaders.Access-Control-Allow-Methods: "GET,OPTIONS,PUT,POST,DELETE,PATCH"
@@ -115,6 +214,14 @@ ingress:
   paths:
     - path: /
       pathType: Prefix
+  # Gateway API configuration (used when type: "gateway-api")
+  gatewayApi:
+    # Name of the Gateway resource to attach to (required for gateway-api)
+    gatewayName: ""
+    # Namespace of the Gateway (optional, defaults to same namespace)
+    gatewayNamespace: ""
+    # Section name on the Gateway (e.g., "https" for TLS listener)
+    sectionName: ""
 
 service:
   type: ClusterIP
@@ -129,6 +236,8 @@ serviceAccount:
 volumes: []
 volumeMounts: []
 
+# Root-level scheduling is deprecated - use app.nodeSelector, app.tolerations, etc.
+# These are kept for backward compatibility but will be removed in a future version
 nodeSelector: {}
 tolerations: []
 affinity: {}

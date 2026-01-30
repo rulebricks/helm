@@ -17,12 +17,30 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "rulebricks-chart.serverless-redis-http.fullname" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- /* Global pod labels */ -}}
+        {{- if and .Values.global .Values.global.podLabels }}
+        {{- toYaml .Values.global.podLabels | nindent 8 }}
+        {{- end }}
+        {{- /* Component-specific pod labels (uses redis settings) */ -}}
+        {{- with .Values.redis.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
-      {{- with .Values.redis.nodeSelector }}
+      {{- /* Node selector: uses redis settings, falls back to global */ -}}
+      {{- $srhNodeSelector := .Values.redis.nodeSelector | default dict }}
+      {{- if and (not $srhNodeSelector) .Values.global .Values.global.scheduling }}
+        {{- $srhNodeSelector = .Values.global.scheduling.nodeSelector | default dict }}
+      {{- end }}
+      {{- with $srhNodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.redis.tolerations }}
+      {{- /* Tolerations: uses redis settings, falls back to global */ -}}
+      {{- $srhTolerations := .Values.redis.tolerations | default list }}
+      {{- if and (not $srhTolerations) .Values.global .Values.global.scheduling }}
+        {{- $srhTolerations = .Values.global.scheduling.tolerations | default list }}
+      {{- end }}
+      {{- with $srhTolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -39,3 +57,15 @@ spec:
             - name: SRH_CONNECTION_STRING
               # Reference the templated redis service name
               value: "redis://{{ include "rulebricks-chart.redis.fullname" . }}:6379"
+          {{- with .Values.redis.serverlessHttp.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.redis.serverlessHttp.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.redis.serverlessHttp.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

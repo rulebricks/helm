@@ -20,6 +20,9 @@ spec:
       {{- end }}
       labels:
         {{- include "supabase.minio.selectorLabels" . | nindent 8 }}
+        {{- with .Values.minio.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       restartPolicy: Always
       {{- with .Values.minio.imagePullSecrets }}

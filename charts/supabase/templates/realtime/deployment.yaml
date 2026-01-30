@@ -20,6 +20,9 @@ spec:
       {{- end }}
       labels:
         {{- include "supabase.realtime.selectorLabels" . | nindent 8 }}
+        {{- with .Values.realtime.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.realtime.imagePullSecrets }}
       imagePullSecrets:

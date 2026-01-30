@@ -22,6 +22,9 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/vector/config.yaml") . | sha256sum }}
       labels:
         {{- include "supabase.vector.selectorLabels" . | nindent 8 }}
+        {{- with .Values.vector.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.vector.imagePullSecrets }}
       imagePullSecrets:
