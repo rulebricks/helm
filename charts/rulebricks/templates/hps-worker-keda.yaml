@@ -20,7 +20,12 @@ spec:
   - type: kafka
     metadata:
       # Use templated Kafka bootstrap servers - handles any release name and namespace
-      {{- $kafkaBrokers := .Values.app.logging.kafkaBrokers | default (include "rulebricks-chart.kafka.bootstrapServers" .) }}
+      {{- $kafkaBrokers := "" }}
+      {{- if and .Values.app .Values.app.logging .Values.app.logging.kafkaBrokers }}
+        {{- $kafkaBrokers = .Values.app.logging.kafkaBrokers }}
+      {{- else }}
+        {{- $kafkaBrokers = (include "rulebricks-chart.kafka.bootstrapServers" .) }}
+      {{- end }}
       bootstrapServers: {{ $kafkaBrokers }}
       consumerGroup: generic-workers
       topic: solution

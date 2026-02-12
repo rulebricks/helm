@@ -1,8 +1,22 @@
 {{/*
 Migration Job for Self-Hosted Supabase
 Uses psql to apply migrations directly to the self-hosted Postgres database
+
+Migration Strategy Options (migrations.strategy):
+  - "hook" (default): Runs as Helm post-install/post-upgrade hook
+    Pros: Automatic execution, tied to release lifecycle
+    Cons: Cannot be customized via post-rendering tools
+    
+  - "deployment": Creates job as regular resource (no hooks)
+    Pros: Visible to post-rendering, supports additional customization
+    Cons: May run on every helm upgrade, requires manual cleanup
+    
+  - "manual": Renders job template without hooks (apply separately)
+    Pros: Full control over when/how migrations run
+    Cons: Requires separate kubectl apply step
 */}}
 {{- if .Values.supabase.enabled -}}
+{{- $strategy := .Values.migrations.strategy | default "hook" }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -14,29 +28,51 @@ metadata:
     app.kubernetes.io/component: migrations
     helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
+  {{- if eq $strategy "hook" }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-delete-policy": before-hook-creation
+    {{- with .Values.migrations.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- else if .Values.migrations.annotations }}
+  annotations:
+    {{- toYaml .Values.migrations.annotations | nindent 4 }}
+  {{- end }}
 spec:
-  ttlSecondsAfterFinished: 600
+  ttlSecondsAfterFinished: {{ .Values.migrations.ttlSecondsAfterFinished | default 600 }}
+  {{- if .Values.migrations.backoffLimit }}
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  {{- end }}
   template:
     metadata:
       labels:
         app.kubernetes.io/name: {{ .Chart.Name }}-migrations
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
-      restartPolicy: OnFailure
-      {{- if .Values.migrations }}
-      {{- with .Values.migrations.tolerations }}
-      tolerations:
+      restartPolicy: {{ .Values.migrations.restartPolicy | default "OnFailure" }}
+      {{- /* Node selector: migrations-level > global scheduling */ -}}
+      {{- $nodeSelector := .Values.migrations.nodeSelector | default dict }}
+      {{- if and (not $nodeSelector) .Values.global .Values.global.scheduling }}
+        {{- $nodeSelector = .Values.global.scheduling.nodeSelector | default dict }}
+      {{- end }}
+      {{- with $nodeSelector }}
+      nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /* Tolerations: migrations-level > global scheduling > ARM64 default */ -}}
+      {{- $tolerations := list }}
+      {{- if .Values.migrations.tolerations }}
+        {{- $tolerations = .Values.migrations.tolerations }}
+      {{- else if and .Values.global .Values.global.scheduling .Values.global.scheduling.tolerations }}
+        {{- $tolerations = .Values.global.scheduling.tolerations }}
       {{- else }}
+        {{- /* Default ARM64 toleration for backwards compatibility */ -}}
+        {{- $tolerations = list (dict "key" "kubernetes.io/arch" "operator" "Equal" "value" "arm64" "effect" "NoSchedule") }}
+      {{- end }}
+      {{- with $tolerations }}
       tolerations:
-        - key: kubernetes.io/arch
-          operator: Equal
-          value: arm64
-          effect: NoSchedule
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       imagePullSecrets:
         - name: {{ .Release.Name }}-regcred
@@ -119,10 +155,19 @@ spec:
               echo "Migrations completed."
           env:
             - name: DB_HOST
-              # Templated Supabase DB service name: <release>-supabase-db
+              {{- if .Values.supabase.db.enabled }}
+              # Internal Supabase DB service
               value: "{{ .Release.Name }}-supabase-db"
+              {{- else }}
+              # External PostgreSQL - use configured host
+              value: {{ .Values.migrations.externalDb.host | default (index .Values.supabase "auth" "environment" "DB_HOST" | default "") | quote }}
+              {{- end }}
             - name: DB_PORT
+              {{- if .Values.supabase.db.enabled }}
               value: "5432"
+              {{- else }}
+              value: {{ .Values.migrations.externalDb.port | default "5432" | quote }}
+              {{- end }}
             - name: DB_USER
               value: {{ .Values.supabase.secret.db.username | default "postgres" | quote }}
             - name: DB_NAME
@@ -130,9 +175,19 @@ spec:
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  # Supabase chart creates secret named: <release>-supabase-db
+                  {{- if .Values.supabase.db.enabled }}
+                  # Internal Supabase chart creates secret named: <release>-supabase-db
                   name: {{ .Release.Name }}-supabase-db
                   key: password
+                  {{- else if .Values.migrations.externalDb.existingSecret }}
+                  # External secret reference
+                  name: {{ .Values.migrations.externalDb.existingSecret }}
+                  key: {{ .Values.migrations.externalDb.existingSecretKey | default "password" }}
+                  {{- else }}
+                  # Fall back to supabase secret
+                  name: {{ .Release.Name }}-supabase-db
+                  key: password
+                  {{- end }}
           volumeMounts:
             - name: assets
               mountPath: /assets
@@ -147,6 +202,8 @@ Uses Supabase CLI to push schema and configuration to a managed Supabase project
 Requires either:
   - global.supabase.accessToken to be set directly, OR
   - global.secrets.secretRef pointing to a secret containing SUPABASE_ACCESS_TOKEN
+
+See self-hosted migration job above for strategy documentation.
 */}}
 {{- $hasAccessToken := false }}
 {{- $useSecretRef := false }}
@@ -157,6 +214,7 @@ Requires either:
   {{- $hasAccessToken = true }}
 {{- end }}
 {{- if and (not .Values.supabase.enabled) $hasAccessToken -}}
+{{- $strategy := .Values.migrations.strategy | default "hook" }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -168,29 +226,51 @@ metadata:
     app.kubernetes.io/component: managed-supabase-setup
     helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
+  {{- if eq $strategy "hook" }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-delete-policy": before-hook-creation
+    {{- with .Values.migrations.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- else if .Values.migrations.annotations }}
+  annotations:
+    {{- toYaml .Values.migrations.annotations | nindent 4 }}
+  {{- end }}
 spec:
-  ttlSecondsAfterFinished: 600
+  ttlSecondsAfterFinished: {{ .Values.migrations.ttlSecondsAfterFinished | default 600 }}
+  {{- if .Values.migrations.backoffLimit }}
+  backoffLimit: {{ .Values.migrations.backoffLimit }}
+  {{- end }}
   template:
     metadata:
       labels:
         app.kubernetes.io/name: {{ .Chart.Name }}-managed-supabase-setup
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
-      restartPolicy: OnFailure
-      {{- if .Values.migrations }}
-      {{- with .Values.migrations.tolerations }}
-      tolerations:
+      restartPolicy: {{ .Values.migrations.restartPolicy | default "OnFailure" }}
+      {{- /* Node selector: migrations-level > global scheduling */ -}}
+      {{- $nodeSelector := .Values.migrations.nodeSelector | default dict }}
+      {{- if and (not $nodeSelector) .Values.global .Values.global.scheduling }}
+        {{- $nodeSelector = .Values.global.scheduling.nodeSelector | default dict }}
+      {{- end }}
+      {{- with $nodeSelector }}
+      nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /* Tolerations: migrations-level > global scheduling > ARM64 default */ -}}
+      {{- $tolerations := list }}
+      {{- if .Values.migrations.tolerations }}
+        {{- $tolerations = .Values.migrations.tolerations }}
+      {{- else if and .Values.global .Values.global.scheduling .Values.global.scheduling.tolerations }}
+        {{- $tolerations = .Values.global.scheduling.tolerations }}
       {{- else }}
+        {{- /* Default ARM64 toleration for backwards compatibility */ -}}
+        {{- $tolerations = list (dict "key" "kubernetes.io/arch" "operator" "Equal" "value" "arm64" "effect" "NoSchedule") }}
+      {{- end }}
+      {{- with $tolerations }}
       tolerations:
-        - key: kubernetes.io/arch
-          operator: Equal
-          value: arm64
-          effect: NoSchedule
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       imagePullSecrets:
         - name: {{ .Release.Name }}-regcred

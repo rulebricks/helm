@@ -1,3 +1,4 @@
+{{- if .Values.redis.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,13 +18,40 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "rulebricks-chart.redis.fullname" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- /* Global pod labels */ -}}
+        {{- if and .Values.global .Values.global.podLabels }}
+        {{- toYaml .Values.global.podLabels | nindent 8 }}
+        {{- end }}
+        {{- /* Component-specific pod labels */ -}}
+        {{- with .Values.redis.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
-      {{- with .Values.redis.nodeSelector }}
+      {{- /* Node selector: component-level overrides global */ -}}
+      {{- $redisNodeSelector := .Values.redis.nodeSelector | default dict }}
+      {{- if and (not $redisNodeSelector) .Values.global .Values.global.scheduling }}
+        {{- $redisNodeSelector = .Values.global.scheduling.nodeSelector | default dict }}
+      {{- end }}
+      {{- with $redisNodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.redis.tolerations }}
+      {{- /* Tolerations: component-level overrides global */ -}}
+      {{- $redisTolerations := .Values.redis.tolerations | default list }}
+      {{- if and (not $redisTolerations) .Values.global .Values.global.scheduling }}
+        {{- $redisTolerations = .Values.global.scheduling.tolerations | default list }}
+      {{- end }}
+      {{- with $redisTolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- /* Affinity: component-level overrides global */ -}}
+      {{- $redisAffinity := .Values.redis.affinity | default dict }}
+      {{- if and (not $redisAffinity) .Values.global .Values.global.scheduling }}
+        {{- $redisAffinity = .Values.global.scheduling.affinity | default dict }}
+      {{- end }}
+      {{- with $redisAffinity }}
+      affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
@@ -56,3 +84,4 @@ spec:
         - name: redis-data
           persistentVolumeClaim:
             claimName: {{ include "rulebricks-chart.redis.pvc" . }}
+{{- end }}

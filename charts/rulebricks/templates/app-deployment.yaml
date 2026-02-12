@@ -17,15 +17,52 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "rulebricks-chart.app.fullname" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- /* Global pod labels */ -}}
+        {{- if and .Values.global .Values.global.podLabels }}
+        {{- toYaml .Values.global.podLabels | nindent 8 }}
+        {{- end }}
+        {{- /* Component-specific pod labels */ -}}
+        {{- with .Values.app.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- /* Pod annotations (global + component) */ -}}
+      {{- if or (and .Values.global .Values.global.podAnnotations) .Values.app.podAnnotations }}
+      annotations:
+        {{- if and .Values.global .Values.global.podAnnotations }}
+        {{- toYaml .Values.global.podAnnotations | nindent 8 }}
+        {{- end }}
+        {{- with .Values.app.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
     spec:
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}
-      {{- with .Values.app.nodeSelector }}
+      {{- /* Node selector: component-level overrides global */ -}}
+      {{- $nodeSelector := .Values.app.nodeSelector | default dict }}
+      {{- if and (not $nodeSelector) .Values.global .Values.global.scheduling }}
+        {{- $nodeSelector = .Values.global.scheduling.nodeSelector | default dict }}
+      {{- end }}
+      {{- with $nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.app.tolerations }}
+      {{- /* Tolerations: component-level overrides global */ -}}
+      {{- $tolerations := .Values.app.tolerations | default list }}
+      {{- if and (not $tolerations) .Values.global .Values.global.scheduling }}
+        {{- $tolerations = .Values.global.scheduling.tolerations | default list }}
+      {{- end }}
+      {{- with $tolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- /* Affinity: component-level overrides global */ -}}
+      {{- $affinity := .Values.app.affinity | default dict }}
+      {{- if and (not $affinity) .Values.global .Values.global.scheduling }}
+        {{- $affinity = .Values.global.scheduling.affinity | default dict }}
+      {{- end }}
+      {{- with $affinity }}
+      affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
@@ -113,6 +150,10 @@ spec:
                 configMapKeyRef:
                   name: {{ include "rulebricks-chart.app.configmap" . }}
                   key: KV_REST_API_TOKEN
+            {{- /* Extra environment variables from values */ -}}
+            {{- with .Values.app.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           envFrom:
             # Load all non-sensitive config from ConfigMap
             - configMapRef:
@@ -120,3 +161,7 @@ spec:
             # Load all secrets (this provides remaining sensitive values)
             - secretRef:
                 name: {{ include "rulebricks-chart.app.secretName" . | trim }}
+            {{- /* Extra envFrom references (additional ConfigMaps/Secrets) */ -}}
+            {{- with .Values.app.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}

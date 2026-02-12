@@ -20,6 +20,9 @@ spec:
       {{- end }}
       labels:
         {{- include "supabase.imgproxy.selectorLabels" . | nindent 8 }}
+        {{- with .Values.imgproxy.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.imgproxy.imagePullSecrets }}
       imagePullSecrets:

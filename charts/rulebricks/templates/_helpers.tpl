@@ -52,6 +52,7 @@ Create chart name and version as used by the chart label.
 
 {{/*
 Common labels
+Merges standard chart labels with global.labels if present
 */}}
 {{- define "rulebricks-chart.labels" -}}
 helm.sh/chart: {{ include "rulebricks-chart.chart" . }}
@@ -60,6 +61,48 @@ helm.sh/chart: {{ include "rulebricks-chart.chart" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- /* Merge global labels */ -}}
+{{- if and .Values.global .Values.global.labels }}
+{{- toYaml .Values.global.labels | nindent 0 }}
+{{- end }}
+{{- end }}
+
+{{/*
+Resource annotations with global merge
+Returns global.annotations merged with any provided component annotations
+Usage: {{ include "rulebricks-chart.annotations" . }}
+*/}}
+{{- define "rulebricks-chart.annotations" -}}
+{{- $annotations := dict }}
+{{- if and .Values.global .Values.global.annotations }}
+  {{- $annotations = merge $annotations .Values.global.annotations }}
+{{- end }}
+{{- with $annotations }}
+{{- toYaml . }}
+{{- end }}
+{{- end }}
+
+{{/*
+Pod labels with global merge
+Returns selector labels plus global.podLabels
+Usage: {{ include "rulebricks-chart.podLabels" . }}
+*/}}
+{{- define "rulebricks-chart.podLabels" -}}
+{{- include "rulebricks-chart.selectorLabels" . }}
+{{- if and .Values.global .Values.global.podLabels }}
+{{- toYaml .Values.global.podLabels | nindent 0 }}
+{{- end }}
+{{- end }}
+
+{{/*
+Pod annotations with global merge
+Returns global.podAnnotations
+Usage: {{ include "rulebricks-chart.podAnnotations" . }}
+*/}}
+{{- define "rulebricks-chart.podAnnotations" -}}
+{{- if and .Values.global .Values.global.podAnnotations }}
+{{- toYaml .Values.global.podAnnotations }}
+{{- end }}
 {{- end }}
 
 {{/*
@@ -236,4 +279,124 @@ TLS Secret name - used by cert-manager Certificate and Ingress
 */}}
 {{- define "rulebricks-chart.tls.secretName" -}}
 {{- printf "%s-tls-secret" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+===========================================
+Scheduling Helpers
+Consolidated functions for nodeSelector, tolerations, affinity
+===========================================
+*/}}
+
+{{/*
+Merge scheduling configuration (component-level overrides global)
+Usage: {{ include "rulebricks-chart.scheduling.nodeSelector" (dict "Values" .Values "component" .Values.app) }}
+Returns: nodeSelector block or empty
+*/}}
+{{- define "rulebricks-chart.scheduling.nodeSelector" -}}
+{{- $nodeSelector := .component.nodeSelector | default dict }}
+{{- if and (not $nodeSelector) .Values.global .Values.global.scheduling .Values.global.scheduling.nodeSelector }}
+  {{- $nodeSelector = .Values.global.scheduling.nodeSelector }}
+{{- end }}
+{{- with $nodeSelector }}
+nodeSelector:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+
+{{/*
+Merge tolerations (component-level overrides global)
+Usage: {{ include "rulebricks-chart.scheduling.tolerations" (dict "Values" .Values "component" .Values.app) }}
+*/}}
+{{- define "rulebricks-chart.scheduling.tolerations" -}}
+{{- $tolerations := .component.tolerations | default list }}
+{{- if and (not $tolerations) .Values.global .Values.global.scheduling .Values.global.scheduling.tolerations }}
+  {{- $tolerations = .Values.global.scheduling.tolerations }}
+{{- end }}
+{{- with $tolerations }}
+tolerations:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+
+{{/*
+Merge affinity (component-level overrides global)
+Usage: {{ include "rulebricks-chart.scheduling.affinity" (dict "Values" .Values "component" .Values.app) }}
+*/}}
+{{- define "rulebricks-chart.scheduling.affinity" -}}
+{{- $affinity := .component.affinity | default dict }}
+{{- if and (not $affinity) .Values.global .Values.global.scheduling .Values.global.scheduling.affinity }}
+  {{- $affinity = .Values.global.scheduling.affinity }}
+{{- end }}
+{{- with $affinity }}
+affinity:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+
+{{/*
+Complete scheduling block (all three: nodeSelector, tolerations, affinity)
+Usage: {{ include "rulebricks-chart.scheduling" (dict "Values" .Values "component" .Values.app) | nindent 6 }}
+*/}}
+{{- define "rulebricks-chart.scheduling" -}}
+{{- include "rulebricks-chart.scheduling.nodeSelector" . }}
+{{- include "rulebricks-chart.scheduling.tolerations" . }}
+{{- include "rulebricks-chart.scheduling.affinity" . }}
+{{- end }}
+
+{{/*
+===========================================
+Redis Connection Helpers
+===========================================
+*/}}
+
+{{/*
+Redis HTTP API URL
+Returns the URL for the Redis HTTP API (Upstash-compatible)
+Handles both internal serverless-redis-http and external Upstash
+*/}}
+{{- define "rulebricks-chart.redis.httpUrl" -}}
+{{- if .Values.redis.enabled }}
+{{- /* Internal Redis - use serverless-redis-http service */ -}}
+http://{{ include "rulebricks-chart.serverless-redis-http.fullname" . }}
+{{- else if .Values.redis.external.httpApi.enabled }}
+{{- /* External HTTP API (e.g., Upstash) */ -}}
+{{- .Values.redis.external.httpApi.url }}
+{{- else }}
+{{- /* External Redis but no HTTP API - use serverless-redis-http bridge */ -}}
+http://{{ include "rulebricks-chart.serverless-redis-http.fullname" . }}
+{{- end }}
+{{- end }}
+
+{{/*
+Redis connection string
+Returns a redis:// or rediss:// connection URL for internal or external Redis
+Kept for future external Redis wiring.
+*/}}
+{{- define "rulebricks-chart.redis.connectionString" -}}
+{{- if .Values.redis.enabled }}
+redis://{{ include "rulebricks-chart.redis.fullname" . }}:6379
+{{- else }}
+{{- $scheme := ternary "rediss" "redis" (and .Values.redis.external .Values.redis.external.tls .Values.redis.external.tls.enabled) -}}
+{{- $host := .Values.redis.external.host | default "" -}}
+{{- $port := .Values.redis.external.port | default 6379 -}}
+{{- printf "%s://%s:%v" $scheme $host $port -}}
+{{- end }}
+{{- end }}
+
+{{/*
+Redis HTTP API Token
+Returns the token for authenticating to the Redis HTTP API
+*/}}
+{{- define "rulebricks-chart.redis.httpToken" -}}
+{{- if .Values.redis.enabled }}
+{{- /* Internal Redis - default token */ -}}
+local_redis
+{{- else if .Values.redis.external.httpApi.enabled }}
+{{- /* External HTTP API token */ -}}
+{{- .Values.redis.external.httpApi.token }}
+{{- else }}
+{{- /* External Redis but no HTTP API - use serverless-redis-http bridge */ -}}
+local_redis
+{{- end }}
 {{- end }}

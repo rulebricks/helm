@@ -20,6 +20,9 @@ spec:
       {{- end }}
       labels:
         {{- include "supabase.db.selectorLabels" . | nindent 8 }}
+        {{- with .Values.db.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.db.imagePullSecrets }}
       imagePullSecrets:

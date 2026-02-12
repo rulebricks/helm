@@ -64,6 +64,13 @@ After installation, Helm will display instructions for configuring DNS and enabl
 | `global.sso.clientId`                | OAuth client ID from your IdP                                             |
 | `global.sso.clientSecret`            | OAuth client secret from your IdP                                         |
 | `global.secrets.secretRef`           | Reference to existing K8s secret (optional)                               |
+| `global.scheduling.nodeSelector`     | Node selector applied to all workloads                                    |
+| `global.scheduling.tolerations`      | Tolerations applied to all workloads                                      |
+| `global.scheduling.affinity`         | Affinity rules applied to all workloads                                   |
+| `global.labels`                      | Labels applied to all resource metadata                                   |
+| `global.annotations`                 | Annotations applied to all resource metadata                              |
+| `global.podLabels`                   | Labels applied to pod templates only                                      |
+| `global.podAnnotations`              | Annotations applied to pod templates only                                 |
 
 ---
 
@@ -254,6 +261,301 @@ To send rule execution logs to S3:
    ```
 
 > For GCS or Azure Blob, see the [Vector sinks documentation](https://vector.dev/docs/reference/configuration/sinks/).
+
+</details>
+
+---
+
+### Advanced Configuration
+
+<details>
+<summary><strong>Node Scheduling (ARM64, Dedicated Nodes)</strong></summary>
+
+For clusters with specialized node pools (ARM64/Graviton, dedicated nodes with taints), configure global scheduling defaults:
+
+```yaml
+global:
+  scheduling:
+    nodeSelector:
+      kubernetes.io/arch: arm64
+    tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "rulebricks"
+        effect: "NoSchedule"
+    affinity: {}
+```
+
+These settings propagate to all workloads. Override at the component level if needed:
+
+```yaml
+rulebricks:
+  app:
+    nodeSelector:
+      kubernetes.io/arch: arm64
+    tolerations: []
+```
+
+</details>
+
+<details>
+<summary><strong>Gateway API (Alternative to Ingress)</strong></summary>
+
+Use Kubernetes Gateway API instead of traditional Ingress resources:
+
+```yaml
+rulebricks:
+  ingress:
+    type: "gateway-api"  # default: "ingress"
+    hostname: "app.example.com"  # override default (global.domain)
+    gatewayApi:
+      gatewayName: "my-gateway"
+      gatewayNamespace: "gateway-system"
+```
+
+This renders `HTTPRoute` resources instead of `Ingress`. Requires a Gateway API implementation (e.g., Envoy Gateway, Cilium, Istio) in your cluster.
+
+| `ingress.type` | Resource Created | Use Case |
+|----------------|------------------|----------|
+| `ingress` | `Ingress` | Standard ingress controllers (nginx, Traefik) |
+| `gateway-api` | `HTTPRoute` | Gateway API implementations |
+
+Use `ingress.hostname` when your application hostname differs from `global.domain` (e.g., `rulebricks.example.com` vs `example.com`).
+
+</details>
+
+<details>
+<summary><strong>External Redis</strong></summary>
+
+Use an external Redis instance instead of the bundled deployment:
+
+```yaml
+rulebricks:
+  redis:
+    enabled: false
+    external:
+      host: "redis.example.com"
+      port: 6379
+      password: ""  # or reference a secret
+```
+
+When `rulebricks.redis.enabled` is `false`, the chart skips deploying internal Redis and uses your external instance settings.
+
+</details>
+
+<details>
+<summary><strong>Auth URL Configuration</strong></summary>
+
+Override computed authentication URLs when your application hostname differs from the base domain:
+
+```yaml
+supabase:
+  auth:
+    # Override GOTRUE_SITE_URL (default: https://<global.domain>)
+    siteUrl: "https://app.example.com"
+    # Override API_EXTERNAL_URL (default: https://supabase.<global.domain>)
+    externalUrl: "https://auth.example.com"
+    # Add URLs to GOTRUE_URI_ALLOW_LIST
+    additionalRedirectUrls:
+      - "https://app.example.com/callback"
+      - "https://staging.example.com/*"
+```
+
+</details>
+
+<details>
+<summary><strong>Migration Job Strategy</strong></summary>
+
+Control how database migrations are executed:
+
+```yaml
+migrations:
+  strategy: "hook"  # default
+```
+
+| Strategy | Behavior | Use Case |
+|----------|----------|----------|
+| `hook` | Runs as Helm post-install/post-upgrade hook | Standard deployments |
+| `deployment` | Creates job as regular resource | When post-rendering is needed |
+| `manual` | Renders template without hooks | Full control over execution |
+
+</details>
+
+<details>
+<summary><strong>Extra Environment Variables</strong></summary>
+
+Inject additional environment variables into the application:
+
+```yaml
+rulebricks:
+  app:
+    extraEnv:
+      - name: MY_CUSTOM_VAR
+        value: "my-value"
+      - name: SECRET_VAR
+        valueFrom:
+          secretKeyRef:
+            name: my-secret
+            key: secret-key
+    extraEnvFrom:
+      - configMapRef:
+          name: my-configmap
+```
+
+</details>
+
+<details>
+<summary><strong>Global Labels and Annotations</strong></summary>
+
+Apply labels and annotations to all resources (useful for compliance, cost allocation, monitoring):
+
+```yaml
+global:
+  # Applied to all resource metadata
+  labels:
+    team: platform
+    cost-center: engineering
+  annotations:
+    app.kubernetes.io/part-of: rulebricks
+  
+  # Applied only to pod templates
+  podLabels:
+    sidecar.istio.io/inject: "true"
+  podAnnotations:
+    prometheus.io/scrape: "true"
+```
+
+</details>
+
+<details>
+<summary><strong>Per-Component Pod Labels</strong></summary>
+
+For clusters with admission policies (Kyverno, OPA Gatekeeper) requiring specific labels on pods, configure labels at the component level:
+
+```yaml
+rulebricks:
+  app:
+    podLabels:
+      team: platform
+  redis:
+    podLabels:
+      team: platform
+    serverlessHttp:
+      podLabels:
+        team: platform
+
+supabase:
+  db:
+    podLabels:
+      team: platform
+  auth:
+    podLabels:
+      team: platform
+  kong:
+    podLabels:
+      team: platform
+  rest:
+    podLabels:
+      team: platform
+  realtime:
+    podLabels:
+      team: platform
+  meta:
+    podLabels:
+      team: platform
+  studio:
+    podLabels:
+      team: platform
+```
+
+This is useful when cluster policies enforce labels like `team`, `cost-center`, or service mesh injection annotations on all pods.
+
+</details>
+
+<details>
+<summary><strong>Resource Requests and Limits</strong></summary>
+
+Configure CPU/memory requests and limits for each component. This is often required by cluster admission policies:
+
+```yaml
+rulebricks:
+  app:
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "1Gi"
+  redis:
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+    serverlessHttp:
+      resources:
+        requests:
+          cpu: "50m"
+          memory: "64Mi"
+        limits:
+          cpu: "200m"
+          memory: "256Mi"
+
+supabase:
+  db:
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "2000m"
+        memory: "2Gi"
+  # Similar for: auth, kong, rest, realtime, meta, studio
+```
+
+</details>
+
+<details>
+<summary><strong>Liveness and Readiness Probes</strong></summary>
+
+Configure health check probes for components. Required by some cluster policies:
+
+```yaml
+rulebricks:
+  app:
+    livenessProbe:
+      httpGet:
+        path: /api/health
+        port: 3000
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /api/health
+        port: 3000
+      initialDelaySeconds: 5
+      periodSeconds: 5
+
+supabase:
+  auth:
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 9999
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: 9999
+      initialDelaySeconds: 5
+      periodSeconds: 5
+```
+
+Default probes are configured for most components. Override only when needed for specific requirements.
 
 </details>
 

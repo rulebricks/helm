@@ -1,9 +1,13 @@
 {{- /*
 Ingress resource for Rulebricks
+Supports multiple ingress controllers via ingress.className
+For Gateway API (HTTPRoute), see httproute.yaml
 */ -}}
+{{- if and .Values.ingress.enabled (ne (.Values.ingress.type | default "ingress") "gateway-api") }}
 {{- $name := include "rulebricks-chart.fullname" . -}}
 {{- $labels := include "rulebricks-chart.labels" . | nindent 4 -}}
 {{- $ingress := .Values.ingress | default dict -}}
+{{- $ingressClass := $ingress.className | default "traefik" -}}
 {{- $hosts := list -}}
 {{- if $ingress.hosts -}}
   {{- $hosts = $ingress.hosts -}}
@@ -30,6 +34,8 @@ metadata:
     external-dns.alpha.kubernetes.io/hostname: {{ .Values.global.domain }}
     external-dns.alpha.kubernetes.io/ttl: "300"
     {{- end }}
+    {{- /* Traefik-specific annotations - only applied when using Traefik */ -}}
+    {{- if eq $ingressClass "traefik" }}
     {{- if and .Values.security .Values.security.network .Values.security.network.allowedIPs }}
     traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ .Release.Name }}-ip-whitelist@kubernetescrd
     {{- end }}
@@ -38,13 +44,18 @@ metadata:
     traefik.ingress.kubernetes.io/router.tls: "true"
     {{- else }}
     traefik.ingress.kubernetes.io/router.entrypoints: web
-    ingress.kubernetes.io/force-ssl-redirect: "false"
     traefik.ingress.kubernetes.io/router.tls: "false"
-    ingress.kubernetes.io/ssl-redirect: "false"
     traefik.ingress.kubernetes.io/frontend-entry-points: http
     {{- end }}
+    {{- end }}
+    {{- /* nginx-specific annotations */ -}}
+    {{- if eq $ingressClass "nginx" }}
+    {{- if ne (include "rulebricks-chart.tlsEnabled" .) "true" }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    {{- end }}
+    {{- end }}
 spec:
-  ingressClassName: traefik
+  ingressClassName: {{ $ingressClass }}
   {{- if eq (include "rulebricks-chart.tlsEnabled" .) "true" }}
   tls:
     - hosts:
@@ -128,3 +139,4 @@ spec:
               {{- end }}
           {{- end }}
     {{- end }}
+{{- end }}
