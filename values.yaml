@@ -322,6 +322,26 @@ keda:
 cert-manager:
   enabled: true
   installCRDs: false # CRDs are managed in parent chart crds/ directory
+  # Controller tolerations
+  tolerations:
+    - key: kubernetes.io/arch
+      operator: Equal
+      value: arm64
+      effect: NoSchedule
+  # Webhook tolerations
+  webhook:
+    tolerations:
+      - key: kubernetes.io/arch
+        operator: Equal
+        value: arm64
+        effect: NoSchedule
+  # CAinjector tolerations
+  cainjector:
+    tolerations:
+      - key: kubernetes.io/arch
+        operator: Equal
+        value: arm64
+        effect: NoSchedule
 
 # =============================================================================
 # DECISION LOGS (Vector)
