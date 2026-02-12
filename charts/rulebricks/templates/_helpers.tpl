@@ -369,6 +369,22 @@ http://{{ include "rulebricks-chart.serverless-redis-http.fullname" . }}
 {{- end }}
 
 {{/*
+Redis connection string
+Returns a redis:// or rediss:// connection URL for internal or external Redis
+Kept for future external Redis wiring.
+*/}}
+{{- define "rulebricks-chart.redis.connectionString" -}}
+{{- if .Values.redis.enabled }}
+redis://{{ include "rulebricks-chart.redis.fullname" . }}:6379
+{{- else }}
+{{- $scheme := ternary "rediss" "redis" (and .Values.redis.external .Values.redis.external.tls .Values.redis.external.tls.enabled) -}}
+{{- $host := .Values.redis.external.host | default "" -}}
+{{- $port := .Values.redis.external.port | default 6379 -}}
+{{- printf "%s://%s:%v" $scheme $host $port -}}
+{{- end }}
+{{- end }}
+
+{{/*
 Redis HTTP API Token
 Returns the token for authenticating to the Redis HTTP API
 */}}

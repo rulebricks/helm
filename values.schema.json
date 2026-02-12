@@ -136,7 +136,7 @@
     },
     "externalSecrets": {
       "type": "object",
-      "description": "External Secrets Operator integration",
+      "description": "Overlay-facing External Secrets metadata (not rendered directly by this chart)",
       "properties": {
         "enabled": { "type": "boolean", "default": false },
         "secretStoreRef": {

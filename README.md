@@ -332,14 +332,14 @@ Use an external Redis instance instead of the bundled deployment:
 ```yaml
 rulebricks:
   redis:
+    enabled: false
     external:
-      enabled: true
       host: "redis.example.com"
       port: 6379
       password: ""  # or reference a secret
 ```
 
-When enabled, the chart skips deploying Redis and configures the application to use your external instance.
+When `rulebricks.redis.enabled` is `false`, the chart skips deploying internal Redis and uses your external instance settings.
 
 </details>
 

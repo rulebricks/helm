@@ -57,8 +57,12 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- /* Affinity: component-level takes precedence, otherwise use default anti-affinity */ -}}
-      {{- with .Values.hps.workers.affinity }}
+      {{- /* Affinity precedence: worker affinity > global scheduling affinity > default anti-affinity */ -}}
+      {{- $workerAffinity := .Values.hps.workers.affinity | default dict }}
+      {{- if and (not $workerAffinity) .Values.global .Values.global.scheduling }}
+        {{- $workerAffinity = .Values.global.scheduling.affinity | default dict }}
+      {{- end }}
+      {{- with $workerAffinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- else }}

@@ -59,8 +59,12 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- /* Affinity: component-level takes precedence, otherwise use default anti-affinity */ -}}
-      {{- with .Values.hps.affinity }}
+      {{- /* Affinity: component-level overrides global */ -}}
+      {{- $hpsAffinity := .Values.hps.affinity | default dict }}
+      {{- if and (not $hpsAffinity) .Values.global .Values.global.scheduling }}
+        {{- $hpsAffinity = .Values.global.scheduling.affinity | default dict }}
+      {{- end }}
+      {{- with $hpsAffinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -76,7 +80,7 @@ spec:
           matchLabels:
             app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}
       {{- end }}
-      {{- if not .Values.hps.affinity }}
+      {{- if not $hpsAffinity }}
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:

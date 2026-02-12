@@ -53,10 +53,18 @@ spec:
             - name: SRH_MODE
               value: "env"
             - name: SRH_TOKEN
+              {{- if .Values.redis.enabled }}
               value: "local_redis"
+              {{- else }}
+              value: {{ include "rulebricks-chart.redis.httpToken" . | quote }}
+              {{- end }}
             - name: SRH_CONNECTION_STRING
+              {{- if .Values.redis.enabled }}
               # Reference the templated redis service name
               value: "redis://{{ include "rulebricks-chart.redis.fullname" . }}:6379"
+              {{- else }}
+              value: {{ include "rulebricks-chart.redis.connectionString" . | quote }}
+              {{- end }}
           {{- with .Values.redis.serverlessHttp.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

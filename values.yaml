@@ -467,12 +467,12 @@ kube-prometheus-stack:
       remoteWrite: []
 
 # =============================================================================
-# EXTERNAL SECRETS OPERATOR INTEGRATION
-# Configure to use ESO for fetching secrets from external stores
-# (AWS Secrets Manager, HashiCorp Vault, Azure Key Vault, etc.)
+# EXTERNAL SECRETS OPERATOR INTEGRATION (overlay-facing metadata)
+# These values are intentionally kept for kustomize/post-render workflows.
+# Note: This chart currently does not render ExternalSecret resources directly.
 # =============================================================================
 externalSecrets:
-  # Enable External Secrets Operator integration
+  # Enable External Secrets Operator integration in downstream overlays
   enabled: false
   # SecretStore or ClusterSecretStore reference
   secretStoreRef:
@@ -481,11 +481,6 @@ externalSecrets:
   # Refresh interval for syncing secrets
   refreshInterval: "1h"
   # Remote key mappings - map local secret keys to remote paths
-  # Example for AWS Secrets Manager:
-  #   remoteRefs:
-  #     licenseKey: "rulebricks/prod/license-key"
-  #     jwtSecret: "rulebricks/prod/jwt-secret"
-  #     dbPassword: "rulebricks/prod/db-password"
   remoteRefs:
     licenseKey: ""
     jwtSecret: ""
@@ -494,7 +489,7 @@ externalSecrets:
     smtpPass: ""
     supabaseAnonKey: ""
     supabaseServiceKey: ""
-  # Target secret name (defaults to <release>-external-secrets)
+  # Target secret name (defaults to <release>-external-secrets in overlays)
   targetSecretName: ""
 
 # =============================================================================
