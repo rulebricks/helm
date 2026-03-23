@@ -23,14 +23,14 @@ global:
   # Example:
   #   team: rulebricks
   #   environment: production
-  
+
   annotations: {}
   # Example:
   #   app.kubernetes.io/managed-by: helm
-  
+
   # Labels applied only to pod templates (not metadata)
   podLabels: {}
-  
+
   # Annotations applied only to pod templates
   podAnnotations: {}
   # =============================================================================
@@ -43,7 +43,7 @@ global:
     nodeSelector: {}
     # Example for ARM64/Graviton nodes:
     #   kubernetes.io/arch: arm64
-    
+
     # Tolerations applied to all workloads
     tolerations: []
     # Example for dedicated node pools:
@@ -51,7 +51,7 @@ global:
     #     operator: "Equal"
     #     value: "rulebricks"
     #     effect: "NoSchedule"
-    
+
     # Affinity rules applied to all workloads
     affinity: {}
   # SMTP Configuration (Vital for instance access and admin)
@@ -156,7 +156,7 @@ rulebricks:
   app:
     image:
       repository: index.docker.io/rulebricks/app
-      tag: "1.5.9" # https://hub.docker.com/repository/docker/rulebricks/app/tags
+      tag: "1.7.0" # https://hub.docker.com/repository/docker/rulebricks/app/tags
       pullPolicy: IfNotPresent
 
     logging:
@@ -175,7 +175,7 @@ rulebricks:
     enabled: true
     image:
       repository: index.docker.io/rulebricks/hps
-      tag: "1.5.8"
+      tag: "1.7.0"
       pullPolicy: Always # HPS image may receive silent updates
     replicas: 3 # Minimum recommended
     resources:
@@ -497,7 +497,7 @@ externalSecrets:
   # SecretStore or ClusterSecretStore reference
   secretStoreRef:
     name: ""
-    kind: "ClusterSecretStore"  # or "SecretStore"
+    kind: "ClusterSecretStore" # or "SecretStore"
   # Refresh interval for syncing secrets
   refreshInterval: "1h"
   # Remote key mappings - map local secret keys to remote paths

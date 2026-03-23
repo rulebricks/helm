@@ -8,10 +8,11 @@ kind: ClusterConfig
 metadata:
   name: rulebricks-cluster
   region: us-east-1
-  version: "1.30"
+  version: "1.33"
 
 managedNodeGroups:
   - name: standard-nodes
+    amiFamily: AmazonLinux2023
     instanceType: c8g.large # ARM/Graviton instance
     minSize: 4 # 8CPU/16GB required if self-hosting db
     maxSize: 4
