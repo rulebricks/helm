@@ -78,7 +78,7 @@ spec:
               Keys that are computed: GOTRUE_SITE_URL, API_EXTERNAL_URL, GOTRUE_URI_ALLOW_LIST
               These can be overridden via auth.siteUrl, auth.externalUrl, auth.additionalRedirectUrls
             */ -}}
-            {{- $computedKeys := list "GOTRUE_SITE_URL" "API_EXTERNAL_URL" "GOTRUE_URI_ALLOW_LIST" "GOTRUE_SMTP_HOST" "GOTRUE_SMTP_PORT" "GOTRUE_SMTP_ADMIN_EMAIL" "GOTRUE_SMTP_SENDER_NAME" -}}
+            {{- $computedKeys := list "GOTRUE_SITE_URL" "API_EXTERNAL_URL" "GOTRUE_URI_ALLOW_LIST" "GOTRUE_SMTP_HOST" "GOTRUE_SMTP_PORT" "GOTRUE_SMTP_ADMIN_EMAIL" "GOTRUE_SMTP_SENDER_NAME" "GOTRUE_MAILER_AUTOCONFIRM" -}}
             {{- range $key, $value := .Values.auth.environment }}
             {{- if not (has $key $computedKeys) }}
             - name: {{ $key }}
@@ -141,6 +141,68 @@ spec:
             - name: GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE
               value: {{ .Values.global.supabase.emails.templates.emailChange | quote }}
             {{- end }}
+            {{- end }}
+            {{- /* SSO / External OIDC provider configuration from global.sso */ -}}
+            {{- if and .Values.global.sso .Values.global.sso.enabled .Values.global.sso.provider }}
+            {{- /*
+              Map global.sso.provider to the GoTrue provider name (uppercased).
+              Native: azure->AZURE, google->GOOGLE, keycloak->KEYCLOAK
+              Mapped: okta->WORKOS, ory/other->KEYCLOAK (generic OIDC bridge)
+            */ -}}
+            {{- $ssoProvider := .Values.global.sso.provider }}
+            {{- $nativeProviders := list "azure" "google" "keycloak" }}
+            {{- if eq $ssoProvider "okta" }}
+              {{- $ssoProvider = "workos" }}
+            {{- else if not (has $ssoProvider $nativeProviders) }}
+              {{- $ssoProvider = "keycloak" }}
+            {{- end }}
+            {{- $gotrueProvider := upper $ssoProvider }}
+            {{- /* Secret name: use global.secrets.secretRef if provided, else release-name-sso */ -}}
+            {{- $ssoSecretName := printf "%s-sso" .Release.Name }}
+            {{- $ssoClientIdKey := "SSO_CLIENT_ID" }}
+            {{- $ssoClientSecretKey := "SSO_CLIENT_SECRET" }}
+            {{- if and .Values.global.secrets .Values.global.secrets.secretRef }}
+              {{- $ssoSecretName = .Values.global.secrets.secretRef }}
+              {{- if .Values.global.secrets.secretRefKeys }}
+                {{- $ssoClientIdKey = .Values.global.secrets.secretRefKeys.ssoClientId | default "SSO_CLIENT_ID" }}
+                {{- $ssoClientSecretKey = .Values.global.secrets.secretRefKeys.ssoClientSecret | default "SSO_CLIENT_SECRET" }}
+              {{- end }}
+            {{- end }}
+            - name: GOTRUE_EXTERNAL_{{ $gotrueProvider }}_ENABLED
+              value: "true"
+            - name: GOTRUE_EXTERNAL_{{ $gotrueProvider }}_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $ssoSecretName }}
+                  key: {{ $ssoClientIdKey }}
+            - name: GOTRUE_EXTERNAL_{{ $gotrueProvider }}_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $ssoSecretName }}
+                  key: {{ $ssoClientSecretKey }}
+            {{- $ssoProtocol := ternary "https" "http" (eq (.Values.global.tlsEnabled | toString) "true") }}
+            {{- $ssoExternalUrl := index $.Values.auth.environment "API_EXTERNAL_URL" | default (.Values.auth.externalUrl | default (printf "%s://supabase.%s" $ssoProtocol .Values.global.domain)) }}
+            - name: GOTRUE_EXTERNAL_{{ $gotrueProvider }}_REDIRECT_URI
+              value: {{ printf "%s/auth/v1/callback" $ssoExternalUrl | quote }}
+            {{- /*
+              Provider URL: native providers point GoTrue directly at the IdP.
+              Custom providers (ory, other) route through the app's SSO proxy,
+              which translates Keycloak-style OIDC paths to the actual IdP paths.
+              The raw IdP URL is configured on the app pods as SSO_PROVIDER_URL.
+            */ -}}
+            {{- $isNativeProvider := has .Values.global.sso.provider (list "azure" "google" "keycloak") }}
+            {{- if and .Values.global.sso.url $isNativeProvider }}
+            - name: GOTRUE_EXTERNAL_{{ $gotrueProvider }}_URL
+              value: {{ .Values.global.sso.url | quote }}
+            {{- else if not $isNativeProvider }}
+            - name: GOTRUE_EXTERNAL_{{ $gotrueProvider }}_URL
+              value: {{ printf "%s://%s/api/sso-proxy" $ssoProtocol .Values.global.domain | quote }}
+            {{- end }}
+            - name: GOTRUE_MAILER_AUTOCONFIRM
+              value: "true"
+            {{- else }}
+            - name: GOTRUE_MAILER_AUTOCONFIRM
+              value: {{ index .Values.auth.environment "GOTRUE_MAILER_AUTOCONFIRM" | default "false" | quote }}
             {{- end }}
             {{- end }}
             {{- if .Values.db.enabled }}

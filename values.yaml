@@ -111,6 +111,8 @@ global:
       supabaseServiceKey: "SUPABASE_SERVICE_KEY"
       openaiApiKey: "OPENAI_API_KEY"
       supabaseAccessToken: "SUPABASE_ACCESS_TOKEN"
+      ssoClientId: "SSO_CLIENT_ID"
+      ssoClientSecret: "SSO_CLIENT_SECRET"
   # =============================================================================
   # SSO Configuration (Optional)
   # Enables Single Sign-On via OIDC
