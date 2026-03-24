@@ -96,7 +96,7 @@ data:
   # Enterprise SSO Configuration
   # Tells the frontend which provider is configured and enables SSO login flow
   {{- if and .Values.global .Values.global.sso .Values.global.sso.enabled .Values.global.sso.provider }}
-  NEXT_PUBLIC_SSO_ENABLED: "1"
+  SSO_ENABLED: "1"
   {{- /* Map provider to Supabase provider name */ -}}
   {{- $provider := .Values.global.sso.provider }}
   {{- $nativeProviders := list "azure" "google" "okta" "keycloak" }}
