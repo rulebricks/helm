@@ -80,7 +80,7 @@ data:
     {{- $aiEnabled = true }}
   {{- end }}
   {{- if $aiEnabled }}
-  NEXT_PUBLIC_AI_ENABLED: "1"
+  AI_ENABLED: "1"
   {{- end }}
   # Kafka/Logging configuration
   {{- if .Values.app.logging }}
