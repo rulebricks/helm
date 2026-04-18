@@ -92,6 +92,27 @@
             "clientSecret": { "type": "string" }
           }
         },
+        "externalAuth": {
+          "type": "object",
+          "description": "External Authentication / Token Passthrough for proxy-gated deployments",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "header": { "type": "string", "default": "Authorization" },
+            "claims": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "default": "sub" },
+                "email": { "type": "string", "default": "email" },
+                "name": { "type": "string", "default": "name" }
+              }
+            },
+            "publicPaths": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "URL-path prefixes that bypass the token check"
+            }
+          }
+        },
         "labels": {
           "type": "object",
           "description": "Global labels applied to all resources",
@@ -455,6 +476,45 @@
               "externalDnsEnabled": { "const": true }
             },
             "required": ["externalDnsEnabled"]
+          }
+        }
+      }
+    },
+    {
+      "title": "External Auth Validation",
+      "description": "If externalAuth is enabled, a Supabase JWT secret is required (sourced from global.supabase.jwtSecret).",
+      "if": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "externalAuth": {
+                "type": "object",
+                "properties": {
+                  "enabled": { "const": true }
+                },
+                "required": ["enabled"]
+              }
+            },
+            "required": ["externalAuth"]
+          }
+        },
+        "required": ["global"]
+      },
+      "then": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "supabase": {
+                "type": "object",
+                "required": ["jwtSecret"],
+                "properties": {
+                  "jwtSecret": { "type": "string", "minLength": 1 }
+                }
+              }
+            },
+            "required": ["supabase"]
           }
         }
       }

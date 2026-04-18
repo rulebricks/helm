@@ -17,6 +17,9 @@ Resources to deploy custom configurations of Rulebricks and its dependencies via
 - PV provisioner support (e.g., AWS EBS CSI driver)
 - A domain name you control
 
+See [External Services](https://rulebricks.com/docs/private-deployment/external-services) for more information on externalizing certain services.
+See [Authentication](https://rulebricks.com/docs/private-deployment/sso) for more information on what happens after you configure SSO.
+
 See [Minimum Cluster Requirements](example-min-cluster.yaml) for an example EKS cluster configuration.
 
 ## Quick Start
@@ -163,7 +166,6 @@ Even if you use Supabase Cloud instead of self-hosting, this chart will automati
 2. **Generate an access token** from Supabase Dashboard: Account Settings > Access Tokens.
 
 3. **Get your project details** from the Supabase Dashboard:
-
    - Project URL (e.g., `https://abcdefghijkl.supabase.co`)
    - Anon (public) key
    - Service role key
@@ -306,8 +308,8 @@ Use Kubernetes Gateway API instead of traditional Ingress resources:
 ```yaml
 rulebricks:
   ingress:
-    type: "gateway-api"  # default: "ingress"
-    hostname: "app.example.com"  # override default (global.domain)
+    type: "gateway-api" # default: "ingress"
+    hostname: "app.example.com" # override default (global.domain)
     gatewayApi:
       gatewayName: "my-gateway"
       gatewayNamespace: "gateway-system"
@@ -315,10 +317,10 @@ rulebricks:
 
 This renders `HTTPRoute` resources instead of `Ingress`. Requires a Gateway API implementation (e.g., Envoy Gateway, Cilium, Istio) in your cluster.
 
-| `ingress.type` | Resource Created | Use Case |
-|----------------|------------------|----------|
-| `ingress` | `Ingress` | Standard ingress controllers (nginx, Traefik) |
-| `gateway-api` | `HTTPRoute` | Gateway API implementations |
+| `ingress.type` | Resource Created | Use Case                                      |
+| -------------- | ---------------- | --------------------------------------------- |
+| `ingress`      | `Ingress`        | Standard ingress controllers (nginx, Traefik) |
+| `gateway-api`  | `HTTPRoute`      | Gateway API implementations                   |
 
 Use `ingress.hostname` when your application hostname differs from `global.domain` (e.g., `rulebricks.example.com` vs `example.com`).
 
@@ -336,7 +338,7 @@ rulebricks:
     external:
       host: "redis.example.com"
       port: 6379
-      password: ""  # or reference a secret
+      password: "" # or reference a secret
 ```
 
 When `rulebricks.redis.enabled` is `false`, the chart skips deploying internal Redis and uses your external instance settings.
@@ -370,14 +372,14 @@ Control how database migrations are executed:
 
 ```yaml
 migrations:
-  strategy: "hook"  # default
+  strategy: "hook" # default
 ```
 
-| Strategy | Behavior | Use Case |
-|----------|----------|----------|
-| `hook` | Runs as Helm post-install/post-upgrade hook | Standard deployments |
-| `deployment` | Creates job as regular resource | When post-rendering is needed |
-| `manual` | Renders template without hooks | Full control over execution |
+| Strategy     | Behavior                                    | Use Case                      |
+| ------------ | ------------------------------------------- | ----------------------------- |
+| `hook`       | Runs as Helm post-install/post-upgrade hook | Standard deployments          |
+| `deployment` | Creates job as regular resource             | When post-rendering is needed |
+| `manual`     | Renders template without hooks              | Full control over execution   |
 
 </details>
 
@@ -417,7 +419,7 @@ global:
     cost-center: engineering
   annotations:
     app.kubernetes.io/part-of: rulebricks
-  
+
   # Applied only to pod templates
   podLabels:
     sidecar.istio.io/inject: "true"

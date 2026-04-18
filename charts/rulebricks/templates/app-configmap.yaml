@@ -116,3 +116,25 @@ data:
   SSO_PROVIDER_URL: {{ .Values.global.sso.url | quote }}
   {{- end }}
   {{- end }}
+  # External Authentication (Token Passthrough) - non-sensitive env
+  {{- if and .Values.global .Values.global.externalAuth .Values.global.externalAuth.enabled }}
+  EXTERNAL_AUTH_TOKEN_PASSTHROUGH: "true"
+  NEXT_PUBLIC_EXTERNAL_AUTH_TOKEN_PASSTHROUGH: "true"
+  {{- with .Values.global.externalAuth.header }}
+  EXTERNAL_AUTH_HEADER: {{ . | quote }}
+  {{- end }}
+  {{- if .Values.global.externalAuth.claims }}
+  {{- with .Values.global.externalAuth.claims.id }}
+  EXTERNAL_AUTH_CLAIM_ID: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.global.externalAuth.claims.email }}
+  EXTERNAL_AUTH_CLAIM_EMAIL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.global.externalAuth.claims.name }}
+  EXTERNAL_AUTH_CLAIM_NAME: {{ . | quote }}
+  {{- end }}
+  {{- end }}
+  {{- with .Values.global.externalAuth.publicPaths }}
+  EXTERNAL_AUTH_PUBLIC_PATHS: {{ join "," . | quote }}
+  {{- end }}
+  {{- end }}
