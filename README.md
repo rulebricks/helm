@@ -25,14 +25,26 @@ See [Minimum Cluster Requirements](example-min-cluster.yaml) for an example EKS 
 ## Quick Start
 
 ```bash
-# Install from OCI registry (follow on-screen instructions for DNS & TLS setup)
-helm install rulebricks oci://ghcr.io/rulebricks/charts/stack \
+# Install from the Rulebricks Helm OCI registry (follow on-screen instructions for DNS & TLS setup)
+helm install rulebricks oci://ghcr.io/rulebricks/helm/stack \
   --namespace rulebricks \
   --create-namespace \
   -f your-values.yaml
 ```
 
 After installation, Helm will display instructions for configuring DNS and enabling TLS.
+
+### Version Pinning
+
+Production deployments should pin a chart version from the [GitHub Releases](https://github.com/rulebricks/helm/releases) page:
+
+```bash
+helm install rulebricks oci://ghcr.io/rulebricks/helm/stack \
+  --namespace rulebricks \
+  --create-namespace \
+  --version 0.2.0 \
+  -f your-values.yaml
+```
 
 ## Configuration
 
@@ -111,7 +123,7 @@ For single-phase installation without manual DNS configuration, you can use exte
 #### Option 1: Deploy external-dns with this chart
 
 ```bash
-helm install rulebricks oci://ghcr.io/rulebricks/charts/stack \
+helm install rulebricks oci://ghcr.io/rulebricks/helm/stack \
   --namespace rulebricks \
   --create-namespace \
   -f your-values.yaml \
@@ -137,7 +149,7 @@ global:
 If external-dns is already installed in your cluster:
 
 ```bash
-helm install rulebricks oci://ghcr.io/rulebricks/charts/stack \
+helm install rulebricks oci://ghcr.io/rulebricks/helm/stack \
   --namespace rulebricks \
   --create-namespace \
   -f your-values.yaml \
@@ -591,7 +603,7 @@ chart will try to automate all configuration and migration work for you.
 helm uninstall rulebricks -n rulebricks
 # Clear PVCs
 kubectl delete pvc --all -n rulebricks
-helm install rulebricks oci://ghcr.io/rulebricks/charts/stack -n rulebricks -f your-values.yaml
+helm install rulebricks oci://ghcr.io/rulebricks/helm/stack -n rulebricks -f your-values.yaml
 ```
 
 ### TLS Certificate Issues

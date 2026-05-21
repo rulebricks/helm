@@ -1,21 +1,27 @@
-name: Release Chart
+name: Helm Chart
 
 on:
+  pull_request:
   push:
     branches:
       - main
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Chart version to release, without the leading v (for example, 0.2.0)"
+        required: true
+        type: string
 
 env:
   REGISTRY: ghcr.io
-  CHART_NAMESPACE: rulebricks/charts
+  CANONICAL_CHART_NAMESPACE: rulebricks/helm
 
 jobs:
-  release:
+  validate:
+    name: Validate Chart
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,20 +29,174 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v3
         with:
-          version: "v3.13.0"
+          version: "v3.17.0"
+
+      - name: Build Dependencies
+        run: helm dependency build .
+
+      - name: Lint
+        run: helm lint .
+
+      - name: Template Default Install
+        run: |
+          helm template rulebricks . \
+            --namespace rulebricks \
+            --set global.domain=rulebricks.example.com \
+            --set global.email=ops@example.com
+
+      - name: Template Gateway API Install
+        run: |
+          helm template rulebricks . \
+            --namespace rulebricks \
+            --set global.domain=rulebricks.example.com \
+            --set global.email=ops@example.com \
+            --set rulebricks.ingress.type=gateway-api \
+            --set rulebricks.ingress.gatewayApi.gatewayName=rulebricks-gateway
+
+      - name: Template Ingress Disabled Install
+        run: |
+          helm template rulebricks . \
+            --namespace rulebricks \
+            --set global.domain=rulebricks.example.com \
+            --set global.email=ops@example.com \
+            --set rulebricks.ingress.enabled=false
+
+      - name: Template External Redis And Auth Install
+        run: |
+          helm template rulebricks . \
+            --namespace rulebricks \
+            --set global.domain=rulebricks.example.com \
+            --set global.email=ops@example.com \
+            --set global.externalAuth.enabled=true \
+            --set rulebricks.redis.enabled=false \
+            --set rulebricks.redis.external.host=redis.example.com
+
+  release:
+    name: Release Chart
+    needs: validate
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: "v3.17.0"
+
+      - name: Resolve Release Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+            echo "::error::Invalid chart version: $VERSION"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set Chart Version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          python - <<'PY'
+          from pathlib import Path
+          import os
+
+          version = os.environ["VERSION"]
+          path = Path("Chart.yaml")
+          lines = path.read_text().splitlines()
+          updated = []
+          for line in lines:
+              if line.startswith("version:"):
+                  updated.append(f"version: {version}")
+              elif line.startswith("appVersion:"):
+                  updated.append(f'appVersion: "{version}"')
+              else:
+                  updated.append(line)
+          path.write_text("\n".join(updated) + "\n")
+          PY
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Build Dependencies
+        run: helm dependency build .
+
+      - name: Package Chart
+        id: package
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          CHART_NAME=$(awk '/^name:/ {print $2; exit}' Chart.yaml)
+          helm package . --destination dist
+          CHART_PACKAGE="dist/${CHART_NAME}-${VERSION}.tgz"
+          shasum -a 256 "$CHART_PACKAGE" | tee "${CHART_PACKAGE}.sha256"
+          echo "chart_name=$CHART_NAME" >> "$GITHUB_OUTPUT"
+          echo "chart_package=$CHART_PACKAGE" >> "$GITHUB_OUTPUT"
+          echo "checksum_file=${CHART_PACKAGE}.sha256" >> "$GITHUB_OUTPUT"
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
-      - name: Package and Push
+      - name: Push Canonical OCI Chart
+        id: push_canonical
         run: |
-          # Get chart name and version from Chart.yaml
-          CHART_NAME=$(grep '^name:' Chart.yaml | awk '{print $2}')
-          VERSION=$(grep '^version:' Chart.yaml | awk '{print $2}')
-          echo "📦 Packaging ${CHART_NAME} version ${VERSION}"
+          OUTPUT=$(helm push "${{ steps.package.outputs.chart_package }}" "oci://${{ env.REGISTRY }}/${{ env.CANONICAL_CHART_NAMESPACE }}" 2>&1)
+          echo "$OUTPUT"
+          DIGEST=$(echo "$OUTPUT" | awk '/Digest:/ {print $2}' | tail -n1)
+          if [ -z "$DIGEST" ]; then
+            echo "::error::Could not determine OCI digest from helm push output"
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
-          helm dependency update .
-          helm package .
-          helm push ${CHART_NAME}-${VERSION}.tgz oci://${{ env.REGISTRY }}/${{ env.CHART_NAMESPACE }}
+      - name: Write Release Notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DIGEST="${{ steps.push_canonical.outputs.digest }}"
+          cat > release-notes.md <<EOF
+          # Rulebricks Helm ${VERSION}
 
-          echo "✅ Pushed oci://${{ env.REGISTRY }}/${{ env.CHART_NAMESPACE }}/${CHART_NAME}:${VERSION}"
+          ## Install
+
+          \`\`\`bash
+          helm install rulebricks oci://ghcr.io/rulebricks/helm/stack \\
+            --namespace rulebricks \\
+            --create-namespace \\
+            --version ${VERSION} \\
+            -f your-values.yaml
+          \`\`\`
+
+          ## Digest Pinning
+
+          \`\`\`bash
+          helm install rulebricks oci://ghcr.io/rulebricks/helm/stack@${DIGEST} \\
+            --namespace rulebricks \\
+            --create-namespace \\
+            -f your-values.yaml
+          \`\`\`
+
+          ## Artifacts
+
+          - OCI: \`oci://ghcr.io/rulebricks/helm/stack:${VERSION}\`
+          - Digest: \`${DIGEST}\`
+          EOF
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --target "${{ github.sha }}" \
+            --title "Rulebricks Helm ${{ steps.version.outputs.version }}" \
+            --notes-file release-notes.md \
+            "${{ steps.package.outputs.chart_package }}" \
+            "${{ steps.package.outputs.checksum_file }}"

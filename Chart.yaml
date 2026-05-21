@@ -2,12 +2,12 @@ apiVersion: v2
 name: stack
 description: A unified Helm chart for deploying Rulebricks and its dependencies (Kafka, Supabase, Traefik, etc.)
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"
 icon: https://d1zic6dm9txw4h.cloudfront.net/rulebricks-docs-assets/static/images/application/logo.png
 home: https://rulebricks.com
 sources:
-  - https://github.com/rulebricks/charts
+  - https://github.com/rulebricks/helm
 maintainers:
   - name: Rulebricks
     email: support@rulebricks.com
