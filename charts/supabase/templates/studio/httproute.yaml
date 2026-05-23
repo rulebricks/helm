@@ -1,0 +1,45 @@
+{{- if and .Values.studio.enabled .Values.studio.ingress.enabled (eq (.Values.studio.ingress.type | default "ingress") "gateway-api") -}}
+{{- $fullName := include "supabase.studio.fullname" . -}}
+{{- $svcPort := .Values.studio.service.port -}}
+{{- $ingress := .Values.studio.ingress | default dict -}}
+{{- $gateway := $ingress.gatewayApi | default dict -}}
+{{- $hostname := $ingress.hostname | default (printf "studio.%s" .Values.global.domain) -}}
+{{- if not $gateway.gatewayName }}
+{{- fail "studio.ingress.gatewayApi.gatewayName is required when using gateway-api ingress type" }}
+{{- end }}
+{{- if not $hostname }}
+{{- fail "studio.ingress.hostname or global.domain is required when Supabase Studio ingress is enabled" }}
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "supabase.labels" . | nindent 4 }}
+    app.kubernetes.io/component: studio
+  {{- with $ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    - name: {{ $gateway.gatewayName }}
+      {{- with $gateway.gatewayNamespace }}
+      namespace: {{ . }}
+      {{- end }}
+      {{- with $gateway.sectionName }}
+      sectionName: {{ . }}
+      {{- end }}
+  hostnames:
+    - {{ $hostname | quote }}
+  rules:
+    - matches:
+        {{- range $ingress.paths }}
+        - path:
+            type: {{ ternary "Exact" "PathPrefix" (eq (.pathType | default "Prefix") "Exact") }}
+            value: {{ .path | quote }}
+        {{- end }}
+      backendRefs:
+        - name: {{ $fullName }}
+          port: {{ $svcPort }}
+{{- end }}

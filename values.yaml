@@ -191,6 +191,10 @@ rulebricks:
       repository: index.docker.io/rulebricks/app
       tag: "1.8.3" # https://hub.docker.com/repository/docker/rulebricks/app/tags
       pullPolicy: IfNotPresent
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: ""
+      maxUnavailable: ""
 
     logging:
       enabled: true
@@ -201,6 +205,18 @@ rulebricks:
       # Label to display in App UI – does not change the logging destination
       # See Vector config below to configure log forwarding
       loggingDestination: "Console (stdout)"
+      # Kafka SSL/SASL settings for external brokers.
+      # For AWS MSK IAM, set kafkaSsl=true and kafkaSasl.mechanism="aws-iam";
+      # credentials are sourced from the HPS pod IAM role via IRSA.
+      kafkaSsl: false
+      kafkaSasl:
+        mechanism: "" # "aws-iam" | "scram-sha-256" | "scram-sha-512" | "plain" | ""
+        region: ""
+        username: ""
+        password: ""
+        existingSecret: ""
+        existingSecretUsernameKey: "KAFKA_SASL_USERNAME"
+        existingSecretPasswordKey: "KAFKA_SASL_PASSWORD"
 
   # HPS (High Performance Server)
   # HPS intercepts requests on solution endpoints via Traefik and processes them scalably
@@ -211,6 +227,10 @@ rulebricks:
       tag: "1.7.0"
       pullPolicy: Always # HPS image may receive silent updates
     replicas: 3 # Minimum recommended
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: ""
+      maxUnavailable: ""
     resources:
       requests:
         cpu: "1000m"
@@ -221,6 +241,10 @@ rulebricks:
     workers:
       enabled: true
       replicas: 4
+      podDisruptionBudget:
+        enabled: false
+        minAvailable: ""
+        maxUnavailable: ""
       keda:
         enabled: true
         minReplicaCount: 4
@@ -232,6 +256,9 @@ rulebricks:
 
   ingress:
     enabled: true
+    app:
+      # Set false when an external auth proxy owns the app catch-all route.
+      enabled: true
     className: traefik
     # Host is automatically configured from global.domain
     paths:
@@ -455,18 +482,20 @@ supabase:
   enabled: true
   # Database options:
   #   1. Self-hosted (default): Set db.enabled: true (below)
-  #   2. External PostgreSQL: Set db.enabled: false and configure auth/rest/etc environment
+  #   2. External PostgreSQL: Set db.enabled: false and configure externalDatabase once
   #
-  # For external PostgreSQL, each service needs DB_HOST configured in its environment:
-  #   auth:
-  #     environment:
-  #       DB_HOST: "your-external-postgres.example.com"
-  #   rest:
-  #     environment:
-  #       DB_HOST: "your-external-postgres.example.com"
-  #   ... (same for realtime, meta, storage, analytics, functions)
-  #
-  # Credentials should be set in secret.db (username, password, database)
+  # For external PostgreSQL, host/port are shared across Supabase services here.
+  # Credentials can remain in secret.db, or use externalDatabase.secretRef to
+  # point every service at one existing Kubernetes Secret.
+  externalDatabase:
+    enabled: false
+    host: ""
+    port: 5432
+    secretRef: ""
+    secretRefKey:
+      username: username
+      password: password
+      database: database
   secret:
     # SMTP credentials are sourced from global.smtp.user and global.smtp.pass
     # JWT keys are sourced from global.supabase.* (anonKey, serviceKey, jwtSecret)
@@ -493,6 +522,18 @@ supabase:
       enabled: true
       className: traefik
       annotations: {}
+  # Optional separate hostname for Supabase Studio
+  studio:
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: ""
+      maxUnavailable: ""
+    ingress:
+      enabled: false
+      type: "ingress"
+      className: traefik
+      hostname: "" # Defaults to studio.<global.domain>
+      annotations: {}
 
 # =============================================================================
 # MONITORING & ALERTING
@@ -518,6 +559,24 @@ kube-prometheus-stack:
               requests:
                 storage: 50Gi
       remoteWrite: []
+      # Examples:
+      # - Azure Monitor managed Prometheus:
+      #   remoteWrite:
+      #     - url: "https://<workspace>.<region>.metrics.ingest.monitor.azure.com/dataCollectionRules/<dcr-id>/streams/Microsoft-PrometheusMetrics/api/v1/write?api-version=2023-04-24"
+      #       azureAd:
+      #         cloud: AzurePublic
+      #         managedIdentity:
+      #           clientId: "<managed-identity-client-id>"
+      # - Grafana Cloud / Mimir-compatible:
+      #   remoteWrite:
+      #     - url: "https://prometheus-prod-XX.grafana.net/api/prom/push"
+      #       basicAuth:
+      #         username:
+      #           name: prometheus-remote-write
+      #           key: username
+      #         password:
+      #           name: prometheus-remote-write
+      #           key: password
 
 # =============================================================================
 # EXTERNAL SECRETS OPERATOR INTEGRATION (overlay-facing metadata)

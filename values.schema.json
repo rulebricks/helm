@@ -185,7 +185,80 @@
             "logging": {
               "type": "object",
               "properties": {
-                "kafkaBrokers": { "type": "string" }
+                "kafkaBrokers": { "type": "string" },
+                "kafkaSsl": { "type": "boolean" },
+                "kafkaSasl": {
+                  "type": "object",
+                  "properties": {
+                    "mechanism": {
+                      "type": "string",
+                      "enum": ["aws-iam", "scram-sha-256", "scram-sha-512", "plain", ""]
+                    },
+                    "region": { "type": "string" },
+                    "username": { "type": "string" },
+                    "password": { "type": "string" },
+                    "existingSecret": { "type": "string" },
+                    "existingSecretUsernameKey": { "type": "string" },
+                    "existingSecretPasswordKey": { "type": "string" }
+                  }
+                }
+              }
+            },
+            "serviceAccount": {
+              "type": "object",
+              "properties": {
+                "create": { "type": "boolean" },
+                "annotations": { "type": "object", "additionalProperties": { "type": "string" } },
+                "automount": { "type": "boolean" },
+                "name": { "type": "string" }
+              }
+            },
+            "podDisruptionBudget": {
+              "$ref": "#/definitions/podDisruptionBudget"
+            }
+          }
+        },
+        "hps": {
+          "type": "object",
+          "properties": {
+            "serviceAccount": {
+              "type": "object",
+              "properties": {
+                "create": { "type": "boolean" },
+                "annotations": { "type": "object", "additionalProperties": { "type": "string" } },
+                "automount": { "type": "boolean" },
+                "name": { "type": "string" }
+              }
+            },
+            "podDisruptionBudget": {
+              "$ref": "#/definitions/podDisruptionBudget"
+            },
+            "workers": {
+              "type": "object",
+              "properties": {
+                "serviceAccount": {
+                  "type": "object",
+                  "properties": {
+                    "create": { "type": "boolean" },
+                    "annotations": { "type": "object", "additionalProperties": { "type": "string" } },
+                    "automount": { "type": "boolean" },
+                    "name": { "type": "string" }
+                  }
+                },
+                "podDisruptionBudget": {
+                  "$ref": "#/definitions/podDisruptionBudget"
+                }
+              }
+            }
+          }
+        },
+        "ingress": {
+          "type": "object",
+          "properties": {
+            "app": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" }
               }
             }
           }
@@ -195,7 +268,66 @@
     "supabase": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": { "type": "boolean" },
+        "externalDatabase": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "host": { "type": "string" },
+            "port": { "type": ["integer", "string"] },
+            "secretRef": { "type": "string" },
+            "secretRefKey": {
+              "type": "object",
+              "properties": {
+                "username": { "type": "string" },
+                "password": { "type": "string" },
+                "database": { "type": "string" }
+              }
+            }
+          }
+        },
+        "studio": {
+          "type": "object",
+          "properties": {
+            "ingress": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "type": { "type": "string", "enum": ["ingress", "gateway-api"] },
+                "className": { "type": "string" },
+                "hostname": { "type": "string" },
+                "annotations": { "type": "object", "additionalProperties": { "type": "string" } },
+                "paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": { "type": "string" },
+                      "pathType": { "type": "string" }
+                    }
+                  }
+                },
+                "gatewayApi": {
+                  "type": "object",
+                  "properties": {
+                    "gatewayName": { "type": "string" },
+                    "gatewayNamespace": { "type": "string" },
+                    "sectionName": { "type": "string" }
+                  }
+                },
+                "tls": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": { "type": ["boolean", "string"] }
+                  }
+                }
+              }
+            },
+            "podDisruptionBudget": {
+              "$ref": "#/definitions/podDisruptionBudget"
+            }
+          }
+        }
       }
     },
     "kafka": {
@@ -570,6 +702,15 @@
         "value": { "type": "string" },
         "effect": { "type": "string", "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"] },
         "tolerationSeconds": { "type": "integer" }
+      }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "description": "Kubernetes PodDisruptionBudget configuration",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minAvailable": { "type": ["integer", "string"] },
+        "maxUnavailable": { "type": ["integer", "string"] }
       }
     },
     "resources": {

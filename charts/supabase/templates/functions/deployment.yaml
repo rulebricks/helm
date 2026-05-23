@@ -42,46 +42,32 @@ spec:
           image: "{{ .Values.functions.image.repository }}:{{ .Values.functions.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.functions.image.pullPolicy }}
           env:
+            {{- $dbSkipKeys := list "DB_HOSTNAME" "DB_PORT" }}
             {{- range $key, $value := .Values.functions.environment }}
+            {{- if not (has $key $dbSkipKeys) }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- end }}
             - name: DB_HOSTNAME
-              {{- if .Values.db.enabled }}
-              value: {{ include "supabase.db.fullname" . }}
-              {{- else }}
-              value: $(DB_HOST)
-              {{- end }}
+              value: {{ include "supabase.db.host" . | quote }}
+            - name: DB_PORT
+              value: {{ include "supabase.db.port" . | quote }}
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.secret.db.secretRef }}
-                  name: {{ .Values.secret.db.secretRef }}
-                  key: {{ .Values.secret.db.secretRefKey.password | default "password" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.db" . }}
-                  key: password
-                  {{- end }}
+                  name: {{ include "supabase.db.secretName" . }}
+                  key: {{ include "supabase.db.secretKey" (dict "root" . "field" "password" "default" "password") }}
             - name: DB_PASSWORD_ENC
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.secret.db.secretRef }}
-                  name: {{ .Values.secret.db.secretRef }}
-                  key: {{ .Values.secret.db.secretRefKey.password | default "password" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.db" . }}
-                  key: password_encoded
-                  {{- end }}
+                  name: {{ include "supabase.db.secretName" . }}
+                  key: {{ include "supabase.db.encodedPasswordKey" . }}
             - name: DB_DATABASE
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.secret.db.secretRef }}
-                  name: {{ .Values.secret.db.secretRef }}
-                  key: {{ .Values.secret.db.secretRefKey.database | default "database" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.db" . }}
-                  key: database
-                  {{- end }}
+                  name: {{ include "supabase.db.secretName" . }}
+                  key: {{ include "supabase.db.secretKey" (dict "root" . "field" "database" "default" "database") }}
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:

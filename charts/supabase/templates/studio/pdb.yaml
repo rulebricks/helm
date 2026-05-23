@@ -1,0 +1,29 @@
+{{- if .Values.studio.enabled }}
+{{- with .Values.studio.podDisruptionBudget }}
+{{- if .enabled }}
+{{- if and .minAvailable .maxUnavailable }}
+{{- fail "studio.podDisruptionBudget: set only one of minAvailable or maxUnavailable" }}
+{{- end }}
+{{- if not (or .minAvailable .maxUnavailable) }}
+{{- fail "studio.podDisruptionBudget: set minAvailable or maxUnavailable when enabled" }}
+{{- end }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "supabase.studio.fullname" $ }}
+  labels:
+    {{- include "supabase.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: studio
+spec:
+  {{- with .minAvailable }}
+  minAvailable: {{ . | quote }}
+  {{- end }}
+  {{- with .maxUnavailable }}
+  maxUnavailable: {{ . | quote }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "supabase.studio.selectorLabels" $ | nindent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}

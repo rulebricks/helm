@@ -29,6 +29,15 @@ app:
   podLabels: {}
   # Additional annotations for pods (merged with global.podAnnotations)
   podAnnotations: {}
+  serviceAccount:
+    create: false
+    annotations: {}
+    automount: true
+    name: ""
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: ""
+    maxUnavailable: ""
   resources:
     requests:
       cpu: 100m
@@ -59,6 +68,15 @@ app:
     kafkaBrokers: ""  # Override Kafka brokers URL, defaults to in-cluster Kafka
     kafkaTopic: "logs"
     loggingDestination: ""
+    kafkaSsl: false
+    kafkaSasl:
+      mechanism: ""    # "aws-iam" | "scram-sha-256" | "scram-sha-512" | "plain" | ""
+      region: ""       # Required when mechanism is "aws-iam"; credentials come from pod IAM.
+      username: ""     # SCRAM/PLAIN only
+      password: ""     # SCRAM/PLAIN only
+      existingSecret: ""
+      existingSecretUsernameKey: "KAFKA_SASL_USERNAME"
+      existingSecretPasswordKey: "KAFKA_SASL_PASSWORD"
   # AI features (optional)
   ai:
     enabled: false
@@ -101,6 +119,15 @@ hps:
   # Pod labels/annotations
   podLabels: {}
   podAnnotations: {}
+  serviceAccount:
+    create: false
+    annotations: {}
+    automount: true
+    name: ""
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: ""
+    maxUnavailable: ""
   # Extra environment variables
   extraEnv: []
   extraEnvFrom: []
@@ -123,6 +150,15 @@ hps:
     # Pod labels/annotations
     podLabels: {}
     podAnnotations: {}
+    serviceAccount:
+      create: false
+      annotations: {}
+      automount: true
+      name: ""
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: ""
+      maxUnavailable: ""
     # Extra environment variables
     extraEnv: []
     extraEnvFrom: []
@@ -199,6 +235,9 @@ redis:
 
 ingress:
   enabled: true
+  app:
+    # Render the app catch-all route. Set false when a separate auth proxy owns app routing.
+    enabled: true
   # Ingress type: "ingress" (standard K8s Ingress) or "gateway-api" (HTTPRoute)
   type: "ingress"
   # Ingress class name (used when type: "ingress")

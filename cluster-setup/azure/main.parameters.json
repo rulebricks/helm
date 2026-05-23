@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "clusterName": {
+      "value": "rulebricks-cluster"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "kubernetesVersion": {
+      "value": "1.34"
+    },
+    "rulebricksNamespace": {
+      "value": "rulebricks"
+    },
+    "vectorServiceAccountName": {
+      "value": "vector"
+    },
+    "prometheusServiceAccountName": {
+      "value": "prometheus"
+    },
+    "enableExternalDns": {
+      "value": false
+    },
+    "dnsZoneResourceGroup": {
+      "value": ""
+    },
+    "enableBlobLogging": {
+      "value": false
+    },
+    "loggingStorageAccountName": {
+      "value": ""
+    }
+  }
+}

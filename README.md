@@ -20,7 +20,7 @@ Resources to deploy custom configurations of Rulebricks and its dependencies via
 See [External Services](https://rulebricks.com/docs/private-deployment/external-services) for more information on externalizing certain services.
 See [Authentication](https://rulebricks.com/docs/private-deployment/sso) for more information on what happens after you configure SSO.
 
-See [Minimum Cluster Requirements](example-min-cluster.yaml) for an example EKS cluster configuration.
+See [`cluster-setup/`](cluster-setup/) for native AWS, Azure, and GCP cluster bootstrap resources and account checks. The AWS [`cluster.yaml`](cluster-setup/aws/cluster.yaml) is the minimum `eksctl` config.
 
 ## Quick Start
 
@@ -169,6 +169,42 @@ When `global.externalDnsEnabled=true`, the following records are configured:
 </details>
 
 <details>
+<summary><strong>Cluster Setup Resources</strong></summary>
+
+The `cluster-setup/` directory contains cloud-native resources for validating account access or creating a Kubernetes cluster outside of the Rulebricks CLI Terraform flow:
+
+- `cluster-setup/aws/check-aws-access.sh` validates AWS identity, common EKS/EC2/IAM access, quota, `eksctl`, `kubectl`, and Helm.
+- `cluster-setup/aws/cluster.yaml` creates a minimum ARM64 EKS cluster with `eksctl`.
+- `cluster-setup/azure/check-aks-prereqs.sh` validates Azure login, provider registration, quota, `kubectl`, and Helm.
+- `cluster-setup/azure/main.bicep` creates a minimum ARM64 AKS cluster with Azure CNI, Calico, Disk CSI, OIDC issuer, and Workload Identity.
+- `cluster-setup/gcp/check-gke-prereqs.sh` validates GCP auth, required APIs, quota, GKE access, `kubectl`, and Helm.
+- `cluster-setup/gcp/README.md` shows the native `gcloud` commands for a minimum ARM64 GKE cluster.
+
+Run the account checks before installing:
+
+```bash
+# AWS
+AWS_REGION=us-east-1 bash cluster-setup/aws/check-aws-access.sh
+cd cluster-setup/aws && eksctl create cluster -f cluster.yaml
+
+# Azure
+AZURE_LOCATION=eastus bash cluster-setup/azure/check-aks-prereqs.sh
+az group create --name rulebricks-rg --location eastus
+az deployment group create \
+  --resource-group rulebricks-rg \
+  --template-file cluster-setup/azure/main.bicep \
+  --parameters @cluster-setup/azure/main.parameters.json
+
+# GCP
+GCP_REGION=us-central1 bash cluster-setup/gcp/check-gke-prereqs.sh
+# Then follow cluster-setup/gcp/README.md for the gcloud create commands.
+```
+
+Monitoring destinations, including local Grafana and remote_write targets, are configured through Helm values or the CLI wizard, not these cluster setup resources.
+
+</details>
+
+<details>
 <summary><strong>Using Supabase Cloud</strong></summary>
 
 Even if you use Supabase Cloud instead of self-hosting, this chart will automatically configure your project. You will need to find and provide certain information from your newly created account/project as values.
@@ -204,6 +240,15 @@ The migration job will:
 - Link to your project
 - Push the database schema via `supabase db push`
 - Configure auth settings based on your domain
+
+</details>
+
+<details>
+<summary><strong>External Kafka SSL/SASL</strong></summary>
+
+For external Kafka brokers, configure `rulebricks.app.logging.kafkaBrokers` and the optional `kafkaSsl` / `kafkaSasl` settings. The full MSK IAM and SCRAM examples live in `/Users/sidgarimella/.rulebricks/deployments/preview/values.yaml`, which is the internal source of truth for deployment configuration.
+
+For AWS MSK with IAM auth, set `kafkaSsl: true`, `kafkaSasl.mechanism: "aws-iam"`, and `kafkaSasl.region`; credentials come from the HPS pod IAM role via `rulebricks.hps.serviceAccount.annotations`. This chart only exposes the configuration to the pods. HPS must also include the corresponding KafkaJS `oauthbearer` implementation using `aws-msk-iam-sasl-signer-js`.
 
 </details>
 
@@ -335,6 +380,42 @@ This renders `HTTPRoute` resources instead of `Ingress`. Requires a Gateway API 
 | `gateway-api`  | `HTTPRoute`      | Gateway API implementations                   |
 
 Use `ingress.hostname` when your application hostname differs from `global.domain` (e.g., `rulebricks.example.com` vs `example.com`).
+
+</details>
+
+<details>
+<summary><strong>External Auth Proxy Routing</strong></summary>
+
+If Rulebricks is fronted by an external auth proxy such as Oathkeeper, you can suppress chart-owned app routing while keeping HPS API routes managed by the chart:
+
+```yaml
+rulebricks:
+  ingress:
+    enabled: true
+    app:
+      enabled: false
+```
+
+Use `rulebricks.ingress.enabled: false` instead when your own Ingress or HTTPRoute should own both the app catch-all route and HPS API routes.
+
+</details>
+
+<details>
+<summary><strong>Exposing Supabase Studio</strong></summary>
+
+Supabase Studio can be exposed on a separate hostname from the app and Kong API:
+
+```yaml
+supabase:
+  studio:
+    ingress:
+      enabled: true
+      type: "ingress" # or "gateway-api"
+      hostname: "studio.example.com" # defaults to studio.<global.domain>
+      annotations: {}
+```
+
+For Gateway API, set `supabase.studio.ingress.type: gateway-api` and configure `supabase.studio.ingress.gatewayApi.gatewayName`. Studio dashboard authentication is controlled by `supabase.secret.dashboard.username` and `supabase.secret.dashboard.password`.
 
 </details>
 

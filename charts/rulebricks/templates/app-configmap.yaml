@@ -90,6 +90,15 @@ data:
   {{- $kafkaBrokers := .Values.app.logging.kafkaBrokers | default (include "rulebricks-chart.kafka.bootstrapServers" .) }}
   KAFKA_BROKERS: {{ $kafkaBrokers | quote }}
   KAFKA_TOPIC: {{ .Values.app.logging.kafkaTopic | default "logs" | quote }}
+  KAFKA_SSL: {{ ternary "true" "false" (.Values.app.logging.kafkaSsl | default false) | quote }}
+  {{- with .Values.app.logging.kafkaSasl }}
+  {{- with .mechanism }}
+  KAFKA_SASL_MECHANISM: {{ . | quote }}
+  {{- end }}
+  {{- with .region }}
+  KAFKA_SASL_REGION: {{ . | quote }}
+  {{- end }}
+  {{- end }}
   NEXT_PUBLIC_LOGGING_DESTINATION: {{ .Values.app.logging.loggingDestination | default "" | quote }}
   {{- end }}
   {{- end }}

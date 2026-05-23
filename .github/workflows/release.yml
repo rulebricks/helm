@@ -5,14 +5,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v*.*.*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Chart version to release, without the leading v (for example, 0.2.0)"
-        required: true
-        type: string
 
 env:
   REGISTRY: ghcr.io
@@ -84,8 +76,11 @@ jobs:
   release:
     name: Release Chart
     needs: validate
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    concurrency:
+      group: helm-chart-release
+      cancel-in-progress: false
     permissions:
       contents: write
       packages: write
@@ -100,18 +95,48 @@ jobs:
 
       - name: Resolve Release Version
         id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          else
-            VERSION="${GITHUB_REF_NAME#v}"
-          fi
-
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
-            echo "::error::Invalid chart version: $VERSION"
+          BASE_VERSION=$(awk '/^version:/ {print $2; exit}' Chart.yaml)
+          if ! echo "$BASE_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid base chart version in Chart.yaml: $BASE_VERSION"
             exit 1
           fi
 
+          LATEST_VERSION=$(gh release list \
+            --repo "${{ github.repository }}" \
+            --exclude-drafts \
+            --exclude-pre-releases \
+            --limit 100 \
+            --json tagName \
+            --jq '[.[].tagName | sub("^v"; "") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))] | sort_by(split(".") | map(tonumber)) | last // ""')
+
+          VERSION=$(BASE_VERSION="$BASE_VERSION" LATEST_VERSION="$LATEST_VERSION" python - <<'PY'
+          import os
+
+          def parse(version: str) -> tuple[int, int, int]:
+              return tuple(int(part) for part in version.split("."))  # type: ignore[return-value]
+
+          base = parse(os.environ["BASE_VERSION"])
+          latest_raw = os.environ.get("LATEST_VERSION", "")
+
+          if not latest_raw:
+              next_version = base
+          else:
+              latest = parse(latest_raw)
+              if latest < base:
+                  next_version = base
+              else:
+                  next_version = (latest[0], latest[1], latest[2] + 1)
+
+          print(".".join(str(part) for part in next_version))
+          PY
+          )
+
+          echo "Base chart version: $BASE_VERSION"
+          echo "Latest released version: ${LATEST_VERSION:-none}"
+          echo "Next release version: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 

@@ -60,3 +60,72 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Resolve the database host used by Supabase services.
+*/}}
+{{- define "supabase.db.host" -}}
+{{- if .Values.db.enabled -}}
+{{- include "supabase.db.fullname" . -}}
+{{- else if and .Values.externalDatabase .Values.externalDatabase.enabled .Values.externalDatabase.host -}}
+{{- .Values.externalDatabase.host -}}
+{{- else -}}
+{{- .Values.auth.environment.DB_HOST -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the database port used by Supabase services.
+*/}}
+{{- define "supabase.db.port" -}}
+{{- if and .Values.externalDatabase .Values.externalDatabase.enabled .Values.externalDatabase.port -}}
+{{- .Values.externalDatabase.port -}}
+{{- else -}}
+{{- .Values.auth.environment.DB_PORT | default 5432 -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the database credentials secret name.
+*/}}
+{{- define "supabase.db.secretName" -}}
+{{- if and .Values.externalDatabase .Values.externalDatabase.enabled .Values.externalDatabase.secretRef -}}
+{{- .Values.externalDatabase.secretRef -}}
+{{- else if .Values.secret.db.secretRef -}}
+{{- .Values.secret.db.secretRef -}}
+{{- else -}}
+{{- include "supabase.secret.db" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve a database secret key.
+Usage: {{ include "supabase.db.secretKey" (dict "root" . "field" "password" "default" "password") }}
+*/}}
+{{- define "supabase.db.secretKey" -}}
+{{- $root := .root -}}
+{{- $field := .field -}}
+{{- $default := .default -}}
+{{- if and $root.Values.externalDatabase $root.Values.externalDatabase.enabled $root.Values.externalDatabase.secretRef -}}
+  {{- index $root.Values.externalDatabase.secretRefKey $field | default $default -}}
+{{- else if $root.Values.secret.db.secretRef -}}
+  {{- index $root.Values.secret.db.secretRefKey $field | default $default -}}
+{{- else -}}
+  {{- $default -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the secret key used for URL-encoded database passwords.
+Existing external secrets keep using the normal password key for backward compatibility.
+*/}}
+{{- define "supabase.db.encodedPasswordKey" -}}
+{{- $root := . -}}
+{{- if and $root.Values.externalDatabase $root.Values.externalDatabase.enabled $root.Values.externalDatabase.secretRef -}}
+  {{- $root.Values.externalDatabase.secretRefKey.password | default "password" -}}
+{{- else if $root.Values.secret.db.secretRef -}}
+  {{- $root.Values.secret.db.secretRefKey.password | default "password" -}}
+{{- else -}}
+password_encoded
+{{- end -}}
+{{- end }}

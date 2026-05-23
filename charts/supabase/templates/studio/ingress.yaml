@@ -1,0 +1,54 @@
+{{- if and .Values.studio.enabled .Values.studio.ingress.enabled (ne (.Values.studio.ingress.type | default "ingress") "gateway-api") -}}
+{{- $fullName := include "supabase.studio.fullname" . -}}
+{{- $svcPort := .Values.studio.service.port -}}
+{{- $ingress := .Values.studio.ingress | default dict -}}
+{{- $hostname := $ingress.hostname | default (printf "studio.%s" .Values.global.domain) -}}
+{{- $tlsEnabled := eq (.Values.global.tlsEnabled | toString) "true" -}}
+{{- if and $ingress.tls (hasKey $ingress.tls "enabled") (ne ($ingress.tls.enabled | toString) "") -}}
+  {{- $tlsEnabled = eq ($ingress.tls.enabled | toString) "true" -}}
+{{- end -}}
+{{- if not $hostname }}
+{{- fail "studio.ingress.hostname or global.domain is required when Supabase Studio ingress is enabled" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "supabase.labels" . | nindent 4 }}
+    app.kubernetes.io/component: studio
+  annotations:
+    {{- if $tlsEnabled }}
+    cert-manager.io/cluster-issuer: {{ .Release.Name }}-letsencrypt
+    {{- end }}
+    {{- if and .Values.global .Values.global.externalDnsEnabled }}
+    external-dns.alpha.kubernetes.io/hostname: {{ $hostname }}
+    external-dns.alpha.kubernetes.io/ttl: "300"
+    {{- end }}
+    {{- with $ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with $ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if $tlsEnabled }}
+  tls:
+    - hosts:
+        - {{ $hostname | quote }}
+      secretName: {{ $fullName }}-tls
+  {{- end }}
+  rules:
+    - host: {{ $hostname | quote }}
+      http:
+        paths:
+          {{- range $ingress.paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ $fullName }}
+                port:
+                  number: {{ $svcPort }}
+          {{- end }}
+{{- end }}

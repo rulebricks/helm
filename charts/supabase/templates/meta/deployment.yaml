@@ -38,34 +38,27 @@ spec:
           image: "{{ .Values.meta.image.repository }}:{{ .Values.meta.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.meta.image.pullPolicy }}
           env:
+            {{- $dbSkipKeys := list "DB_HOST" "DB_PORT" }}
             {{- range $key, $value := .Values.meta.environment }}
+            {{- if not (has $key $dbSkipKeys) }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
-            {{- if .Values.db.enabled }}
-            - name: DB_HOST
-              value: {{ include "supabase.db.fullname" . }}
             {{- end }}
+            - name: DB_HOST
+              value: {{ include "supabase.db.host" . | quote }}
+            - name: DB_PORT
+              value: {{ include "supabase.db.port" . | quote }}
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.secret.db.secretRef }}
-                  name: {{ .Values.secret.db.secretRef }}
-                  key: {{ .Values.secret.db.secretRefKey.password | default "password" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.db" . }}
-                  key: password
-                  {{- end }}
+                  name: {{ include "supabase.db.secretName" . }}
+                  key: {{ include "supabase.db.secretKey" (dict "root" . "field" "password" "default" "password") }}
             - name: DB_NAME
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.secret.db.secretRef }}
-                  name: {{ .Values.secret.db.secretRef }}
-                  key: {{ .Values.secret.db.secretRefKey.database | default "database" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.db" . }}
-                  key: database
-                  {{- end }}
+                  name: {{ include "supabase.db.secretName" . }}
+                  key: {{ include "supabase.db.secretKey" (dict "root" . "field" "database" "default" "database") }}
             - name: PG_META_DB_HOST
               value: $(DB_HOST)
             - name: PG_META_DB_PORT

@@ -20,23 +20,14 @@ spec:
               echo "Database is ready"
           env:
             - name: DB_HOST
-              {{- if .Values.db.enabled }}
-              value: {{ include "supabase.db.fullname" . | quote }}
-              {{- else }}
-              value: {{ .Values.auth.environment.DB_HOST | quote }}
-              {{- end }}
+              value: {{ include "supabase.db.host" . | quote }}
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.secret.db.secretRef }}
-                  name: {{ .Values.secret.db.secretRef }}
-                  key: {{ .Values.secret.db.secretRefKey.username | default "username" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.db" . }}
-                  key: username
-                  {{- end }}
+                  name: {{ include "supabase.db.secretName" . }}
+                  key: {{ include "supabase.db.secretKey" (dict "root" . "field" "username" "default" "username") }}
             - name: DB_PORT
-              value: {{ .Values.auth.environment.DB_PORT | quote }}
+              value: {{ include "supabase.db.port" . | quote }}
           image: postgres:15-alpine
           imagePullPolicy: IfNotPresent
           name: test-db

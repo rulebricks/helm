@@ -1,0 +1,29 @@
+{{- with .Values.app.podDisruptionBudget }}
+{{- if .enabled }}
+{{- if and .minAvailable .maxUnavailable }}
+{{- fail "app.podDisruptionBudget: set only one of minAvailable or maxUnavailable" }}
+{{- end }}
+{{- if not (or .minAvailable .maxUnavailable) }}
+{{- fail "app.podDisruptionBudget: set minAvailable or maxUnavailable when enabled" }}
+{{- end }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "rulebricks-chart.app.fullname" $ }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: app
+spec:
+  {{- with .minAvailable }}
+  minAvailable: {{ . | quote }}
+  {{- end }}
+  {{- with .maxUnavailable }}
+  maxUnavailable: {{ . | quote }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "rulebricks-chart.app.fullname" $ }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+{{- end }}
+{{- end }}

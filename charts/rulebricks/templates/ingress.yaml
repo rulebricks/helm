@@ -3,10 +3,16 @@ Ingress resource for Rulebricks
 Supports multiple ingress controllers via ingress.className
 For Gateway API (HTTPRoute), see httproute.yaml
 */ -}}
-{{- if and .Values.ingress.enabled (ne (.Values.ingress.type | default "ingress") "gateway-api") }}
 {{- $name := include "rulebricks-chart.fullname" . -}}
 {{- $labels := include "rulebricks-chart.labels" . | nindent 4 -}}
 {{- $ingress := .Values.ingress | default dict -}}
+{{- $ingressApp := $ingress.app | default dict -}}
+{{- $appIngressEnabled := true -}}
+{{- if hasKey $ingressApp "enabled" -}}
+  {{- $appIngressEnabled = $ingressApp.enabled -}}
+{{- end -}}
+{{- $hpsIngressEnabled := and .Values.hps .Values.hps.enabled -}}
+{{- if and .Values.ingress.enabled (ne (.Values.ingress.type | default "ingress") "gateway-api") (or $appIngressEnabled $hpsIngressEnabled) }}
 {{- $ingressClass := $ingress.className | default "traefik" -}}
 {{- $hosts := list -}}
 {{- if $ingress.hosts -}}
@@ -121,6 +127,7 @@ spec:
               {{- end }}
           {{- end }}
 
+          {{- if $appIngressEnabled }}
           # Default paths - fallback to main app
           {{- range .paths }}
           - path: {{ .path }}
@@ -137,6 +144,7 @@ spec:
               serviceName: {{ $name }}
               servicePort: 80
               {{- end }}
+          {{- end }}
           {{- end }}
     {{- end }}
 {{- end }}

@@ -1,0 +1,31 @@
+{{- if and .Values.hps .Values.hps.enabled }}
+{{- with .Values.hps.podDisruptionBudget }}
+{{- if .enabled }}
+{{- if and .minAvailable .maxUnavailable }}
+{{- fail "hps.podDisruptionBudget: set only one of minAvailable or maxUnavailable" }}
+{{- end }}
+{{- if not (or .minAvailable .maxUnavailable) }}
+{{- fail "hps.podDisruptionBudget: set minAvailable or maxUnavailable when enabled" }}
+{{- end }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "rulebricks-chart.hps.fullname" $ }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: hps
+spec:
+  {{- with .minAvailable }}
+  minAvailable: {{ . | quote }}
+  {{- end }}
+  {{- with .maxUnavailable }}
+  maxUnavailable: {{ . | quote }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" $ }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+{{- end }}
+{{- end }}
+{{- end }}

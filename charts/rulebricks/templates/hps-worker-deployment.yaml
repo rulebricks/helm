@@ -39,6 +39,7 @@ spec:
     spec:
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}
+      serviceAccountName: {{ include "rulebricks-chart.hps-worker.serviceAccountName" . }}
       {{- /* Node selector: component-level overrides global */ -}}
       {{- $workerNodeSelector := .Values.hps.workers.nodeSelector | default dict }}
       {{- if and (not $workerNodeSelector) .Values.global .Values.global.scheduling }}
@@ -153,6 +154,21 @@ spec:
               value: {{ .Values.hps.workers.topics | default "solution" | quote }}
             - name: NODE_ENV
               value: "production"
+            {{- with .Values.app.logging.kafkaSasl }}
+            {{- if .existingSecret }}
+            # Optional external Kafka SASL credentials secret
+            - name: KAFKA_SASL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .existingSecret }}
+                  key: {{ .existingSecretUsernameKey | default "KAFKA_SASL_USERNAME" }}
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .existingSecret }}
+                  key: {{ .existingSecretPasswordKey | default "KAFKA_SASL_PASSWORD" }}
+            {{- end }}
+            {{- end }}
             {{- /* Extra environment variables */ -}}
             {{- with .Values.hps.workers.extraEnv }}
             {{- toYaml . | nindent 12 }}

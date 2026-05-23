@@ -2,9 +2,15 @@
 HTTPRoute resource for Rulebricks (Kubernetes Gateway API)
 Only rendered when ingress.type is "gateway-api"
 */ -}}
-{{- if and .Values.ingress.enabled (eq (.Values.ingress.type | default "ingress") "gateway-api") }}
 {{- $name := include "rulebricks-chart.fullname" . -}}
 {{- $ingress := .Values.ingress | default dict -}}
+{{- $ingressApp := $ingress.app | default dict -}}
+{{- $appIngressEnabled := true -}}
+{{- if hasKey $ingressApp "enabled" -}}
+  {{- $appIngressEnabled = $ingressApp.enabled -}}
+{{- end -}}
+{{- $hpsIngressEnabled := and .Values.hps .Values.hps.enabled -}}
+{{- if and .Values.ingress.enabled (eq (.Values.ingress.type | default "ingress") "gateway-api") (or $appIngressEnabled $hpsIngressEnabled) }}
 {{- $gateway := $ingress.gatewayApi | default dict -}}
 {{- $hostname := $ingress.hostname | default .Values.global.domain -}}
 
@@ -66,6 +72,7 @@ spec:
         - name: {{ include "rulebricks-chart.hps.fullname" . }}
           port: 80
     {{- end }}
+    {{- if $appIngressEnabled }}
     # Default route - all other traffic to main app
     - matches:
         - path:
@@ -74,4 +81,5 @@ spec:
       backendRefs:
         - name: {{ $name }}
           port: 80
+    {{- end }}
 {{- end }}

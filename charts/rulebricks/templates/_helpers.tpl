@@ -125,6 +125,39 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
+Create the name of the app service account to use
+*/}}
+{{- define "rulebricks-chart.app.serviceAccountName" -}}
+{{- if and .Values.app.serviceAccount .Values.app.serviceAccount.create }}
+{{- default (include "rulebricks-chart.app.fullname" .) .Values.app.serviceAccount.name }}
+{{- else }}
+{{- include "rulebricks-chart.serviceAccountName" . }}
+{{- end }}
+{{- end }}
+
+{{/*
+Create the name of the HPS service account to use
+*/}}
+{{- define "rulebricks-chart.hps.serviceAccountName" -}}
+{{- if and .Values.hps.serviceAccount .Values.hps.serviceAccount.create }}
+{{- default (include "rulebricks-chart.hps.fullname" .) .Values.hps.serviceAccount.name }}
+{{- else }}
+{{- include "rulebricks-chart.serviceAccountName" . }}
+{{- end }}
+{{- end }}
+
+{{/*
+Create the name of the HPS worker service account to use
+*/}}
+{{- define "rulebricks-chart.hps-worker.serviceAccountName" -}}
+{{- if and .Values.hps.workers.serviceAccount .Values.hps.workers.serviceAccount.create }}
+{{- default (include "rulebricks-chart.hps-worker.fullname" .) .Values.hps.workers.serviceAccount.name }}
+{{- else }}
+{{- include "rulebricks-chart.serviceAccountName" . }}
+{{- end }}
+{{- end }}
+
+{{/*
 Check if TLS is enabled
 Prioritize global.tlsEnabled if present, otherwise use app.tlsEnabled
 */}}

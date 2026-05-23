@@ -81,6 +81,18 @@ secret:
       keyId: keyId
       accessKey: accessKey
 
+externalDatabase:
+  enabled: false
+  host: ""
+  port: 5432
+  # Optional: source username/password/database from one existing secret.
+  # When unset, the chart keeps using secret.db.
+  secretRef: ""
+  secretRefKey:
+    username: username
+    password: password
+    database: database
+
 # Optional: Postgres Database
 # A standalone Postgres database configured to work with Supabase services.
 # You can spin up any other Postgres database container if required.
@@ -196,6 +208,10 @@ studio:
     # The name of the service account to use.
     # If not set and create is true, a name is generated using the fullname template
     name: ""
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: ""
+    maxUnavailable: ""
   podAnnotations: {}
   podLabels: {}
   podSecurityContext:
@@ -212,6 +228,21 @@ studio:
   service:
     type: ClusterIP
     port: 3000
+  ingress:
+    enabled: false
+    type: "ingress" # "ingress" or "gateway-api"
+    className: "traefik"
+    hostname: "" # Defaults to studio.<global.domain>
+    annotations: {}
+    paths:
+      - path: /
+        pathType: Prefix
+    gatewayApi:
+      gatewayName: ""
+      gatewayNamespace: ""
+      sectionName: ""
+    tls:
+      enabled: "" # Empty string inherits global.tlsEnabled
   environment:
     STUDIO_DEFAULT_ORGANIZATION: Default Organization
     STUDIO_DEFAULT_PROJECT: Default Project

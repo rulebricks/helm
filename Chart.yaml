@@ -2,8 +2,8 @@ apiVersion: v2
 name: stack
 description: A unified Helm chart for deploying Rulebricks and its dependencies (Kafka, Supabase, Traefik, etc.)
 type: application
-version: 0.2.0
-appVersion: "0.2.0"
+version: 0.3.0
+appVersion: "0.3.0"
 icon: https://d1zic6dm9txw4h.cloudfront.net/rulebricks-docs-assets/static/images/application/logo.png
 home: https://rulebricks.com
 sources:
@@ -20,7 +20,7 @@ keywords:
   - enterprise
 dependencies:
   - name: rulebricks
-    version: 0.1.0
+    version: 0.1.1
     repository: file://charts/rulebricks
   - name: common
     version: 2.31.4
@@ -30,7 +30,7 @@ dependencies:
     repository: file://charts/kafka
     condition: kafka.enabled
   - name: supabase
-    version: 0.1.3
+    version: 0.1.4
     repository: file://charts/supabase
     condition: supabase.enabled
   - name: kube-prometheus-stack
@@ -50,7 +50,7 @@ dependencies:
     repository: https://charts.jetstack.io
     condition: cert-manager.enabled
   - name: vector
-    version: 0.40.0
+    version: 0.52.0
     repository: https://helm.vector.dev
     condition: vector.enabled
   - name: external-dns
