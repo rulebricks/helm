@@ -60,15 +60,12 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- /* Tolerations: migrations-level > global scheduling > ARM64 default */ -}}
+      {{- /* Tolerations: migrations-level > global scheduling */ -}}
       {{- $tolerations := list }}
       {{- if .Values.migrations.tolerations }}
         {{- $tolerations = .Values.migrations.tolerations }}
       {{- else if and .Values.global .Values.global.scheduling .Values.global.scheduling.tolerations }}
         {{- $tolerations = .Values.global.scheduling.tolerations }}
-      {{- else }}
-        {{- /* Default ARM64 toleration for backwards compatibility */ -}}
-        {{- $tolerations = list (dict "key" "kubernetes.io/arch" "operator" "Equal" "value" "arm64" "effect" "NoSchedule") }}
       {{- end }}
       {{- with $tolerations }}
       tolerations:
@@ -258,15 +255,12 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- /* Tolerations: migrations-level > global scheduling > ARM64 default */ -}}
+      {{- /* Tolerations: migrations-level > global scheduling */ -}}
       {{- $tolerations := list }}
       {{- if .Values.migrations.tolerations }}
         {{- $tolerations = .Values.migrations.tolerations }}
       {{- else if and .Values.global .Values.global.scheduling .Values.global.scheduling.tolerations }}
         {{- $tolerations = .Values.global.scheduling.tolerations }}
-      {{- else }}
-        {{- /* Default ARM64 toleration for backwards compatibility */ -}}
-        {{- $tolerations = list (dict "key" "kubernetes.io/arch" "operator" "Equal" "value" "arm64" "effect" "NoSchedule") }}
       {{- end }}
       {{- with $tolerations }}
       tolerations:

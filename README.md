@@ -20,8 +20,6 @@ Resources to deploy custom configurations of Rulebricks and its dependencies via
 See [External Services](https://rulebricks.com/docs/private-deployment/external-services) for more information on externalizing certain services.
 See [Authentication](https://rulebricks.com/docs/private-deployment/sso) for more information on what happens after you configure SSO.
 
-See [`cluster-setup/`](cluster-setup/) for native AWS, Azure, and GCP cluster bootstrap resources and account checks. The AWS [`cluster.yaml`](cluster-setup/aws/cluster.yaml) is the minimum `eksctl` config.
-
 ## Quick Start
 
 ```bash
@@ -79,9 +77,9 @@ helm install rulebricks oci://ghcr.io/rulebricks/helm/stack \
 | `global.sso.clientId`                | OAuth client ID from your IdP                                             |
 | `global.sso.clientSecret`            | OAuth client secret from your IdP                                         |
 | `global.secrets.secretRef`           | Reference to existing K8s secret (optional)                               |
-| `global.scheduling.nodeSelector`     | Node selector applied to all workloads                                    |
-| `global.scheduling.tolerations`      | Tolerations applied to all workloads                                      |
-| `global.scheduling.affinity`         | Affinity rules applied to all workloads                                   |
+| `global.scheduling.nodeSelector`     | Optional selector for workloads that inherit global scheduling            |
+| `global.scheduling.tolerations`      | Optional tolerations for workloads that inherit global scheduling         |
+| `global.scheduling.affinity`         | Optional affinity for workloads that inherit global scheduling            |
 | `global.labels`                      | Labels applied to all resource metadata                                   |
 | `global.annotations`                 | Annotations applied to all resource metadata                              |
 | `global.podLabels`                   | Labels applied to pod templates only                                      |
@@ -165,42 +163,6 @@ When `global.externalDnsEnabled=true`, the following records are configured:
 
 - `<global.domain>` → Traefik LoadBalancer
 - `supabase.<global.domain>` → Traefik LoadBalancer (if self-hosting Supabase)
-
-</details>
-
-<details>
-<summary><strong>Cluster Setup Resources</strong></summary>
-
-The `cluster-setup/` directory contains cloud-native resources for validating account access or creating a Kubernetes cluster outside of the Rulebricks CLI Terraform flow:
-
-- `cluster-setup/aws/check-aws-access.sh` validates AWS identity, common EKS/EC2/IAM access, quota, `eksctl`, `kubectl`, and Helm.
-- `cluster-setup/aws/cluster.yaml` creates a minimum ARM64 EKS cluster with `eksctl`.
-- `cluster-setup/azure/check-aks-prereqs.sh` validates Azure login, provider registration, quota, `kubectl`, and Helm.
-- `cluster-setup/azure/main.bicep` creates a minimum ARM64 AKS cluster with Azure CNI, Calico, Disk CSI, OIDC issuer, and Workload Identity.
-- `cluster-setup/gcp/check-gke-prereqs.sh` validates GCP auth, required APIs, quota, GKE access, `kubectl`, and Helm.
-- `cluster-setup/gcp/README.md` shows the native `gcloud` commands for a minimum ARM64 GKE cluster.
-
-Run the account checks before installing:
-
-```bash
-# AWS
-AWS_REGION=us-east-1 bash cluster-setup/aws/check-aws-access.sh
-cd cluster-setup/aws && eksctl create cluster -f cluster.yaml
-
-# Azure
-AZURE_LOCATION=eastus bash cluster-setup/azure/check-aks-prereqs.sh
-az group create --name rulebricks-rg --location eastus
-az deployment group create \
-  --resource-group rulebricks-rg \
-  --template-file cluster-setup/azure/main.bicep \
-  --parameters @cluster-setup/azure/main.parameters.json
-
-# GCP
-GCP_REGION=us-central1 bash cluster-setup/gcp/check-gke-prereqs.sh
-# Then follow cluster-setup/gcp/README.md for the gcloud create commands.
-```
-
-Monitoring destinations, including local Grafana and remote_write targets, are configured through Helm values or the CLI wizard, not these cluster setup resources.
 
 </details>
 
@@ -328,32 +290,68 @@ To send rule execution logs to S3:
 ### Advanced Configuration
 
 <details>
-<summary><strong>Node Scheduling (ARM64, Dedicated Nodes)</strong></summary>
+<summary><strong>Node Scheduling (Optional)</strong></summary>
 
-For clusters with specialized node pools (ARM64/Graviton, dedicated nodes with taints), configure global scheduling defaults:
+The default chart does not require node labels, taints, architecture selectors, hard affinity, or multiple nodes. A single shared node pool is supported as long as the cluster has enough CPU, memory, and storage for the requested pods.
+
+By default, pod templates are labeled with `rulebricks.com/workload-group`. Infrastructure includes the frontend app, Redis, Kafka, Supabase, Traefik, KEDA, cert-manager, and Vector. The compute path is HPS and HPS workers.
+
+HPS and HPS workers use soft pod anti-affinity to prefer nodes that do not already run `rulebricks.com/workload-group=infrastructure` pods. This keeps one-node deployments valid while biasing CPU-intensive compute pods away from core services when additional nodes are available.
+
+For normal AMD64 or ARM64 nodes, no architecture-specific Helm values are required. Multi-arch images allow Kubernetes to pull the correct image variant for the node. If your cluster taints ARM64 nodes, add the relevant tolerations explicitly:
 
 ```yaml
 global:
   scheduling:
-    nodeSelector:
-      kubernetes.io/arch: arm64
     tolerations:
-      - key: "dedicated"
-        operator: "Equal"
-        value: "rulebricks"
-        effect: "NoSchedule"
-    affinity: {}
+      - key: kubernetes.io/arch
+        operator: Equal
+        value: arm64
+        effect: NoSchedule
+
+cert-manager:
+  tolerations:
+    - key: kubernetes.io/arch
+      operator: Equal
+      value: arm64
+      effect: NoSchedule
+  webhook:
+    tolerations:
+      - key: kubernetes.io/arch
+        operator: Equal
+        value: arm64
+        effect: NoSchedule
+  cainjector:
+    tolerations:
+      - key: kubernetes.io/arch
+        operator: Equal
+        value: arm64
+        effect: NoSchedule
+
+migrations:
+  tolerations:
+    - key: kubernetes.io/arch
+      operator: Equal
+      value: arm64
+      effect: NoSchedule
 ```
 
-These settings propagate to all workloads. Override at the component level if needed:
+Avoid `nodeSelector` or `requiredDuringSchedulingIgnoredDuringExecution` unless your platform team intentionally wants hard placement. `global.scheduling` is honored by Rulebricks workloads and migration jobs; dependency subcharts such as Kafka, Supabase, cert-manager, Traefik, KEDA, and Vector may require their own scheduling values.
 
-```yaml
-rulebricks:
-  app:
-    nodeSelector:
-      kubernetes.io/arch: arm64
-    tolerations: []
+</details>
+
+<details>
+<summary><strong>Kafka Image Publishing</strong></summary>
+
+The vendored Kafka subchart defaults to `docker.io/rulebricks/kafka` so installs do not depend on the upstream image namespace at deploy time. Publish the default Kafka tag as a multi-arch manifest before releasing chart changes that reference it:
+
+```bash
+KAFKA_TAG=4.0.0-debian-12-r10 bash scripts/publish-kafka-image.sh
 ```
+
+The script verifies that the source image has both `linux/amd64` and `linux/arm64` variants, then republishes the manifest list under `docker.io/rulebricks/kafka:<tag>`. The Helm chart release workflow runs the same publish step before packaging the chart.
+
+The release workflow requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets with write access to `docker.io/rulebricks/kafka`.
 
 </details>
 

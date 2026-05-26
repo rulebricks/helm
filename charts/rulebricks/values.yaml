@@ -21,12 +21,14 @@ app:
     tag: "latest"
     pullPolicy: IfNotPresent
   replicas: 2
-  # Node scheduling configuration
+  # Node scheduling configuration. Keep overrides preferred-only unless your
+  # platform team intentionally wants hard placement.
   nodeSelector: {}
   tolerations: []
   affinity: {}
   # Additional labels for pods (merged with global.podLabels)
-  podLabels: {}
+  podLabels:
+    rulebricks.com/workload-group: infrastructure
   # Additional annotations for pods (merged with global.podAnnotations)
   podAnnotations: {}
   serviceAccount:
@@ -112,10 +114,14 @@ hps:
     pullPolicy: Always
     tag: "latest"
   replicas: 1
-  # Node scheduling configuration
+  # Node scheduling configuration. Custom affinity can include stricter rules
+  # if your platform team requires them.
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # Optional custom topology spread constraints. The chart does not set a
+  # default spread rule so compute pods can prefer non-infrastructure nodes.
+  # topologySpreadConstraints: []
   # Pod labels/annotations
   podLabels: {}
   podAnnotations: {}
@@ -143,10 +149,13 @@ hps:
     enabled: true
     replicas: 3 # Starting replicas
     topics: "solution"
-    # Node scheduling configuration (inherits from hps if not set)
+    # Node scheduling configuration.
+    # Optional custom topology spread constraints. The chart does not set a
+    # default spread rule so workers can prefer non-infrastructure nodes.
     nodeSelector: {}
     tolerations: []
     affinity: {}
+    # topologySpreadConstraints: []
     # Pod labels/annotations
     podLabels: {}
     podAnnotations: {}

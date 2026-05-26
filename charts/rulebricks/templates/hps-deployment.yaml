@@ -38,6 +38,16 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: hps
+        rulebricks.com/workload-group: application
+        {{- /* Global pod labels */ -}}
+        {{- if and .Values.global .Values.global.podLabels }}
+        {{- toYaml .Values.global.podLabels | nindent 8 }}
+        {{- end }}
+        {{- /* Component-specific pod labels */ -}}
+        {{- with .Values.hps.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}
@@ -72,14 +82,6 @@ spec:
       {{- with .Values.hps.topologySpreadConstraints }}
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
-      {{- else }}
-      topologySpreadConstraints:
-      - maxSkew: 1
-        topologyKey: kubernetes.io/hostname
-        whenUnsatisfiable: ScheduleAnyway
-        labelSelector:
-          matchLabels:
-            app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}
       {{- end }}
       {{- if not $hpsAffinity }}
       affinity:
@@ -89,28 +91,10 @@ spec:
             podAffinityTerm:
               labelSelector:
                 matchExpressions:
-                - key: app.kubernetes.io/name
+                - key: rulebricks.com/workload-group
                   operator: In
                   values:
-                  - {{ include "rulebricks-chart.hps.fullname" . }}
-              topologyKey: kubernetes.io/hostname
-          - weight: 80
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app.kubernetes.io/name
-                  operator: In
-                  values:
-                  - {{ include "rulebricks-chart.hps-worker.fullname" . }}
-              topologyKey: kubernetes.io/hostname
-          - weight: 80
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app.kubernetes.io/name
-                  operator: In
-                  values:
-                  - kafka
+                  - infrastructure
               topologyKey: kubernetes.io/hostname
       {{- end }}
       initContainers:

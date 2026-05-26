@@ -36,6 +36,16 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: hps-worker
+        rulebricks.com/workload-group: application
+        {{- /* Global pod labels */ -}}
+        {{- if and .Values.global .Values.global.podLabels }}
+        {{- toYaml .Values.global.podLabels | nindent 8 }}
+        {{- end }}
+        {{- /* Component-specific pod labels */ -}}
+        {{- with .Values.hps.workers.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}
@@ -58,7 +68,7 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- /* Affinity precedence: worker affinity > global scheduling affinity > default anti-affinity */ -}}
+      {{- /* Affinity precedence: worker affinity > global scheduling affinity > soft default anti-affinity */ -}}
       {{- $workerAffinity := .Values.hps.workers.affinity | default dict }}
       {{- if and (not $workerAffinity) .Values.global .Values.global.scheduling }}
         {{- $workerAffinity = .Values.global.scheduling.affinity | default dict }}
@@ -74,47 +84,15 @@ spec:
             podAffinityTerm:
               labelSelector:
                 matchExpressions:
-                - key: app.kubernetes.io/name
+                - key: rulebricks.com/workload-group
                   operator: In
                   values:
-                  - {{ include "rulebricks-chart.hps-worker.fullname" . }}
-              topologyKey: kubernetes.io/hostname
-          - weight: 80
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app.kubernetes.io/name
-                  operator: In
-                  values:
-                  - {{ include "rulebricks-chart.hps.fullname" . }}
-              topologyKey: kubernetes.io/hostname
-          - weight: 80
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app.kubernetes.io/name
-                  operator: In
-                  values:
-                  - kafka
+                  - infrastructure
               topologyKey: kubernetes.io/hostname
       {{- end }}
       {{- with .Values.hps.workers.topologySpreadConstraints }}
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
-      {{- else }}
-      topologySpreadConstraints:
-      - maxSkew: 1
-        topologyKey: kubernetes.io/hostname
-        whenUnsatisfiable: ScheduleAnyway
-        labelSelector:
-          matchLabels:
-            app.kubernetes.io/name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
-      - maxSkew: 2
-        topologyKey: kubernetes.io/hostname
-        whenUnsatisfiable: DoNotSchedule
-        labelSelector:
-          matchLabels:
-            app.kubernetes.io/name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
       {{- end }}
       initContainers:
         - name: wait-for-kafka

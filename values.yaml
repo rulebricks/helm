@@ -35,24 +35,30 @@ global:
   podAnnotations: {}
   # =============================================================================
   # Global Scheduling Defaults
-  # Applied to all components unless overridden at the component level.
-  # Useful for clusters with specialized node pools (e.g., ARM64/Graviton).
+  # Optional scheduling defaults for chart templates that explicitly inherit
+  # global.scheduling. Rulebricks workloads and migration jobs honor these;
+  # dependency subcharts may require their own scheduling keys.
   # =============================================================================
   scheduling:
-    # Node selector applied to all workloads
+    # Node selector applied to workloads that inherit global scheduling
     nodeSelector: {}
-    # Example for ARM64/Graviton nodes:
+    # Example for pinning to ARM64/Graviton nodes:
     #   kubernetes.io/arch: arm64
 
-    # Tolerations applied to all workloads
+    # Tolerations applied to workloads that inherit global scheduling
     tolerations: []
-    # Example for dedicated node pools:
+    # Example for ARM64-tainted or dedicated node pools:
+    #   - key: "kubernetes.io/arch"
+    #     operator: "Equal"
+    #     value: "arm64"
+    #     effect: "NoSchedule"
     #   - key: "Dedicated"
     #     operator: "Equal"
     #     value: "rulebricks"
     #     effect: "NoSchedule"
 
-    # Affinity rules applied to all workloads
+    # Affinity rules applied to workloads that inherit global scheduling.
+    # Prefer soft/preferred rules so node layout does not block installs.
     affinity: {}
   # SMTP Configuration (Vital for instance access and admin)
   smtp:
@@ -195,6 +201,8 @@ rulebricks:
       enabled: false
       minAvailable: ""
       maxUnavailable: ""
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
 
     logging:
       enabled: true
@@ -267,6 +275,8 @@ rulebricks:
 
   # Redis is used heavily
   redis:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
     resources:
       requests:
         cpu: "200m"
@@ -296,6 +306,8 @@ kafka:
     num.partitions: "12" # Must be >= maxReplicaCount for workers to enable parallel consumption
   controller:
     replicaCount: 1
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
     resources:
       requests:
         cpu: "500m"
@@ -338,6 +350,9 @@ kafka:
         value: "1048576"
       - name: KAFKA_CFG_MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION
         value: "10"
+  broker:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
   listeners:
     client:
       protocol: PLAINTEXT
@@ -349,6 +364,9 @@ kafka:
 # Ingress Controller (Traefik)
 traefik:
   enabled: true
+  deployment:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
   ingressClass:
     name: traefik # Must match ingress.className in rulebricks and supabase
   autoscaling:
@@ -375,6 +393,13 @@ traefik:
 # Autoscaling (KEDA)
 keda:
   enabled: true
+  podLabels:
+    keda:
+      rulebricks.com/workload-group: infrastructure
+    metricsAdapter:
+      rulebricks.com/workload-group: infrastructure
+    webhooks:
+      rulebricks.com/workload-group: infrastructure
   crds:
     install: false # CRDs are managed in parent chart crds/ directory
 
@@ -382,26 +407,39 @@ keda:
 cert-manager:
   enabled: true
   installCRDs: false # CRDs are managed in parent chart crds/ directory
-  # Controller tolerations
-  tolerations:
-    - key: kubernetes.io/arch
-      operator: Equal
-      value: arm64
-      effect: NoSchedule
+  podLabels:
+    rulebricks.com/workload-group: infrastructure
+  # Controller tolerations. Defaults are empty so AMD64 and untainted ARM64
+  # clusters work without architecture-specific values.
+  tolerations: []
+  # Example for ARM64 node pools tainted with kubernetes.io/arch=arm64:
+  # tolerations:
+  #   - key: kubernetes.io/arch
+  #     operator: Equal
+  #     value: arm64
+  #     effect: NoSchedule
   # Webhook tolerations
   webhook:
-    tolerations:
-      - key: kubernetes.io/arch
-        operator: Equal
-        value: arm64
-        effect: NoSchedule
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+    tolerations: []
+    # Example for ARM64-tainted node pools:
+    # tolerations:
+    #   - key: kubernetes.io/arch
+    #     operator: Equal
+    #     value: arm64
+    #     effect: NoSchedule
   # CAinjector tolerations
   cainjector:
-    tolerations:
-      - key: kubernetes.io/arch
-        operator: Equal
-        value: arm64
-        effect: NoSchedule
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+    tolerations: []
+    # Example for ARM64-tainted node pools:
+    # tolerations:
+    #   - key: kubernetes.io/arch
+    #     operator: Equal
+    #     value: arm64
+    #     effect: NoSchedule
 
 # =============================================================================
 # DECISION LOGS (Vector)
@@ -410,6 +448,8 @@ cert-manager:
 # =============================================================================
 vector:
   enabled: true
+  podLabels:
+    rulebricks.com/workload-group: infrastructure
   role: "Stateless-Aggregator"
   replicas: 2
   resources:
@@ -508,6 +548,8 @@ supabase:
       password: "dashboard-password-change-me"
   # Database resource and storage configuration (for self-hosted)
   db:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
     resources:
       requests:
         cpu: "500m"
@@ -518,12 +560,16 @@ supabase:
       storageClassName: gp3
   # Kong API Gateway ingress configuration
   kong:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
     ingress:
       enabled: true
       className: traefik
       annotations: {}
   # Optional separate hostname for Supabase Studio
   studio:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
     podDisruptionBudget:
       enabled: false
       minAvailable: ""
@@ -534,6 +580,36 @@ supabase:
       className: traefik
       hostname: "" # Defaults to studio.<global.domain>
       annotations: {}
+  auth:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+  rest:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+  realtime:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+  meta:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+  storage:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+  imgproxy:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+  analytics:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+  vector:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+  functions:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+  minio:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
 
 # =============================================================================
 # MONITORING & ALERTING
@@ -636,12 +712,14 @@ migrations:
   restartPolicy: OnFailure
   # Node selector for migration pods (inherits from global.scheduling if not set)
   nodeSelector: {}
-  # Tolerations for migration pods (defaults to ARM64 if not set)
-  tolerations:
-    - key: kubernetes.io/arch
-      operator: Equal
-      value: arm64
-      effect: NoSchedule
+  # Tolerations for migration pods. Defaults are empty; add the example below
+  # only for clusters that taint ARM64 nodes with kubernetes.io/arch=arm64.
+  tolerations: []
+  # tolerations:
+  #   - key: kubernetes.io/arch
+  #     operator: Equal
+  #     value: arm64
+  #     effect: NoSchedule
   # Additional annotations for the job
   annotations: {}
   # External database configuration (used when supabase.db.enabled: false)

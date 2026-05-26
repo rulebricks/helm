@@ -135,21 +135,21 @@
         },
         "scheduling": {
           "type": "object",
-          "description": "Global scheduling defaults",
+          "description": "Opt-in scheduling defaults for Rulebricks workloads and migration jobs; dependency subcharts may require their own scheduling values",
           "properties": {
             "nodeSelector": {
               "type": "object",
-              "description": "Node selector applied to all workloads",
+              "description": "Node selector applied to workloads that inherit global scheduling",
               "additionalProperties": { "type": "string" }
             },
             "tolerations": {
               "type": "array",
-              "description": "Tolerations applied to all workloads",
+              "description": "Tolerations applied to workloads that inherit global scheduling",
               "items": { "$ref": "#/definitions/toleration" }
             },
             "affinity": {
               "type": "object",
-              "description": "Affinity rules applied to all workloads"
+              "description": "Affinity rules applied to workloads that inherit global scheduling; prefer soft rules unless your platform requires hard placement"
             }
           }
         }
@@ -182,6 +182,20 @@
         "app": {
           "type": "object",
           "properties": {
+            "nodeSelector": {
+              "type": "object",
+              "description": "Node selector for Rulebricks app pods",
+              "additionalProperties": { "type": "string" }
+            },
+            "tolerations": {
+              "type": "array",
+              "description": "Tolerations for Rulebricks app pods",
+              "items": { "$ref": "#/definitions/toleration" }
+            },
+            "affinity": {
+              "type": "object",
+              "description": "Affinity for Rulebricks app pods. Prefer soft rules unless your platform requires hard placement."
+            },
             "logging": {
               "type": "object",
               "properties": {
@@ -221,6 +235,25 @@
         "hps": {
           "type": "object",
           "properties": {
+            "nodeSelector": {
+              "type": "object",
+              "description": "Node selector for HPS pods",
+              "additionalProperties": { "type": "string" }
+            },
+            "tolerations": {
+              "type": "array",
+              "description": "Tolerations for HPS pods",
+              "items": { "$ref": "#/definitions/toleration" }
+            },
+            "affinity": {
+              "type": "object",
+              "description": "Affinity for HPS pods. Prefer soft rules unless your platform requires hard placement."
+            },
+            "topologySpreadConstraints": {
+              "type": "array",
+              "description": "Optional custom topology spread constraints for HPS pods. Unset by default so HPS can prefer non-infrastructure nodes.",
+              "items": { "type": "object" }
+            },
             "serviceAccount": {
               "type": "object",
               "properties": {
@@ -236,6 +269,25 @@
             "workers": {
               "type": "object",
               "properties": {
+                "nodeSelector": {
+                  "type": "object",
+                  "description": "Node selector for HPS worker pods",
+                  "additionalProperties": { "type": "string" }
+                },
+                "tolerations": {
+                  "type": "array",
+                  "description": "Tolerations for HPS worker pods",
+                  "items": { "$ref": "#/definitions/toleration" }
+                },
+                "affinity": {
+                  "type": "object",
+                  "description": "Affinity for HPS worker pods. Prefer soft rules unless your platform requires hard placement."
+                },
+                "topologySpreadConstraints": {
+                  "type": "array",
+                  "description": "Optional custom topology spread constraints for HPS worker pods. Unset by default so workers can prefer non-infrastructure nodes.",
+                  "items": { "type": "object" }
+                },
                 "serviceAccount": {
                   "type": "object",
                   "properties": {
@@ -373,7 +425,7 @@
         },
         "tolerations": {
           "type": "array",
-          "description": "Tolerations for migration job pods",
+          "description": "Tolerations for migration job pods. Defaults are empty; add ARM64 tolerations only for clusters that taint ARM64 nodes.",
           "items": { "$ref": "#/definitions/toleration" }
         },
         "annotations": {
