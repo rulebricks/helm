@@ -16,6 +16,42 @@ global:
   # Works with either: the external-dns subchart below, OR an existing cluster-wide external-dns
   externalDnsEnabled: false
   # =============================================================================
+  # Shared Object Storage
+  # Configure once and let storage-backed features reuse it. Decision log query
+  # uses paths.decisionLogs; database backups use paths.dbBackups.
+  # =============================================================================
+  storage:
+    enabled: false
+    provider: "s3" # s3 | azure-blob | gcs
+    bucket: ""
+    region: ""
+    s3:
+      # Preferred: IAM Roles for Service Accounts (IRSA).
+      iamRoleArn: ""
+      # Optional escape hatch for static AWS credentials. Secret keys expected:
+      # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.
+      existingSecret:
+        name: ""
+    azure:
+      # For azure-blob, bucket above is the storage account name.
+      container: ""
+      authMode: "workload-identity" # workload-identity | connection-string
+      clientId: ""
+      tenantId: ""
+      connectionStringSecretRef:
+        name: ""
+        key: ""
+    gcp:
+      # Preferred: GKE Workload Identity.
+      serviceAccountEmail: ""
+    paths:
+      decisionLogs: "decision-logs"
+      dbBackups: "db-backups"
+  # Mirrors top-level clickhouse.enabled so subcharts can gate behavior through
+  # Helm's global values propagation.
+  clickhouse:
+    enabled: false
+  # =============================================================================
   # Global Labels and Annotations
   # Applied to ALL resources rendered by this chart (useful for compliance)
   # =============================================================================
@@ -182,6 +218,31 @@ global:
     # Example:
     #   - /form/
     #   - /api/form/
+
+# =============================================================================
+# DATABASE BACKUPS
+# Periodic Supabase Postgres base backups are written to global.storage under
+# global.storage.paths.dbBackups. Requires self-hosted Supabase.
+# =============================================================================
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  retentionDays: 7
+  serverName: "supabase"
+  image:
+    repository: rulebricks/supabase-postgres
+    tag: "15.1.0.147-rb1"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  jobHistory:
+    successful: 3
+    failed: 3
 
 # =============================================================================
 # RULEBRICKS APPLICATION STACK
@@ -361,6 +422,81 @@ kafka:
     interbroker:
       protocol: PLAINTEXT
 
+# ClickHouse (vendored Bitnami chart) enables self-hosted decision log query.
+# Kept stateless: all decision-log data lives in object storage and ClickHouse
+# only serves queries over Parquet files.
+clickhouse:
+  enabled: false
+  auth:
+    username: rulebricks
+    password: ""
+    existingSecret: '{{ printf "%s-clickhouse-credentials" .Release.Name }}'
+    existingSecretKey: admin-password
+  shards: 1
+  replicaCount: 1
+  keeper:
+    enabled: false
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  serviceAccount:
+    create: true
+    annotations: {}
+  configdFiles:
+    09-decision-log-storage.xml: |
+      <clickhouse>
+        <named_collections>
+          {{- $provider := .Values.global.storage.provider | default "s3" }}
+          {{- if eq $provider "s3" }}
+          <decision_logs_s3>
+            <url>{{ include "rulebricks.storage.s3Url" . }}</url>
+            <format>Parquet</format>
+            <use_environment_credentials>true</use_environment_credentials>
+            <structure>timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), request String, response String, decision String, params Nullable(String)</structure>
+          </decision_logs_s3>
+          {{- else if eq $provider "azure-blob" }}
+          <decision_logs_azure>
+            <url>{{ include "rulebricks.storage.azureUrl" . }}</url>
+            <format>Parquet</format>
+            <structure>timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), request String, response String, decision String, params Nullable(String)</structure>
+          </decision_logs_azure>
+          {{- else if eq $provider "gcs" }}
+          <decision_logs_gcs>
+            <url>{{ include "rulebricks.storage.gcsUrl" . }}</url>
+            <format>Parquet</format>
+            <structure>timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), request String, response String, decision String, params Nullable(String)</structure>
+          </decision_logs_gcs>
+          {{- end }}
+        </named_collections>
+      </clickhouse>
+    10-query-limits.xml: |
+      <clickhouse>
+        <profiles>
+          <default>
+            <max_memory_usage>1073741824</max_memory_usage>
+            <max_threads>4</max_threads>
+            <max_execution_time>60</max_execution_time>
+          </default>
+        </profiles>
+      </clickhouse>
+  initdbScripts:
+    01-decision-logs-view.sql: |
+      {{- $provider := .Values.global.storage.provider | default "s3" }}
+      CREATE DATABASE IF NOT EXISTS rulebricks;
+      {{- if eq $provider "s3" }}
+      CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM s3(decision_logs_s3);
+      {{- else if eq $provider "azure-blob" }}
+      CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM azureBlobStorage(decision_logs_azure);
+      {{- else if eq $provider "gcs" }}
+      CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM gcs(decision_logs_gcs);
+      {{- end }}
+
 # Ingress Controller (Traefik)
 traefik:
   enabled: true
@@ -485,34 +621,61 @@ vector:
           - logs
         group_id: vector-consumers
         auto_offset_reset: latest
+    transforms:
+      normalize_logs:
+        type: remap
+        inputs:
+          - kafka
+        source: |
+          parsed, err = parse_json(string!(.message))
+          if err == null {
+            . = parsed
+          }
+
+          .timestamp = parse_timestamp!(to_string(.timestamp) ?? to_string(now()), format: "%+")
+          .api_key = del(.k)
+          .user_id = del(.u)
+          .environment = del(.e)
+          .rule_name = del(.rule)
+          .rule_id = .decision.ruleId ?? ""
+          .rule_slug = .decision.ruleSlug ?? ""
+          .rule_version = to_string(.decision.ruleVersion) ?? ""
+          .operation = .decision.operation ?? ""
+          .error = del(.err)
+          .request = encode_json(del(.req) ?? {})
+          .response = encode_json(del(.res) ?? {})
+          .decision = encode_json(.decision ?? {})
+          .params = encode_json(del(.params) ?? {})
+          del(.m)
     sinks:
       console:
         type: console
         inputs:
-          - kafka
+          - normalize_logs
         encoding:
           codec: json
-      # ==== S3 Sink Example ====
-      # To send logs to S3, uncomment and configure the following:
-      # Requires IRSA (IAM Roles for Service Accounts) - see README.md for setup
+      # ==== Decision Log Storage Sink ====
+      # When clickhouse.enabled and global.storage.enabled are both true, add a
+      # decision_logs sink so ClickHouse can query the Parquet archive directly.
+      # The key prefix MUST match the partition layout used by ClickHouse's
+      # named_collection URLs in clickhouse.configdFiles (year=YYYY/month=MM/...).
+      # The CLI generates this automatically; hand-installs should set it here.
       #
-      # s3:
-      #   type: aws_s3
+      # decision_logs:
+      #   type: aws_s3            # or azure_blob | gcp_cloud_storage
       #   inputs:
-      #     - kafka
-      #   bucket: "your-logs-bucket"
+      #     - normalize_logs
+      #   bucket: "your-bucket"
       #   region: "us-east-1"
-      #   key_prefix: "rulebricks/logs/%Y/%m/%d/"
-      #   compression: gzip
+      #   key_prefix: "decision-logs/year=%Y/month=%m/day=%d/hour=%H/"
+      #   filename_extension: "parquet"
       #   encoding:
-      #     codec: json
-      #   # Authentication via IRSA (recommended) - no credentials needed in config
-      #   # Vector will use the IAM role attached to its service account
-      #   #
-      #   # Alternative: use static credentials (not recommended for production)
-      #   # auth:
-      #   #   access_key_id: "${AWS_ACCESS_KEY_ID}"
-      #   #   secret_access_key: "${AWS_SECRET_ACCESS_KEY}"
+      #     codec: parquet
+      #   batch:
+      #     max_bytes: 134217728
+      #     timeout_secs: 60
+      #   # Authentication via IRSA (recommended) - no credentials needed in config.
+      #   # Vector will use the IAM role attached to its service account.
 
 # =============================================================================
 # SELF-HOSTED DATABASE SETTINGS (Supabase)

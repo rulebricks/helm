@@ -12,6 +12,13 @@ env:
   KAFKA_TAG: 4.0.0-debian-12-r10
   KAFKA_SOURCE_IMAGE: docker.io/bitnamilegacy/kafka
   KAFKA_TARGET_IMAGE: docker.io/rulebricks/kafka
+  CLICKHOUSE_TAG: 25.7.5-debian-12-r0
+  CLICKHOUSE_SOURCE_IMAGE: docker.io/bitnamilegacy/clickhouse
+  CLICKHOUSE_TARGET_IMAGE: docker.io/rulebricks/clickhouse
+  CLICKHOUSE_KEEPER_SOURCE_IMAGE: docker.io/bitnamilegacy/clickhouse-keeper
+  CLICKHOUSE_KEEPER_TARGET_IMAGE: docker.io/rulebricks/clickhouse-keeper
+  SUPABASE_POSTGRES_TAG: 15.1.0.147-rb1
+  SUPABASE_POSTGRES_TARGET_IMAGE: docker.io/rulebricks/supabase-postgres
 
 jobs:
   validate:
@@ -111,6 +118,21 @@ jobs:
           SOURCE_IMAGE: ${{ env.KAFKA_SOURCE_IMAGE }}
           TARGET_IMAGE: ${{ env.KAFKA_TARGET_IMAGE }}
         run: bash scripts/publish-kafka-image.sh
+
+      - name: Publish ClickHouse Image
+        env:
+          CLICKHOUSE_TAG: ${{ env.CLICKHOUSE_TAG }}
+          SOURCE_IMAGE: ${{ env.CLICKHOUSE_SOURCE_IMAGE }}
+          TARGET_IMAGE: ${{ env.CLICKHOUSE_TARGET_IMAGE }}
+          KEEPER_SOURCE_IMAGE: ${{ env.CLICKHOUSE_KEEPER_SOURCE_IMAGE }}
+          KEEPER_TARGET_IMAGE: ${{ env.CLICKHOUSE_KEEPER_TARGET_IMAGE }}
+        run: bash scripts/publish-clickhouse-image.sh
+
+      - name: Publish Supabase Postgres Image
+        env:
+          SUPABASE_POSTGRES_TAG: ${{ env.SUPABASE_POSTGRES_TAG }}
+          TARGET_IMAGE: ${{ env.SUPABASE_POSTGRES_TARGET_IMAGE }}
+        run: bash scripts/publish-supabase-postgres-image.sh
 
       - name: Resolve Release Version
         id: version

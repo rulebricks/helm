@@ -31,6 +31,64 @@
           "type": "boolean",
           "description": "Enable external-dns integration for automatic DNS record management"
         },
+        "storage": {
+          "type": "object",
+          "description": "Shared object storage configuration for storage-backed features such as decision-log query",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "provider": { "type": "string", "enum": ["s3", "azure-blob", "gcs"], "default": "s3" },
+            "bucket": { "type": "string" },
+            "region": { "type": "string" },
+            "s3": {
+              "type": "object",
+              "properties": {
+                "iamRoleArn": { "type": "string" },
+                "existingSecret": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" }
+                  }
+                }
+              }
+            },
+            "azure": {
+              "type": "object",
+              "properties": {
+                "container": { "type": "string" },
+                "authMode": { "type": "string", "enum": ["workload-identity", "connection-string"], "default": "workload-identity" },
+                "clientId": { "type": "string" },
+                "tenantId": { "type": "string" },
+                "connectionStringSecretRef": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "key": { "type": "string" }
+                  }
+                }
+              }
+            },
+            "gcp": {
+              "type": "object",
+              "properties": {
+                "serviceAccountEmail": { "type": "string" }
+              }
+            },
+            "paths": {
+              "type": "object",
+              "properties": {
+                "decisionLogs": { "type": "string" },
+                "dbBackups": { "type": "string" }
+              }
+            }
+          }
+        },
+        "clickhouse": {
+          "type": "object",
+          "description": "Global mirror of ClickHouse enablement for subcharts",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false }
+          }
+        },
         "smtp": {
           "type": "object",
           "description": "SMTP Configuration",
@@ -151,6 +209,32 @@
               "type": "object",
               "description": "Affinity rules applied to workloads that inherit global scheduling; prefer soft rules unless your platform requires hard placement"
             }
+          }
+        }
+      }
+    },
+    "backup": {
+      "type": "object",
+      "description": "Periodic self-hosted Supabase Postgres backups to shared object storage",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "schedule": { "type": "string", "default": "0 2 * * *" },
+        "retentionDays": { "type": "integer", "minimum": 1, "default": 7 },
+        "serverName": { "type": "string", "default": "supabase" },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" },
+            "pullPolicy": { "type": "string" }
+          }
+        },
+        "resources": { "$ref": "#/definitions/resources" },
+        "jobHistory": {
+          "type": "object",
+          "properties": {
+            "successful": { "type": "integer", "minimum": 0, "default": 3 },
+            "failed": { "type": "integer", "minimum": 0, "default": 3 }
           }
         }
       }
@@ -386,6 +470,12 @@
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean" }
+      }
+    },
+    "clickhouse": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false }
       }
     },
     "external-dns": {
@@ -736,6 +826,99 @@
                   "provider": { "type": "string", "minLength": 1 },
                   "clientId": { "type": "string", "minLength": 1 },
                   "clientSecret": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Decision Log Query Storage Validation",
+      "description": "Decision log query requires shared object storage to be configured.",
+      "if": {
+        "properties": {
+          "clickhouse": {
+            "type": "object",
+            "properties": {
+              "enabled": { "const": true }
+            },
+            "required": ["enabled"]
+          }
+        },
+        "required": ["clickhouse"]
+      },
+      "then": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "required": ["storage"],
+            "properties": {
+              "storage": {
+                "type": "object",
+                "required": ["enabled", "provider", "bucket", "region"],
+                "properties": {
+                  "enabled": { "const": true },
+                  "provider": { "type": "string", "enum": ["s3", "azure-blob", "gcs"] },
+                  "bucket": { "type": "string", "minLength": 1 },
+                  "region": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Database Backup Storage Validation",
+      "description": "Database backups require self-hosted Supabase and shared object storage to be configured.",
+      "if": {
+        "properties": {
+          "backup": {
+            "type": "object",
+            "properties": {
+              "enabled": { "const": true }
+            },
+            "required": ["enabled"]
+          }
+        },
+        "required": ["backup"]
+      },
+      "then": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "required": ["storage"],
+            "properties": {
+              "storage": {
+                "type": "object",
+                "required": ["enabled", "provider", "bucket", "region", "paths"],
+                "properties": {
+                  "enabled": { "const": true },
+                  "provider": { "type": "string", "enum": ["s3", "azure-blob", "gcs"] },
+                  "bucket": { "type": "string", "minLength": 1 },
+                  "region": { "type": "string", "minLength": 1 },
+                  "paths": {
+                    "type": "object",
+                    "required": ["dbBackups"],
+                    "properties": {
+                      "dbBackups": { "type": "string", "minLength": 1 }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "supabase": {
+            "type": "object",
+            "required": ["enabled", "db"],
+            "properties": {
+              "enabled": { "const": true },
+              "db": {
+                "type": "object",
+                "required": ["enabled"],
+                "properties": {
+                  "enabled": { "const": true }
                 }
               }
             }

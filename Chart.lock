@@ -8,6 +8,9 @@ dependencies:
 - name: kafka
   repository: file://charts/kafka
   version: 32.4.4
+- name: clickhouse
+  repository: file://charts/clickhouse
+  version: 9.4.4
 - name: supabase
   repository: file://charts/supabase
   version: 0.1.4
@@ -29,5 +32,5 @@ dependencies:
 - name: external-dns
   repository: https://kubernetes-sigs.github.io/external-dns/
   version: 1.14.5
-digest: sha256:1bd3476e9a30e52b45f52e337b673052c85933845a0b572c988391c8de688544
-generated: "2026-05-22T18:02:27.932726-07:00"
+digest: sha256:7e80da15ef7cf7c94a6df3e52519782b78e43cb39a29fba02232b05eab3741af
+generated: "2026-05-26T13:07:10.059946-07:00"

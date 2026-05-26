@@ -151,6 +151,13 @@ spec:
                 configMapKeyRef:
                   name: {{ include "rulebricks-chart.app.configmap" . }}
                   key: KV_REST_API_TOKEN
+            {{- if and .Values.global .Values.global.clickhouse .Values.global.clickhouse.enabled }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%s-clickhouse-credentials" .Release.Name | trunc 63 | trimSuffix "-" }}
+                  key: admin-password
+            {{- end }}
             {{- with .Values.app.logging.kafkaSasl }}
             {{- if .existingSecret }}
             # Optional external Kafka SASL credentials secret

@@ -84,10 +84,42 @@ helm install rulebricks oci://ghcr.io/rulebricks/helm/stack \
 | `global.annotations`                 | Annotations applied to all resource metadata                              |
 | `global.podLabels`                   | Labels applied to pod templates only                                      |
 | `global.podAnnotations`              | Annotations applied to pod templates only                                 |
+| `global.storage.*`                   | Shared object storage used by decision logs and database backups          |
+| `backup.enabled`                     | Enable self-hosted Supabase Postgres backups                              |
+| `backup.schedule`                    | Cron schedule for Barman base backups                                     |
+| `backup.retentionDays`               | Number of days to retain restorable backups                               |
 
 ---
 
 ### Configuration Choices
+
+<details>
+<summary><strong>Shared Object Storage and Database Backups</strong></summary>
+
+Rulebricks uses one shared object storage configuration for storage-backed features. Decision logs are written under `global.storage.paths.decisionLogs`; database backups are written under `global.storage.paths.dbBackups`.
+
+```yaml
+global:
+  storage:
+    enabled: true
+    provider: s3 # s3, azure-blob, or gcs
+    bucket: my-rulebricks-storage
+    region: us-west-2
+    s3:
+      iamRoleArn: arn:aws:iam::123456789012:role/rulebricks-storage
+    paths:
+      decisionLogs: decision-logs
+      dbBackups: db-backups
+
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retentionDays: 7
+```
+
+Backups use Barman cloud tooling and are available only for self-hosted Supabase. The backup CronJob runs with the same workload identity pattern used by Vector and ClickHouse, so bucket credentials stay in Kubernetes service account configuration instead of the database container.
+
+</details>
 
 <details>
 <summary><strong>Single Sign-On via OIDC</strong></summary>

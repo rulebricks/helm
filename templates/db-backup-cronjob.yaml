@@ -1,0 +1,117 @@
+{{- if and .Values.backup .Values.backup.enabled .Values.supabase.enabled .Values.supabase.db.enabled }}
+{{- $storage := .Values.global.storage -}}
+{{- $provider := $storage.provider | default "s3" -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "rulebricks.backup.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "rulebricks.backup.fullname" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: db-backup
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    {{- with .Values.global.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.global.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  schedule: {{ .Values.backup.schedule | default "0 2 * * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.backup.jobHistory.successful | default 3 }}
+  failedJobsHistoryLimit: {{ .Values.backup.jobHistory.failed | default 3 }}
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ include "rulebricks.backup.fullname" . }}
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/component: db-backup
+            rulebricks.com/workload-group: infrastructure
+            {{- include "rulebricks.storage.podLabels" . | nindent 12 }}
+            {{- with .Values.global.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.global.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "rulebricks.backup.serviceAccountName" . }}
+          containers:
+            - name: backup
+              image: "{{ .Values.backup.image.repository }}:{{ .Values.backup.image.tag | default .Values.supabase.db.image.tag | default .Chart.AppVersion }}"
+              imagePullPolicy: {{ .Values.backup.image.pullPolicy | default "IfNotPresent" }}
+              env:
+                - name: PGHOST
+                  value: {{ include "rulebricks.supabase.db.fullname" . | quote }}
+                - name: PGPORT
+                  value: "5432"
+                - name: PGDATABASE
+                  value: "postgres"
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "rulebricks.supabase.db.secretName" . }}
+                      key: {{ .Values.supabase.secret.db.secretRefKey.username | default "username" }}
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "rulebricks.supabase.db.secretName" . }}
+                      key: {{ .Values.supabase.secret.db.secretRefKey.password | default "password" }}
+                - name: BARMAN_DESTINATION
+                  value: {{ include "rulebricks.storage.cloudDestination" (list . "dbBackups") | quote }}
+                - name: BARMAN_SERVER_NAME
+                  value: {{ .Values.backup.serverName | default "supabase" | quote }}
+                - name: BACKUP_RETENTION_DAYS
+                  value: {{ .Values.backup.retentionDays | default 7 | quote }}
+                {{- if eq $provider "s3" }}
+                - name: AWS_DEFAULT_REGION
+                  value: {{ $storage.region | quote }}
+                {{- else if eq $provider "azure-blob" }}
+                {{- if eq ($storage.azure.authMode | default "workload-identity") "connection-string" }}
+                - name: AZURE_STORAGE_CONNECTION_STRING
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ required "global.storage.azure.connectionStringSecretRef.name is required for connection-string auth" $storage.azure.connectionStringSecretRef.name }}
+                      key: {{ required "global.storage.azure.connectionStringSecretRef.key is required for connection-string auth" $storage.azure.connectionStringSecretRef.key }}
+                {{- else }}
+                - name: AZURE_CLIENT_ID
+                  value: {{ $storage.azure.clientId | quote }}
+                - name: AZURE_TENANT_ID
+                  value: {{ $storage.azure.tenantId | quote }}
+                {{- end }}
+                {{- end }}
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -euo pipefail
+
+                  PROVIDER_ARGS=({{ include "rulebricks.storage.cloudProviderArgs" . }})
+
+                  echo "Starting Barman base backup for ${BARMAN_SERVER_NAME}"
+                  echo "Destination: ${BARMAN_DESTINATION}"
+                  barman-cloud-backup "${PROVIDER_ARGS[@]}" \
+                    -h "${PGHOST}" \
+                    -p "${PGPORT}" \
+                    -U "${PGUSER}" \
+                    "${BARMAN_DESTINATION}" \
+                    "${BARMAN_SERVER_NAME}"
+
+                  echo "Applying retention policy: ${BACKUP_RETENTION_DAYS} days"
+                  barman-cloud-backup-delete "${PROVIDER_ARGS[@]}" \
+                    --minimum-redundancy 1 \
+                    --retention-policy "RECOVERY WINDOW OF ${BACKUP_RETENTION_DAYS} DAYS" \
+                    "${BARMAN_DESTINATION}" \
+                    "${BARMAN_SERVER_NAME}"
+
+                  echo "Backup completed"
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+{{- end }}

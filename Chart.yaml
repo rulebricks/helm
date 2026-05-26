@@ -29,6 +29,10 @@ dependencies:
     version: 32.4.4
     repository: file://charts/kafka
     condition: kafka.enabled
+  - name: clickhouse
+    version: 9.4.4
+    repository: file://charts/clickhouse
+    condition: clickhouse.enabled
   - name: supabase
     version: 0.1.4
     repository: file://charts/supabase
