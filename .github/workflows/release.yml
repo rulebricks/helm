@@ -112,14 +112,37 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Detect Image Changes
+        id: image_changes
+        uses: dorny/paths-filter@v3
+        with:
+          base: ${{ github.event.before }}
+          ref: ${{ github.sha }}
+          filters: |
+            kafka:
+              - 'charts/kafka/**'
+              - 'scripts/publish-kafka-image.sh'
+            clickhouse:
+              - 'charts/clickhouse/**'
+              - 'scripts/publish-clickhouse-image.sh'
+            supabase_postgres:
+              - 'images/supabase-postgres/**'
+              - 'scripts/publish-supabase-postgres-image.sh'
+
       - name: Publish Kafka Image
+        if: steps.image_changes.outputs.kafka == 'true'
         env:
           KAFKA_TAG: ${{ env.KAFKA_TAG }}
           SOURCE_IMAGE: ${{ env.KAFKA_SOURCE_IMAGE }}
           TARGET_IMAGE: ${{ env.KAFKA_TARGET_IMAGE }}
         run: bash scripts/publish-kafka-image.sh
 
+      - name: Skip Kafka Publish
+        if: steps.image_changes.outputs.kafka != 'true'
+        run: echo "::notice title=Skipping Kafka publish::No relevant files changed in this push."
+
       - name: Publish ClickHouse Image
+        if: steps.image_changes.outputs.clickhouse == 'true'
         env:
           CLICKHOUSE_TAG: ${{ env.CLICKHOUSE_TAG }}
           SOURCE_IMAGE: ${{ env.CLICKHOUSE_SOURCE_IMAGE }}
@@ -128,11 +151,20 @@ jobs:
           KEEPER_TARGET_IMAGE: ${{ env.CLICKHOUSE_KEEPER_TARGET_IMAGE }}
         run: bash scripts/publish-clickhouse-image.sh
 
+      - name: Skip ClickHouse Publish
+        if: steps.image_changes.outputs.clickhouse != 'true'
+        run: echo "::notice title=Skipping ClickHouse publish::No relevant files changed in this push."
+
       - name: Publish Supabase Postgres Image
+        if: steps.image_changes.outputs.supabase_postgres == 'true'
         env:
           SUPABASE_POSTGRES_TAG: ${{ env.SUPABASE_POSTGRES_TAG }}
           TARGET_IMAGE: ${{ env.SUPABASE_POSTGRES_TARGET_IMAGE }}
         run: bash scripts/publish-supabase-postgres-image.sh
+
+      - name: Skip Supabase Postgres Publish
+        if: steps.image_changes.outputs.supabase_postgres != 'true'
+        run: echo "::notice title=Skipping Supabase Postgres publish::No relevant files changed in this push."
 
       - name: Resolve Release Version
         id: version
