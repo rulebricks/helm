@@ -271,9 +271,6 @@ rulebricks:
       # Only set explicitly if using an external Kafka cluster
       kafkaBrokers: ""
       kafkaTopic: "logs"
-      # Label to display in App UI – does not change the logging destination
-      # See Vector config below to configure log forwarding
-      loggingDestination: "Console (stdout)"
       # Kafka SSL/SASL settings for external brokers.
       # For AWS MSK IAM, set kafkaSsl=true and kafkaSasl.mechanism="aws-iam";
       # credentials are sourced from the HPS pod IAM role via IRSA.
@@ -627,26 +624,32 @@ vector:
         inputs:
           - kafka
         source: |
+          # HPS owns the decision-log schema. Vector only parses the Kafka
+          # envelope and coerces fields to the Parquet/ClickHouse types below.
           parsed, err = parse_json(string!(.message))
           if err == null {
             . = parsed
           }
 
           .timestamp = parse_timestamp!(to_string(.timestamp) ?? to_string(now()), format: "%+")
-          .api_key = del(.k)
-          .user_id = del(.u)
-          .environment = del(.e)
-          .rule_name = del(.rule)
-          .rule_id = .decision.ruleId ?? ""
-          .rule_slug = .decision.ruleSlug ?? ""
-          .rule_version = to_string(.decision.ruleVersion) ?? ""
-          .operation = .decision.operation ?? ""
-          .error = del(.err)
-          .request = encode_json(del(.req) ?? {})
-          .response = encode_json(del(.res) ?? {})
-          .decision = encode_json(.decision ?? {})
-          .params = encode_json(del(.params) ?? {})
-          del(.m)
+          .api_key = to_string(.api_key) ?? ""
+          .user_id = to_string(.user_id) ?? null
+          .environment = to_string(.environment) ?? null
+          .ip = to_string(.ip) ?? null
+          .method = to_string(.method) ?? null
+          .url = to_string(.url) ?? ""
+          .status = to_int(.status) ?? 0
+          .rule_name = to_string(.rule_name) ?? null
+          .rule_id = to_string(.rule_id) ?? null
+          .rule_slug = to_string(.rule_slug) ?? null
+          .rule_version = to_string(.rule_version) ?? null
+          .operation = to_string(.operation) ?? null
+          .level = to_string(.level) ?? "info"
+          .error = to_string(.error) ?? null
+          .request = to_string(.request) ?? "null"
+          .response = to_string(.response) ?? "null"
+          .decision = to_string(.decision) ?? "{}"
+          .params = to_string(.params) ?? "{}"
     sinks:
       console:
         type: console

@@ -69,7 +69,6 @@ app:
     enabled: false
     kafkaBrokers: ""  # Override Kafka brokers URL, defaults to in-cluster Kafka
     kafkaTopic: "logs"
-    loggingDestination: ""
     kafkaSsl: false
     kafkaSasl:
       mechanism: ""    # "aws-iam" | "scram-sha-256" | "scram-sha-512" | "plain" | ""

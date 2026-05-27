@@ -100,14 +100,11 @@ data:
   {{- end }}
   {{- end }}
   {{- if and .Values.global .Values.global.clickhouse .Values.global.clickhouse.enabled }}
-  NEXT_PUBLIC_LOGGING_DESTINATION: ""
   LOG_QUERY_BACKEND: "clickhouse_oss"
   NEXT_PUBLIC_LOG_QUERY_BACKEND: "clickhouse_oss"
   CLICKHOUSE_URL: {{ printf "http://%s-clickhouse.%s.svc.cluster.local:8123" .Release.Name .Release.Namespace | quote }}
   CLICKHOUSE_USER: {{ .Values.global.clickhouse.user | default "rulebricks" | quote }}
   CLICKHOUSE_DATABASE: "rulebricks"
-  {{- else }}
-  NEXT_PUBLIC_LOGGING_DESTINATION: {{ .Values.app.logging.loggingDestination | default "" | quote }}
   {{- end }}
   {{- end }}
   {{- end }}
