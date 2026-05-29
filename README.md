@@ -34,7 +34,10 @@ After installation, Helm will display instructions for configuring DNS and enabl
 
 ### Version Pinning
 
-Production deployments should pin a chart version from the [GitHub Releases](https://github.com/rulebricks/helm/releases) page:
+Production deployments should pin both:
+
+- a Helm chart version from the [GitHub Releases](https://github.com/rulebricks/helm/releases) page
+- a Rulebricks product version through `global.version`
 
 ```bash
 helm install rulebricks oci://ghcr.io/rulebricks/helm/stack \
@@ -43,6 +46,13 @@ helm install rulebricks oci://ghcr.io/rulebricks/helm/stack \
   --version 0.2.0 \
   -f your-values.yaml
 ```
+
+```yaml
+global:
+  version: "1.8.17"
+```
+
+`global.version` is the single application semver. It is used for `rulebricks/app:<version>`, `rulebricks/hps:<version>`, `rulebricks/hps:worker-<version>`, and app-backed migration jobs. The chart version controls Kubernetes packaging and infrastructure templates; it does not select the Rulebricks application image version.
 
 ## Configuration
 
@@ -53,6 +63,7 @@ helm install rulebricks oci://ghcr.io/rulebricks/helm/stack \
 | `global.domain`                      | Base domain for the deployment                                            |
 | `global.email`                       | Admin email (required for TLS certificates)                               |
 | `global.licenseKey`                  | Rulebricks Enterprise license key                                         |
+| `global.version`                     | Rulebricks product version for app, HPS, HPS worker, and migration images |
 | `global.tlsEnabled`                  | Enable TLS/HTTPS (set after DNS is configured or with external-dns)       |
 | `global.externalDnsEnabled`          | Add external-dns annotations to ingresses for automatic DNS management    |
 | `global.smtp.host`                   | SMTP server hostname                                                      |
@@ -88,36 +99,98 @@ helm install rulebricks oci://ghcr.io/rulebricks/helm/stack \
 | `backup.enabled`                     | Enable self-hosted Supabase Postgres backups                              |
 | `backup.schedule`                    | Cron schedule for Barman base backups                                     |
 | `backup.retentionDays`               | Number of days to retain restorable backups                               |
+| `backup.ttlSecondsAfterFinished`     | Seconds to retain completed backup Jobs and pod logs                      |
+| `backup.jobHistory.*`                | CronJob history limits for completed backup Jobs                          |
+| `migrations.ttlSecondsAfterFinished` | Seconds to retain completed migration Jobs and pod logs                   |
 
 ---
 
 ### Configuration Choices
 
 <details>
+<summary><strong>Monitoring and Remote Write</strong></summary>
+
+Monitoring is enabled by default through `kube-prometheus-stack`. Prometheus stores metrics in-cluster unless you configure `kube-prometheus-stack.prometheus.prometheusSpec.remoteWrite`.
+
+Rulebricks adds ServiceMonitors for the app and HPS services:
+
+- App metrics are scraped from `/api/metrics` and cover app/admin API request counts, latency histograms, coarse rejections, and frontend error counts.
+- HPS metrics are scraped from `/metrics` and cover rule-engine request counts, latency histograms, rejections, Kafka worker wait time, bulk/parallel item volume, and memory cache stats.
+- Kafka JMX and ClickHouse ServiceMonitors are enabled where those charts expose Prometheus endpoints. ClickHouse metrics only apply when `clickhouse.enabled=true`. Traefik's Prometheus endpoint is enabled, but its ServiceMonitor is left as an explicit opt-in because the Traefik chart validates the Prometheus Operator CRD during template rendering.
+
+Metric labels are intentionally bounded to avoid Prometheus cardinality problems. Labels use route templates, methods, status classes, operations, and coarse reasons. They do not include API keys, users, organizations, IP addresses, raw URLs, rule slugs, flow slugs, or error messages.
+
+```yaml
+monitoring:
+  enabled: true
+kube-prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      remoteWrite:
+        - url: "https://prometheus-prod-XX.grafana.net/api/prom/push"
+          basicAuth:
+            username:
+              name: prometheus-remote-write
+              key: username
+            password:
+              name: prometheus-remote-write
+              key: password
+```
+
+Useful queries:
+
+```promql
+histogram_quantile(0.95, sum(rate(rulebricks_hps_http_request_duration_seconds_bucket[5m])) by (le, route))
+sum(rate(rulebricks_hps_rejections_total[5m])) by (route, reason)
+histogram_quantile(0.95, sum(rate(rulebricks_hps_kafka_request_duration_seconds_bucket[5m])) by (le, operation))
+sum(rate(rulebricks_hps_bulk_items_total[5m])) by (operation)
+sum(rate(rulebricks_app_frontend_errors_total[5m])) by (source)
+```
+
+After install, verify scrape discovery with:
+
+```bash
+kubectl get servicemonitor -n rulebricks
+kubectl port-forward -n rulebricks svc/rulebricks-kube-prometheus-stack-prometheus 9090:9090
+```
+
+</details>
+
+<details>
 <summary><strong>Shared Object Storage and Database Backups</strong></summary>
 
-Rulebricks uses one shared object storage configuration for storage-backed features. Decision logs are written under `global.storage.paths.decisionLogs`; database backups are written under `global.storage.paths.dbBackups`.
+Rulebricks uses one shared cloud provider and identity for storage-backed features, while allowing separate buckets, regions, and prefixes for high-volume decision logs and smaller database backups. If a DB backup field is left empty, it falls back to the decision-log location.
 
 ```yaml
 global:
   storage:
-    enabled: true
     provider: s3 # s3, azure-blob, or gcs
-    bucket: my-rulebricks-storage
-    region: us-west-2
     s3:
       iamRoleArn: arn:aws:iam::123456789012:role/rulebricks-storage
-    paths:
-      decisionLogs: decision-logs
-      dbBackups: db-backups
+    decisionLogs:
+      bucket: my-rulebricks-decision-logs
+      region: us-west-2
+      path: decision-logs
+    dbBackups:
+      bucket: my-rulebricks-db-backups
+      region: us-west-2
+      path: db-backups
 
 backup:
   enabled: true
   schedule: "0 2 * * *"
-  retentionDays: 7
+  retentionDays: 30
+  ttlSecondsAfterFinished: 2592000
+  jobHistory:
+    successful: 30
+    failed: 30
 ```
 
-Backups use Barman cloud tooling and are available only for self-hosted Supabase. The backup CronJob runs with the same workload identity pattern used by Vector and ClickHouse, so bucket credentials stay in Kubernetes service account configuration instead of the database container.
+Upgrade note: older values that used `global.storage.bucket`, `global.storage.region`, and `global.storage.paths.*` should move those fields under `global.storage.decisionLogs.*` and, when backups are enabled, `global.storage.dbBackups.*`.
+
+Backups use Barman cloud tooling and are available only for self-hosted Supabase. By default, restorable backup data is retained for 30 days, and completed backup Jobs and their pod logs are retained for 30 days through both CronJob history limits and Kubernetes Job TTL. The default history limits assume the default daily schedule; increase `backup.jobHistory.successful` and `backup.jobHistory.failed` if you run backups more frequently and need every completed Job to remain visible for the full 30-day TTL window.
+
+The backup CronJob runs with the same workload identity pattern used by Vector and ClickHouse, so bucket credentials stay in Kubernetes service account configuration instead of the database container. Migration Jobs use `migrations.ttlSecondsAfterFinished`, which also defaults to 30 days.
 
 </details>
 
@@ -240,9 +313,79 @@ The migration job will:
 <details>
 <summary><strong>External Kafka SSL/SASL</strong></summary>
 
-For external Kafka brokers, configure `rulebricks.app.logging.kafkaBrokers` and the optional `kafkaSsl` / `kafkaSasl` settings. The full MSK IAM and SCRAM examples live in `/Users/sidgarimella/.rulebricks/deployments/preview/values.yaml`, which is the internal source of truth for deployment configuration.
+To use external/managed Kafka, set `kafka.enabled: false` and configure `rulebricks.app.logging.kafkaBrokers` plus the optional `kafkaSsl` / `kafkaSasl` settings. The chart exposes these to the app, HPS, HPS workers, and Vector. The `wait-for-kafka` init container is automatically skipped when `kafkaBrokers` is set.
 
-For AWS MSK with IAM auth, set `kafkaSsl: true`, `kafkaSasl.mechanism: "aws-iam"`, and `kafkaSasl.region`; credentials come from the HPS pod IAM role via `rulebricks.hps.serviceAccount.annotations`. This chart only exposes the configuration to the pods. HPS must also include the corresponding KafkaJS `oauthbearer` implementation using `aws-msk-iam-sasl-signer-js`.
+Two consumers connect to Kafka: HPS (KafkaJS, produces/consumes the solution + logs topics) and Vector (consumes the `logs` topic for the decision-log archive). They have different auth capabilities, so the right preset depends on your provider.
+
+**AWS MSK with IAM auth** — credentials come from pod identity (IRSA), no static secrets:
+
+```yaml
+kafka:
+  enabled: false
+rulebricks:
+  app:
+    logging:
+      enabled: true
+      kafkaBrokers: "b-1.msk.example:9098,b-2.msk.example:9098"
+      kafkaSsl: true
+      kafkaSasl:
+        mechanism: "aws-iam"
+        region: "us-east-1"
+  hps:
+    serviceAccount:
+      create: true
+      annotations:
+        eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT:role/msk-access"
+# Vector cannot speak MSK IAM directly, so it uses the kafka-proxy bridge sidecar:
+kafkaBridge:
+  enabled: true
+  provider: "aws"
+  region: "us-east-1"
+  brokers: "b-1.msk.example:9098,b-2.msk.example:9098"
+  awsRoleArn: "arn:aws:iam::ACCOUNT:role/msk-access"
+vector:
+  serviceAccount:
+    create: true
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT:role/msk-access"
+  extraContainers:
+    - name: kafka-proxy
+      image: grepplabs/kafka-proxy:latest
+      args:
+        - server
+        - --bootstrap-server-mapping=b-1.msk.example:9098,127.0.0.1:19092
+        - --bootstrap-server-mapping=b-2.msk.example:9098,127.0.0.1:19093
+        - --tls-enable
+        - --sasl-enable
+        - --sasl-method=AWS_MSK_IAM
+        - --sasl-aws-region=us-east-1
+      ports:
+        - containerPort: 19092
+```
+
+HPS must include the KafkaJS `oauthbearer` implementation using `aws-msk-iam-sasl-signer-js`; the chart only passes configuration to the pods.
+
+**Azure Event Hubs (Kafka endpoint)** — SASL PLAIN with the namespace connection string. Both HPS and Vector connect directly; no bridge sidecar required:
+
+```yaml
+kafka:
+  enabled: false
+rulebricks:
+  app:
+    logging:
+      enabled: true
+      kafkaBrokers: "my-namespace.servicebus.windows.net:9093"
+      kafkaSsl: true
+      kafkaSasl:
+        mechanism: "plain"
+        username: "$ConnectionString"
+        password: "Endpoint=sb://my-namespace.servicebus.windows.net/;SharedAccessKeyName=...;SharedAccessKey=..."
+        # or: existingSecret / existingSecretUsernameKey / existingSecretPasswordKey
+```
+
+**GCP Managed Service for Apache Kafka** — OAUTHBEARER (Workload Identity) is preferred; the Vector bridge runs the GCP local auth-token server sidecar (`kafkaBridge.provider: "gcp"`, `gcpServiceAccountEmail`). A simpler `plain`/SCRAM credential also works for both consumers but uses static credentials.
+
+Vector's Kafka source natively supports SSL + SASL `PLAIN`/`SCRAM`, but not token mechanisms (`aws-iam`, `oauthbearer`). For those, the `kafkaBridge` sidecar authenticates upstream using the Vector pod's workload identity and exposes a local plaintext listener that Vector consumes from. The CLI sets all of this automatically when you externalize Kafka; the values above are for hand-installs.
 
 </details>
 
@@ -452,7 +595,9 @@ For Gateway API, set `supabase.studio.ingress.type: gateway-api` and configure `
 <details>
 <summary><strong>External Redis</strong></summary>
 
-Use an external Redis instance instead of the bundled deployment:
+Use an external/managed Redis instance (ElastiCache, Azure Cache for Redis, Memorystore, Upstash, etc.) instead of the bundled deployment. Set `rulebricks.redis.enabled: false` and provide connection details under `rulebricks.redis.external`.
+
+Basic TCP connection with inline password:
 
 ```yaml
 rulebricks:
@@ -461,10 +606,45 @@ rulebricks:
     external:
       host: "redis.example.com"
       port: 6379
-      password: "" # or reference a secret
+      password: "super-secret"   # injected at runtime; never written to a ConfigMap
+      tls:
+        enabled: true             # uses rediss:// scheme
 ```
 
-When `rulebricks.redis.enabled` is `false`, the chart skips deploying internal Redis and uses your external instance settings.
+Reference an existing secret instead of an inline password (recommended for production):
+
+```yaml
+rulebricks:
+  redis:
+    enabled: false
+    external:
+      host: "redis.example.com"
+      existingSecret: "my-redis-auth"
+      existingSecretKey: "redis-password"
+      tls:
+        enabled: true
+```
+
+Upstash-style HTTP API (bypasses the in-cluster `serverless-redis-http` bridge):
+
+```yaml
+rulebricks:
+  redis:
+    enabled: false
+    external:
+      host: "redis.example.com"   # still required for the direct Redis client
+      httpApi:
+        enabled: true
+        # inline:
+        url: "https://my-db.upstash.io"
+        token: "AX..."
+        # or via an existing secret:
+        existingSecret: "my-upstash-creds"
+        existingSecretUrlKey: "redis-url"
+        existingSecretTokenKey: "redis-token"
+```
+
+When `rulebricks.redis.enabled` is `false`, the chart skips the internal Redis Deployment/Service/PVC and points both the app and the `serverless-redis-http` bridge at your external instance. Passwords are injected via env at container start (using `$(REDIS_PASSWORD)` expansion) so they never land in a ConfigMap. The schema requires `external.host` to be set whenever Redis is disabled.
 
 </details>
 
@@ -701,7 +881,7 @@ chart will try to automate all configuration and migration work for you.
 | **keda**                  | Event-driven autoscaling for HPS workers           |    ✓    |
 | **vector**                | Log aggregation and forwarding                     |    ✓    |
 | **external-dns**          | Automatic DNS record management                    |    ✗    |
-| **kube-prometheus-stack** | Metrics collection (Prometheus)                    |    ✗    |
+| **kube-prometheus-stack** | Metrics collection (Prometheus)                    |    ✓    |
 
 ---
 

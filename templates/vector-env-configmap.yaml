@@ -1,4 +1,16 @@
 {{- if .Values.vector.enabled }}
+{{- $logging := (.Values.rulebricks.app).logging | default dict }}
+{{- $brokers := $logging.kafkaBrokers | default "" }}
+{{- $external := ne $brokers "" }}
+{{- $sasl := $logging.kafkaSasl | default dict }}
+{{- $mechanism := $sasl.mechanism | default "" }}
+{{- /* Vector's kafka source natively supports SSL + SASL PLAIN/SCRAM, but NOT token
+       mechanisms (AWS aws-iam / GCP oauthbearer). Those route through the in-pod
+       kafka-proxy bridge sidecar, which exposes a local plaintext listener. */ -}}
+{{- $tokenMech := or (eq $mechanism "aws-iam") (eq $mechanism "oauthbearer") }}
+{{- $bridge := and .Values.kafkaBridge .Values.kafkaBridge.enabled }}
+{{- /* Vector must consume the same (prefixed) log topic HPS produces to. */ -}}
+{{- $logTopic := printf "%s%s" (include "rulebricks.kafka.topicPrefix" .) ($logging.kafkaTopic | default "logs") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -9,8 +21,32 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 data:
-  # Dynamically constructed Kafka broker address based on Helm release name
-  # This ensures Vector can always find Kafka regardless of what the release is named
+  # Prefixed decision-log topic Vector subscribes to (matches HPS's producer).
+  KAFKA_LOG_TOPIC: {{ $logTopic | quote }}
+  {{- if $bridge }}
+  # Token-auth Kafka (MSK IAM / GCP OAUTHBEARER): Vector talks plaintext to the
+  # local kafka-proxy sidecar, which authenticates upstream via workload identity.
+  KAFKA_BOOTSTRAP_SERVERS: {{ printf "127.0.0.1:%v" (.Values.kafkaBridge.localPort | default 19092) | quote }}
+  KAFKA_TLS_ENABLED: "false"
+  KAFKA_SASL_ENABLED: "false"
+  KAFKA_SASL_MECHANISM: ""
+  {{- else if $external }}
+  # External Kafka brokers consumed directly by Vector.
+  KAFKA_BOOTSTRAP_SERVERS: {{ $brokers | quote }}
+  KAFKA_TLS_ENABLED: {{ ternary "true" "false" ($logging.kafkaSsl | default false) | quote }}
+  {{- if and (ne $mechanism "") (not $tokenMech) }}
+  KAFKA_SASL_ENABLED: "true"
+  # Vector expects uppercase mechanism names (PLAIN, SCRAM-SHA-256, SCRAM-SHA-512).
+  KAFKA_SASL_MECHANISM: {{ upper $mechanism | quote }}
+  {{- else }}
+  KAFKA_SASL_ENABLED: "false"
+  KAFKA_SASL_MECHANISM: ""
+  {{- end }}
+  {{- else }}
+  # In-cluster Kafka (default). Service name is derived from the Helm release name.
   KAFKA_BOOTSTRAP_SERVERS: "{{ .Release.Name }}-kafka.{{ .Release.Namespace }}.svc.cluster.local:9092"
+  KAFKA_TLS_ENABLED: "false"
+  KAFKA_SASL_ENABLED: "false"
+  KAFKA_SASL_MECHANISM: ""
+  {{- end }}
 {{- end }}
-

@@ -40,7 +40,7 @@ metadata:
     {{- toYaml .Values.migrations.annotations | nindent 4 }}
   {{- end }}
 spec:
-  ttlSecondsAfterFinished: {{ .Values.migrations.ttlSecondsAfterFinished | default 600 }}
+  ttlSecondsAfterFinished: {{ .Values.migrations.ttlSecondsAfterFinished | default 2592000 | int }}
   {{- if .Values.migrations.backoffLimit }}
   backoffLimit: {{ .Values.migrations.backoffLimit }}
   {{- end }}
@@ -76,7 +76,7 @@ spec:
       initContainers:
         - name: extract-assets
           # Use the configured migration image or fallback to app image
-          image: "{{ .Values.rulebricks.app.image.repository }}:{{ .Values.rulebricks.app.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.rulebricks.app.image.repository }}:{{ include "rulebricks.productVersion" . }}"
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
@@ -235,7 +235,7 @@ metadata:
     {{- toYaml .Values.migrations.annotations | nindent 4 }}
   {{- end }}
 spec:
-  ttlSecondsAfterFinished: {{ .Values.migrations.ttlSecondsAfterFinished | default 600 }}
+  ttlSecondsAfterFinished: {{ .Values.migrations.ttlSecondsAfterFinished | default 2592000 | int }}
   {{- if .Values.migrations.backoffLimit }}
   backoffLimit: {{ .Values.migrations.backoffLimit }}
   {{- end }}
@@ -271,7 +271,7 @@ spec:
       initContainers:
         - name: extract-assets
           # Use the configured migration image or fallback to app image
-          image: "{{ .Values.rulebricks.app.image.repository }}:{{ .Values.rulebricks.app.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.rulebricks.app.image.repository }}:{{ include "rulebricks.productVersion" . }}"
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:

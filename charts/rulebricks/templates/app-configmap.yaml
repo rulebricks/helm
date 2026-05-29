@@ -82,6 +82,10 @@ data:
   {{- if $aiEnabled }}
   AI_ENABLED: "1"
   {{- end }}
+  # Kafka topic namespace prefix. Emitted unconditionally because HPS applies it
+  # to all topics (including the always-on solution work topics), independent of
+  # whether decision logging is enabled.
+  KAFKA_TOPIC_PREFIX: {{ include "rulebricks-chart.kafka.topicPrefix" . | quote }}
   # Kafka/Logging configuration
   {{- if .Values.app.logging }}
   {{- if .Values.app.logging.enabled }}
@@ -99,13 +103,11 @@ data:
   KAFKA_SASL_REGION: {{ . | quote }}
   {{- end }}
   {{- end }}
-  {{- if and .Values.global .Values.global.clickhouse .Values.global.clickhouse.enabled }}
   LOG_QUERY_BACKEND: "clickhouse_oss"
   NEXT_PUBLIC_LOG_QUERY_BACKEND: "clickhouse_oss"
   CLICKHOUSE_URL: {{ printf "http://%s-clickhouse.%s.svc.cluster.local:8123" .Release.Name .Release.Namespace | quote }}
-  CLICKHOUSE_USER: {{ .Values.global.clickhouse.user | default "rulebricks" | quote }}
+  CLICKHOUSE_USER: "rulebricks"
   CLICKHOUSE_DATABASE: "rulebricks"
-  {{- end }}
   {{- end }}
   {{- end }}
   # Enterprise SSO Configuration

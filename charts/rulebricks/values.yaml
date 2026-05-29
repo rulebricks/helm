@@ -18,7 +18,6 @@
 app:
   image:
     repository: index.docker.io/rulebricks/app
-    tag: "latest"
     pullPolicy: IfNotPresent
   replicas: 2
   # Node scheduling configuration. Keep overrides preferred-only unless your
@@ -69,6 +68,11 @@ app:
     enabled: false
     kafkaBrokers: ""  # Override Kafka brokers URL, defaults to in-cluster Kafka
     kafkaTopic: "logs"
+    # Prefix applied to ALL Kafka topic names (solution, solution-response, logs, ...)
+    # so they don't collide on a shared/managed Kafka cluster. HPS prepends this to
+    # its topics; the chart applies it to KEDA lag triggers and the Vector consumer.
+    # Set to "" to disable prefixing entirely.
+    kafkaTopicPrefix: "com.rulebricks."
     kafkaSsl: false
     kafkaSasl:
       mechanism: ""    # "aws-iam" | "scram-sha-256" | "scram-sha-512" | "plain" | ""
@@ -106,12 +110,24 @@ app:
   supabaseServiceKey: ""
   supabaseAnonKey: ""
 
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+    annotations: {}
+  app:
+    path: /api/metrics
+  hps:
+    path: /metrics
+
 hps:
   enabled: true
   image:
     repository: index.docker.io/rulebricks/hps
     pullPolicy: Always
-    tag: "latest"
   replicas: 1
   # Node scheduling configuration. Custom affinity can include stricter rules
   # if your platform team requires them.
@@ -282,12 +298,6 @@ serviceAccount:
 
 volumes: []
 volumeMounts: []
-
-# Root-level scheduling is deprecated - use app.nodeSelector, app.tolerations, etc.
-# These are kept for backward compatibility but will be removed in a future version
-nodeSelector: {}
-tolerations: []
-affinity: {}
 
 podSecurityContext: {}
 securityContext: {}

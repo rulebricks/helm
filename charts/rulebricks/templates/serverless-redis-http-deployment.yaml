@@ -58,10 +58,20 @@ spec:
               {{- else }}
               value: {{ include "rulebricks-chart.redis.httpToken" . | quote }}
               {{- end }}
+            {{- /* External Redis password: defined before SRH_CONNECTION_STRING so Kubernetes
+                   $(VAR) expansion can inject it into the connection string at runtime. */ -}}
+            {{- if eq (include "rulebricks-chart.redis.hasAuth" .) "true" }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- include "rulebricks-chart.redis.passwordSecretRef" . | nindent 18 }}
+            {{- end }}
             - name: SRH_CONNECTION_STRING
               {{- if .Values.redis.enabled }}
               # Reference the templated redis service name
               value: "redis://{{ include "rulebricks-chart.redis.fullname" . }}:6379"
+              {{- else if eq (include "rulebricks-chart.redis.hasAuth" .) "true" }}
+              value: {{ include "rulebricks-chart.redis.connectionStringAuth" . | quote }}
               {{- else }}
               value: {{ include "rulebricks-chart.redis.connectionString" . | quote }}
               {{- end }}

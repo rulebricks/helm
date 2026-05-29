@@ -51,14 +51,30 @@ Create chart name and version as used by the chart label.
 {{- end }}
 
 {{/*
+Single Rulebricks product version used for app, HPS, and HPS worker images.
+*/}}
+{{- define "rulebricks-chart.globalVersion" -}}
+{{- coalesce .Values.global.version .Chart.AppVersion -}}
+{{- end }}
+
+{{- define "rulebricks-chart.app.imageTag" -}}
+{{- include "rulebricks-chart.globalVersion" . -}}
+{{- end }}
+
+{{- define "rulebricks-chart.hps.imageTag" -}}
+{{- include "rulebricks-chart.globalVersion" . -}}
+{{- end }}
+
+{{/*
 Common labels
 Merges standard chart labels with global.labels if present
 */}}
 {{- define "rulebricks-chart.labels" -}}
 helm.sh/chart: {{ include "rulebricks-chart.chart" . }}
 {{ include "rulebricks-chart.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- $productVersion := include "rulebricks-chart.app.imageTag" . }}
+{{- if $productVersion }}
+app.kubernetes.io/version: {{ $productVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- /* Merge global labels */ -}}
@@ -293,6 +309,22 @@ The Bitnami Kafka chart creates a service named: <release>-kafka
 {{- end }}
 
 {{/*
+Kafka topic prefix
+Namespaces all Kafka topic names (e.g. "com.rulebricks.solution") so they don't
+collide on a shared/managed Kafka cluster. HPS applies this prefix to its own
+topics; the chart applies it to systems that must match HPS (KEDA lag triggers,
+the Vector consumer). An explicit empty string disables prefixing; when the key
+is absent entirely we fall back to the default.
+*/}}
+{{- define "rulebricks-chart.kafka.topicPrefix" -}}
+{{- if and .Values.app .Values.app.logging (hasKey .Values.app.logging "kafkaTopicPrefix") -}}
+{{- .Values.app.logging.kafkaTopicPrefix -}}
+{{- else -}}
+com.rulebricks.
+{{- end -}}
+{{- end }}
+
+{{/*
 Supabase Kong URL - references the supabase subchart's Kong service
 The Supabase chart creates Kong service named: <release>-supabase-kong
 */}}
@@ -403,8 +435,9 @@ http://{{ include "rulebricks-chart.serverless-redis-http.fullname" . }}
 
 {{/*
 Redis connection string
-Returns a redis:// or rediss:// connection URL for internal or external Redis
-Kept for future external Redis wiring.
+Returns a redis:// or rediss:// connection URL for internal or external Redis.
+This form omits credentials; use rulebricks-chart.redis.connectionStringAuth when
+external Redis requires a password so the secret is injected at runtime instead.
 */}}
 {{- define "rulebricks-chart.redis.connectionString" -}}
 {{- if .Values.redis.enabled }}
@@ -414,6 +447,49 @@ redis://{{ include "rulebricks-chart.redis.fullname" . }}:6379
 {{- $host := .Values.redis.external.host | default "" -}}
 {{- $port := .Values.redis.external.port | default 6379 -}}
 {{- printf "%s://%s:%v" $scheme $host $port -}}
+{{- end }}
+{{- end }}
+
+{{/*
+Redis external auth detection
+Returns "true" when using external Redis (redis.enabled: false) that is protected by
+a password, supplied either inline (external.password) or via an existing secret
+(external.existingSecret). Empty string otherwise.
+*/}}
+{{- define "rulebricks-chart.redis.hasAuth" -}}
+{{- if and (not .Values.redis.enabled) .Values.redis.external -}}
+{{- if or .Values.redis.external.password .Values.redis.external.existingSecret -}}
+true
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Redis connection string with runtime password substitution
+Emits a literal $(REDIS_PASSWORD) reference that Kubernetes expands from the
+REDIS_PASSWORD env var at container start, so the password never lands in a ConfigMap.
+The consuming container must define REDIS_PASSWORD (from a Secret) earlier in its env list.
+Note: passwords are not URL-encoded; use URL-safe credentials or an existing secret.
+*/}}
+{{- define "rulebricks-chart.redis.connectionStringAuth" -}}
+{{- $scheme := ternary "rediss" "redis" (and .Values.redis.external .Values.redis.external.tls .Values.redis.external.tls.enabled) -}}
+{{- $host := .Values.redis.external.host | default "" -}}
+{{- $port := .Values.redis.external.port | default 6379 -}}
+{{- printf "%s://:$(REDIS_PASSWORD)@%s:%v" $scheme $host $port -}}
+{{- end }}
+
+{{/*
+Redis password Secret reference
+Returns a secretKeyRef (name + key) block body for the REDIS_PASSWORD env var.
+Uses the user-provided existing secret when set, otherwise the chart-managed app secret.
+*/}}
+{{- define "rulebricks-chart.redis.passwordSecretRef" -}}
+{{- if .Values.redis.external.existingSecret }}
+name: {{ .Values.redis.external.existingSecret }}
+key: {{ .Values.redis.external.existingSecretKey | default "redis-password" }}
+{{- else }}
+name: {{ include "rulebricks-chart.app.secretName" . | trim }}
+key: REDIS_PASSWORD
 {{- end }}
 {{- end }}
 

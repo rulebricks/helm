@@ -68,7 +68,7 @@ spec:
       {{- end }}
       containers:
         - name: app
-          image: {{ .Values.app.image.repository }}:{{ .Values.app.image.tag | default .Chart.AppVersion }}
+          image: {{ .Values.app.image.repository }}:{{ include "rulebricks-chart.app.imageTag" . }}
           imagePullPolicy: {{ .Values.app.image.pullPolicy }}
           ports:
             - name: http
@@ -140,7 +140,21 @@ spec:
                   name: {{ include "rulebricks-chart.app.secretName" . | trim }}
                   key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "openaiApiKey" "default" "OPENAI_API_KEY") | trim }}
             {{- end }}
-            # Redis (from configmap)
+            # Redis HTTP API endpoint/token
+            {{- if and (not .Values.redis.enabled) .Values.redis.external .Values.redis.external.httpApi .Values.redis.external.httpApi.enabled .Values.redis.external.httpApi.existingSecret }}
+            # External HTTP API (e.g. Upstash) credentials sourced from an existing secret
+            - name: UPSTASH_REDIS_REST_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.redis.external.httpApi.existingSecret }}
+                  key: {{ .Values.redis.external.httpApi.existingSecretUrlKey | default "redis-url" }}
+            - name: UPSTASH_REDIS_REST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.redis.external.httpApi.existingSecret }}
+                  key: {{ .Values.redis.external.httpApi.existingSecretTokenKey | default "redis-token" }}
+            {{- else }}
+            # From configmap (in-cluster bridge or inline external HTTP API)
             - name: UPSTASH_REDIS_REST_URL
               valueFrom:
                 configMapKeyRef:
@@ -151,13 +165,22 @@ spec:
                 configMapKeyRef:
                   name: {{ include "rulebricks-chart.app.configmap" . }}
                   key: KV_REST_API_TOKEN
-            {{- if and .Values.global .Values.global.clickhouse .Values.global.clickhouse.enabled }}
+            {{- end }}
+            {{- /* External Redis password: injected at runtime so it never lands in a ConfigMap.
+                   REDIS_PASSWORD must precede REDIS_URL for Kubernetes $(VAR) expansion. */ -}}
+            {{- if eq (include "rulebricks-chart.redis.hasAuth" .) "true" }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- include "rulebricks-chart.redis.passwordSecretRef" . | nindent 18 }}
+            - name: REDIS_URL
+              value: {{ include "rulebricks-chart.redis.connectionStringAuth" . | quote }}
+            {{- end }}
             - name: CLICKHOUSE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ printf "%s-clickhouse-credentials" .Release.Name | trunc 63 | trimSuffix "-" }}
                   key: admin-password
-            {{- end }}
             {{- with .Values.app.logging.kafkaSasl }}
             {{- if .existingSecret }}
             # Optional external Kafka SASL credentials secret

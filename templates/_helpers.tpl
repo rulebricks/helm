@@ -4,18 +4,69 @@ These helpers keep bucket auth and path naming consistent across Vector,
 ClickHouse, and future storage-backed jobs.
 */}}
 {{- define "rulebricks.storage.enabled" -}}
-{{- if and .Values.global .Values.global.storage .Values.global.storage.enabled -}}true{{- else -}}false{{- end -}}
+{{- $storage := .Values.global.storage | default dict -}}
+{{- $decisionLogs := $storage.decisionLogs | default dict -}}
+{{- if or $storage.bucket $decisionLogs.bucket -}}true{{- else -}}false{{- end -}}
 {{- end -}}
 
 {{- define "rulebricks.storage.provider" -}}
 {{- .Values.global.storage.provider | default "s3" -}}
 {{- end -}}
 
+{{- define "rulebricks.storage.bucket" -}}
+{{- $root := index . 0 -}}
+{{- $key := index . 1 -}}
+{{- $storage := $root.Values.global.storage | default dict -}}
+{{- $purpose := index $storage $key | default dict -}}
+{{- $decisionLogs := $storage.decisionLogs | default dict -}}
+{{- if $purpose.bucket -}}
+{{- $purpose.bucket -}}
+{{- else if and (ne $key "decisionLogs") $decisionLogs.bucket -}}
+{{- $decisionLogs.bucket -}}
+{{- else -}}
+{{- $storage.bucket | default "" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "rulebricks.storage.region" -}}
+{{- $root := index . 0 -}}
+{{- $key := index . 1 -}}
+{{- $storage := $root.Values.global.storage | default dict -}}
+{{- $purpose := index $storage $key | default dict -}}
+{{- $decisionLogs := $storage.decisionLogs | default dict -}}
+{{- if $purpose.region -}}
+{{- $purpose.region -}}
+{{- else if and (ne $key "decisionLogs") $decisionLogs.region -}}
+{{- $decisionLogs.region -}}
+{{- else -}}
+{{- $storage.region | default "" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "rulebricks.storage.azureContainer" -}}
+{{- $root := index . 0 -}}
+{{- $key := index . 1 -}}
+{{- $storage := $root.Values.global.storage | default dict -}}
+{{- $purpose := index $storage $key | default dict -}}
+{{- $decisionLogs := $storage.decisionLogs | default dict -}}
+{{- $azure := $storage.azure | default dict -}}
+{{- if $purpose.azureContainer -}}
+{{- $purpose.azureContainer -}}
+{{- else if and (ne $key "decisionLogs") $decisionLogs.azureContainer -}}
+{{- $decisionLogs.azureContainer -}}
+{{- else -}}
+{{- $azure.container | default "" -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "rulebricks.storage.path" -}}
 {{- $root := index . 0 -}}
 {{- $key := index . 1 -}}
-{{- $paths := $root.Values.global.storage.paths | default dict -}}
-{{- index $paths $key | default $key | trimPrefix "/" | trimSuffix "/" -}}
+{{- $storage := $root.Values.global.storage | default dict -}}
+{{- $purpose := index $storage $key | default dict -}}
+{{- $paths := $storage.paths | default dict -}}
+{{- $path := $purpose.path | default (index $paths $key) | default $key -}}
+{{- $path | trimPrefix "/" | trimSuffix "/" -}}
 {{- end -}}
 
 {{- define "rulebricks.storage.serviceAccountAnnotations" -}}
@@ -29,6 +80,38 @@ azure.workload.identity/client-id: {{ $storage.azure.clientId | quote }}
 {{- end }}
 {{- end -}}
 
+{{/*
+Unified Kafka workload-identity annotations.
+Given the kafkaBridge provider + identity inputs, emits the correct service-account
+annotation for the cloud's managed-Kafka auth: AWS MSK IAM via IRSA, GCP Managed
+Kafka via GKE Workload Identity. Azure Event Hubs uses SASL PLAIN and needs none.
+Apply to the HPS service account (Kafka producer/consumer) and the Vector service
+account (when the bridge sidecar is enabled) so a single identity input drives both.
+*/}}
+{{/*
+Kafka topic prefix (parent-chart view of rulebricks.app.logging.kafkaTopicPrefix).
+Used by parent-rendered resources (Vector) so they consume the same prefixed
+topics HPS produces. Empty string disables; absent key falls back to default.
+*/}}
+{{- define "rulebricks.kafka.topicPrefix" -}}
+{{- $logging := (.Values.rulebricks).app | default dict -}}
+{{- $logging = $logging.logging | default dict -}}
+{{- if hasKey $logging "kafkaTopicPrefix" -}}
+{{- $logging.kafkaTopicPrefix -}}
+{{- else -}}
+com.rulebricks.
+{{- end -}}
+{{- end -}}
+
+{{- define "rulebricks.kafka.identityAnnotations" -}}
+{{- $bridge := .Values.kafkaBridge | default dict -}}
+{{- if and (eq ($bridge.provider | default "") "aws") $bridge.awsRoleArn }}
+eks.amazonaws.com/role-arn: {{ $bridge.awsRoleArn | quote }}
+{{- else if and (eq ($bridge.provider | default "") "gcp") $bridge.gcpServiceAccountEmail }}
+iam.gke.io/gcp-service-account: {{ $bridge.gcpServiceAccountEmail | quote }}
+{{- end }}
+{{- end -}}
+
 {{- define "rulebricks.storage.podLabels" -}}
 {{- $storage := .Values.global.storage | default dict -}}
 {{- if and (eq ($storage.provider | default "") "azure-blob") $storage.azure (eq ($storage.azure.authMode | default "workload-identity") "workload-identity") }}
@@ -37,35 +120,39 @@ azure.workload.identity/use: "true"
 {{- end -}}
 
 {{- define "rulebricks.storage.s3Url" -}}
-{{- $storage := .Values.global.storage -}}
+{{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
+{{- $region := include "rulebricks.storage.region" (list . "decisionLogs") -}}
 {{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
-{{- printf "https://%s.s3.%s.amazonaws.com/%s/year=*/month=*/day=*/hour=*/*.parquet" $storage.bucket $storage.region $path -}}
+{{- printf "https://%s.s3.%s.amazonaws.com/%s/year=*/month=*/day=*/hour=*/*.parquet" $bucket $region $path -}}
 {{- end -}}
 
 {{- define "rulebricks.storage.azureUrl" -}}
-{{- $storage := .Values.global.storage -}}
+{{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
+{{- $container := include "rulebricks.storage.azureContainer" (list . "decisionLogs") -}}
 {{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
-{{- printf "https://%s.blob.core.windows.net/%s/%s/year=*/month=*/day=*/hour=*/*.parquet" $storage.bucket $storage.azure.container $path -}}
+{{- printf "https://%s.blob.core.windows.net/%s/%s/year=*/month=*/day=*/hour=*/*.parquet" $bucket $container $path -}}
 {{- end -}}
 
 {{- define "rulebricks.storage.gcsUrl" -}}
-{{- $storage := .Values.global.storage -}}
+{{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
 {{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
-{{- printf "https://storage.googleapis.com/%s/%s/year=*/month=*/day=*/hour=*/*.parquet" $storage.bucket $path -}}
+{{- printf "https://storage.googleapis.com/%s/%s/year=*/month=*/day=*/hour=*/*.parquet" $bucket $path -}}
 {{- end -}}
 
 {{- define "rulebricks.storage.cloudDestination" -}}
 {{- $root := index . 0 -}}
 {{- $key := index . 1 -}}
 {{- $storage := $root.Values.global.storage -}}
+{{- $bucket := include "rulebricks.storage.bucket" (list $root $key) -}}
+{{- $container := include "rulebricks.storage.azureContainer" (list $root $key) -}}
 {{- $path := include "rulebricks.storage.path" (list $root $key) -}}
 {{- $provider := $storage.provider | default "s3" -}}
 {{- if eq $provider "s3" -}}
-{{- printf "s3://%s/%s" $storage.bucket $path -}}
+{{- printf "s3://%s/%s" $bucket $path -}}
 {{- else if eq $provider "azure-blob" -}}
-{{- printf "https://%s.blob.core.windows.net/%s/%s" $storage.bucket $storage.azure.container $path -}}
+{{- printf "https://%s.blob.core.windows.net/%s/%s" $bucket $container $path -}}
 {{- else if eq $provider "gcs" -}}
-{{- printf "gs://%s/%s" $storage.bucket $path -}}
+{{- printf "gs://%s/%s" $bucket $path -}}
 {{- end -}}
 {{- end -}}
 
@@ -86,6 +173,11 @@ azure.workload.identity/use: "true"
 
 {{- define "rulebricks.backup.serviceAccountName" -}}
 {{- printf "%s-backup" .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "rulebricks.productVersion" -}}
+{{- $global := .Values.global | default dict -}}
+{{- coalesce $global.version .Chart.AppVersion -}}
 {{- end -}}
 
 {{- define "rulebricks.supabase.fullname" -}}

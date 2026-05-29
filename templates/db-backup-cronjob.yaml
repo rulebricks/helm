@@ -1,6 +1,7 @@
 {{- if and .Values.backup .Values.backup.enabled .Values.supabase.enabled .Values.supabase.db.enabled }}
 {{- $storage := .Values.global.storage -}}
 {{- $provider := $storage.provider | default "s3" -}}
+{{- $backupRegion := include "rulebricks.storage.region" (list . "dbBackups") -}}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -20,11 +21,12 @@ metadata:
 spec:
   schedule: {{ .Values.backup.schedule | default "0 2 * * *" | quote }}
   concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: {{ .Values.backup.jobHistory.successful | default 3 }}
-  failedJobsHistoryLimit: {{ .Values.backup.jobHistory.failed | default 3 }}
+  successfulJobsHistoryLimit: {{ .Values.backup.jobHistory.successful | default 30 }}
+  failedJobsHistoryLimit: {{ .Values.backup.jobHistory.failed | default 30 }}
   jobTemplate:
     spec:
       backoffLimit: 1
+      ttlSecondsAfterFinished: {{ .Values.backup.ttlSecondsAfterFinished | default 2592000 | int }}
       template:
         metadata:
           labels:
@@ -69,10 +71,10 @@ spec:
                 - name: BARMAN_SERVER_NAME
                   value: {{ .Values.backup.serverName | default "supabase" | quote }}
                 - name: BACKUP_RETENTION_DAYS
-                  value: {{ .Values.backup.retentionDays | default 7 | quote }}
+                  value: {{ .Values.backup.retentionDays | default 30 | quote }}
                 {{- if eq $provider "s3" }}
                 - name: AWS_DEFAULT_REGION
-                  value: {{ $storage.region | quote }}
+                  value: {{ $backupRegion | quote }}
                 {{- else if eq $provider "azure-blob" }}
                 {{- if eq ($storage.azure.authMode | default "workload-identity") "connection-string" }}
                 - name: AZURE_STORAGE_CONNECTION_STRING

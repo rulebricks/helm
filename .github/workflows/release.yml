@@ -83,10 +83,39 @@ jobs:
             --set rulebricks.redis.enabled=false \
             --set rulebricks.redis.external.host=redis.example.com
 
+  changes:
+    name: Detect Release Changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      chart: ${{ steps.filter.outputs.chart }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect Chart Release Changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          base: ${{ github.event.before }}
+          ref: ${{ github.sha }}
+          filters: |
+            chart:
+              - 'Chart.yaml'
+              - 'Chart.lock'
+              - 'values.schema.json'
+              - 'templates/**'
+              - 'charts/**'
+              - 'crds/**'
+              - 'scripts/publish-*.sh'
+              - 'images/**'
+
   release:
     name: Release Chart
-    needs: validate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - validate
+      - changes
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.chart == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: helm-chart-release

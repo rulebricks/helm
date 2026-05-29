@@ -9,6 +9,9 @@ global:
   email: "support@rulebricks.com"
   # License Key for Rulebricks Enterprise (provided in your onboarding space)
   licenseKey: "evaluation"
+  # Rulebricks product version used by app, HPS, HPS worker, and migration images.
+  # CLI-generated values pin this to a semantic version such as "1.8.17".
+  version: ""
   # Enable TLS/HTTPS - requires DNS records to be configured first
   # Set to `true` when using external-dns OR after manually creating DNS records
   tlsEnabled: false
@@ -17,14 +20,11 @@ global:
   externalDnsEnabled: false
   # =============================================================================
   # Shared Object Storage
-  # Configure once and let storage-backed features reuse it. Decision log query
-  # uses paths.decisionLogs; database backups use paths.dbBackups.
+  # Configure one cloud provider and identity, then choose separate object
+  # storage locations for high-volume decision logs and smaller DB backups.
   # =============================================================================
   storage:
-    enabled: false
     provider: "s3" # s3 | azure-blob | gcs
-    bucket: ""
-    region: ""
     s3:
       # Preferred: IAM Roles for Service Accounts (IRSA).
       iamRoleArn: ""
@@ -33,8 +33,6 @@ global:
       existingSecret:
         name: ""
     azure:
-      # For azure-blob, bucket above is the storage account name.
-      container: ""
       authMode: "workload-identity" # workload-identity | connection-string
       clientId: ""
       tenantId: ""
@@ -44,13 +42,19 @@ global:
     gcp:
       # Preferred: GKE Workload Identity.
       serviceAccountEmail: ""
-    paths:
-      decisionLogs: "decision-logs"
-      dbBackups: "db-backups"
-  # Mirrors top-level clickhouse.enabled so subcharts can gate behavior through
-  # Helm's global values propagation.
-  clickhouse:
-    enabled: false
+    decisionLogs:
+      # High-volume Parquet archive written by Vector and queried by ClickHouse.
+      bucket: "<decision-log-bucket>"
+      region: "<object-storage-region>"
+      path: "decision-logs"
+      # For azure-blob, bucket is the storage account name.
+      azureContainer: ""
+    dbBackups:
+      # Smaller periodic database backups. Leave empty to reuse decisionLogs.
+      bucket: ""
+      region: ""
+      path: "db-backups"
+      azureContainer: ""
   # =============================================================================
   # Global Labels and Annotations
   # Applied to ALL resources rendered by this chart (useful for compliance)
@@ -221,13 +225,15 @@ global:
 
 # =============================================================================
 # DATABASE BACKUPS
-# Periodic Supabase Postgres base backups are written to global.storage under
-# global.storage.paths.dbBackups. Requires self-hosted Supabase.
+# Periodic Supabase Postgres base backups are written to global.storage.dbBackups.
+# Requires self-hosted Supabase.
 # =============================================================================
 backup:
   enabled: false
   schedule: "0 2 * * *"
-  retentionDays: 7
+  retentionDays: 30
+  # Time to keep completed backup jobs and their pod logs (seconds, default 30 days)
+  ttlSecondsAfterFinished: 2592000
   serverName: "supabase"
   image:
     repository: rulebricks/supabase-postgres
@@ -241,8 +247,8 @@ backup:
       cpu: "1"
       memory: 1Gi
   jobHistory:
-    successful: 3
-    failed: 3
+    successful: 30
+    failed: 30
 
 # =============================================================================
 # RULEBRICKS APPLICATION STACK
@@ -253,10 +259,20 @@ backup:
 # solver directly depends on their configurations.
 # =============================================================================
 rulebricks:
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      scrapeTimeout: 10s
+    app:
+      path: /api/metrics
+    hps:
+      path: /metrics
+
   app:
     image:
       repository: index.docker.io/rulebricks/app
-      tag: "1.8.3" # https://hub.docker.com/repository/docker/rulebricks/app/tags
       pullPolicy: IfNotPresent
     podDisruptionBudget:
       enabled: false
@@ -271,6 +287,11 @@ rulebricks:
       # Only set explicitly if using an external Kafka cluster
       kafkaBrokers: ""
       kafkaTopic: "logs"
+      # Prefix applied to ALL Kafka topic names so they don't collide on a shared/
+      # managed Kafka cluster (e.g. "com.rulebricks.solution"). HPS prepends this to
+      # its own topics; the chart applies it to KEDA lag triggers and the Vector
+      # consumer so everything stays in sync. Set to "" to disable prefixing.
+      kafkaTopicPrefix: "com.rulebricks."
       # Kafka SSL/SASL settings for external brokers.
       # For AWS MSK IAM, set kafkaSsl=true and kafkaSasl.mechanism="aws-iam";
       # credentials are sourced from the HPS pod IAM role via IRSA.
@@ -290,7 +311,6 @@ rulebricks:
     enabled: true
     image:
       repository: index.docker.io/rulebricks/hps
-      tag: "1.7.0"
       pullPolicy: Always # HPS image may receive silent updates
     replicas: 3 # Minimum recommended
     podDisruptionBudget:
@@ -418,12 +438,17 @@ kafka:
       protocol: PLAINTEXT
     interbroker:
       protocol: PLAINTEXT
+  metrics:
+    jmx:
+      enabled: true
+    serviceMonitor:
+      enabled: true
 
-# ClickHouse (vendored Bitnami chart) enables self-hosted decision log query.
-# Kept stateless: all decision-log data lives in object storage and ClickHouse
-# only serves queries over Parquet files.
+# Rulebricks always deploys ClickHouse for native decision-log query support.
+# This is stateless: all decision-log data lives in object storage; you can
+# still query it directly via your own solutions.
 clickhouse:
-  enabled: false
+  enabled: true
   auth:
     username: rulebricks
     password: ""
@@ -445,54 +470,19 @@ clickhouse:
   serviceAccount:
     create: true
     annotations: {}
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+  queryLimits:
+    maxMemoryUsage: 1073741824
+    maxThreads: 4
+    maxExecutionTime: 60
   configdFiles:
-    09-decision-log-storage.xml: |
-      <clickhouse>
-        <named_collections>
-          {{- $provider := .Values.global.storage.provider | default "s3" }}
-          {{- if eq $provider "s3" }}
-          <decision_logs_s3>
-            <url>{{ include "rulebricks.storage.s3Url" . }}</url>
-            <format>Parquet</format>
-            <use_environment_credentials>true</use_environment_credentials>
-            <structure>timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), request String, response String, decision String, params Nullable(String)</structure>
-          </decision_logs_s3>
-          {{- else if eq $provider "azure-blob" }}
-          <decision_logs_azure>
-            <url>{{ include "rulebricks.storage.azureUrl" . }}</url>
-            <format>Parquet</format>
-            <structure>timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), request String, response String, decision String, params Nullable(String)</structure>
-          </decision_logs_azure>
-          {{- else if eq $provider "gcs" }}
-          <decision_logs_gcs>
-            <url>{{ include "rulebricks.storage.gcsUrl" . }}</url>
-            <format>Parquet</format>
-            <structure>timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), request String, response String, decision String, params Nullable(String)</structure>
-          </decision_logs_gcs>
-          {{- end }}
-        </named_collections>
-      </clickhouse>
-    10-query-limits.xml: |
-      <clickhouse>
-        <profiles>
-          <default>
-            <max_memory_usage>1073741824</max_memory_usage>
-            <max_threads>4</max_threads>
-            <max_execution_time>60</max_execution_time>
-          </default>
-        </profiles>
-      </clickhouse>
+    09-decision-log-storage.xml: '{{ include "rulebricks.clickhouse.decisionLogStorageXml" . }}'
+    10-query-limits.xml: '{{ include "rulebricks.clickhouse.queryLimitsXml" . }}'
   initdbScripts:
-    01-decision-logs-view.sql: |
-      {{- $provider := .Values.global.storage.provider | default "s3" }}
-      CREATE DATABASE IF NOT EXISTS rulebricks;
-      {{- if eq $provider "s3" }}
-      CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM s3(decision_logs_s3);
-      {{- else if eq $provider "azure-blob" }}
-      CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM azureBlobStorage(decision_logs_azure);
-      {{- else if eq $provider "gcs" }}
-      CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM gcs(decision_logs_gcs);
-      {{- end }}
+    01-decision-logs-view.sql: '{{ include "rulebricks.clickhouse.decisionLogsViewSql" . }}'
 
 # Ingress Controller (Traefik)
 traefik:
@@ -520,6 +510,14 @@ traefik:
     websecure:
       port: 8443
       exposedPort: 443
+  metrics:
+    prometheus:
+      enabled: true
+      serviceMonitor:
+        # Traefik validates CRD presence during render. Keep app/HPS/Kafka/
+        # ClickHouse ServiceMonitors on by default and let operators opt into
+        # this after Prometheus Operator CRDs are installed.
+        enabled: false
   persistence:
     enabled: false
 
@@ -599,57 +597,80 @@ vector:
         port: 8686
         protocol: TCP
         targetPort: 8686
-  # Load KAFKA_BOOTSTRAP_SERVERS from the templated ConfigMap (see templates/vector-env-configmap.yaml)
-  # Automatically constructs the correct internal Kafka service name based on your Helm release name.
+  # Kafka connection settings are sourced from the templated vector-kafka-env ConfigMap
+  # (see templates/vector-env-configmap.yaml). For in-cluster Kafka the internal service
+  # name is derived from the release name; for external Kafka the CLI/chart sets brokers,
+  # TLS, and SASL (PLAIN/SCRAM). Token mechanisms (MSK IAM / GCP OAUTHBEARER) are handled
+  # by the kafka-proxy bridge sidecar and Vector connects to it over local plaintext.
   env:
     - name: KAFKA_BOOTSTRAP_SERVERS
       valueFrom:
         configMapKeyRef:
           name: vector-kafka-env
           key: KAFKA_BOOTSTRAP_SERVERS
+    - name: KAFKA_TLS_ENABLED
+      valueFrom:
+        configMapKeyRef:
+          name: vector-kafka-env
+          key: KAFKA_TLS_ENABLED
+    - name: KAFKA_SASL_ENABLED
+      valueFrom:
+        configMapKeyRef:
+          name: vector-kafka-env
+          key: KAFKA_SASL_ENABLED
+    - name: KAFKA_SASL_MECHANISM
+      valueFrom:
+        configMapKeyRef:
+          name: vector-kafka-env
+          key: KAFKA_SASL_MECHANISM
+    - name: KAFKA_LOG_TOPIC
+      valueFrom:
+        configMapKeyRef:
+          name: vector-kafka-env
+          key: KAFKA_LOG_TOPIC
+    # SASL credentials (inline PLAIN/SCRAM). Optional so in-cluster/token-auth deploys
+    # work without the secret existing. existingSecret users can override these entries.
+    - name: KAFKA_SASL_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: vector-kafka-credentials
+          key: KAFKA_SASL_USERNAME
+          optional: true
+    - name: KAFKA_SASL_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: vector-kafka-credentials
+          key: KAFKA_SASL_PASSWORD
+          optional: true
   customConfig:
     sources:
       kafka:
         type: kafka
-        # KAFKA_BOOTSTRAP_SERVERS is set automatically via env from the vector-env ConfigMap
-        # Fallback value is only used if the env var is somehow not set
+        # KAFKA_BOOTSTRAP_SERVERS is set automatically via env from the vector-kafka-env ConfigMap.
+        # Fallback value is only used if the env var is somehow not set.
         bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-rulebricks-kafka:9092}"
+        # KAFKA_LOG_TOPIC carries the namespace prefix (e.g. com.rulebricks.logs).
         topics:
-          - logs
+          - "${KAFKA_LOG_TOPIC:-logs}"
         group_id: vector-consumers
         auto_offset_reset: latest
+        # TLS + SASL are driven by env from vector-kafka-env. Disabled by default
+        # (in-cluster Kafka and the bridge path both use plaintext).
+        tls:
+          enabled: ${KAFKA_TLS_ENABLED:-false}
+        sasl:
+          enabled: ${KAFKA_SASL_ENABLED:-false}
+          mechanism: "${KAFKA_SASL_MECHANISM:-PLAIN}"
+          username: "${KAFKA_SASL_USERNAME:-}"
+          password: "${KAFKA_SASL_PASSWORD:-}"
     transforms:
       normalize_logs:
         type: remap
         inputs:
           - kafka
-        source: |
-          # HPS owns the decision-log schema. Vector only parses the Kafka
-          # envelope and coerces fields to the Parquet/ClickHouse types below.
-          parsed, err = parse_json(string!(.message))
-          if err == null {
-            . = parsed
-          }
-
-          .timestamp = parse_timestamp!(to_string(.timestamp) ?? to_string(now()), format: "%+")
-          .api_key = to_string(.api_key) ?? ""
-          .user_id = to_string(.user_id) ?? null
-          .environment = to_string(.environment) ?? null
-          .ip = to_string(.ip) ?? null
-          .method = to_string(.method) ?? null
-          .url = to_string(.url) ?? ""
-          .status = to_int(.status) ?? 0
-          .rule_name = to_string(.rule_name) ?? null
-          .rule_id = to_string(.rule_id) ?? null
-          .rule_slug = to_string(.rule_slug) ?? null
-          .rule_version = to_string(.rule_version) ?? null
-          .operation = to_string(.operation) ?? null
-          .level = to_string(.level) ?? "info"
-          .error = to_string(.error) ?? null
-          .request = to_string(.request) ?? "null"
-          .response = to_string(.response) ?? "null"
-          .decision = to_string(.decision) ?? "{}"
-          .params = to_string(.params) ?? "{}"
+        # HPS owns the decision-log schema. Vector owns the Kafka-to-Parquet
+        # typing boundary so storage sinks stay stable during rolling deploys.
+        source: '{{ include "rulebricks.vector.normalizeLogs" . }}'
     sinks:
       console:
         type: console
@@ -658,7 +679,7 @@ vector:
         encoding:
           codec: json
       # ==== Decision Log Storage Sink ====
-      # When clickhouse.enabled and global.storage.enabled are both true, add a
+      # When clickhouse.enabled and global.storage.decisionLogs are configured, add a
       # decision_logs sink so ClickHouse can query the Parquet archive directly.
       # The key prefix MUST match the partition layout used by ClickHouse's
       # named_collection URLs in clickhouse.configdFiles (year=YYYY/month=MM/...).
@@ -675,10 +696,65 @@ vector:
       #   encoding:
       #     codec: parquet
       #   batch:
-      #     max_bytes: 134217728
-      #     timeout_secs: 60
+      #     max_bytes: 268435456
+      #     timeout_secs: 300
       #   # Authentication via IRSA (recommended) - no credentials needed in config.
       #   # Vector will use the IAM role attached to its service account.
+
+# =============================================================================
+# VECTOR KAFKA BRIDGE (token-auth managed Kafka)
+# =============================================================================
+# Vector's kafka source speaks SSL + SASL PLAIN/SCRAM natively, but NOT the
+# token-based mechanisms used by AWS MSK IAM (aws-iam) or GCP Managed Kafka
+# (oauthbearer). When external Kafka uses one of those, enable this bridge: a
+# kafka-proxy sidecar runs in the Vector pod, authenticates upstream using the
+# pod's workload identity (IRSA / GKE Workload Identity), and exposes a local
+# plaintext listener that Vector consumes from. No static credentials required.
+#
+# The CLI sets this automatically when you externalize Kafka with a token
+# mechanism. For hand-installs, set kafkaBridge.enabled and add the matching
+# sidecar to vector.extraContainers (example below), and annotate the Vector
+# service account with the cloud identity (see vector.serviceAccount).
+kafkaBridge:
+  enabled: false
+  # Cloud provider for the upstream auth method: "aws" | "gcp"
+  provider: ""
+  # Region (required for AWS MSK IAM signing)
+  region: ""
+  # Comma-separated upstream broker list (the real managed-Kafka brokers).
+  brokers: ""
+  # Local port the proxy listens on; Vector points KAFKA_BOOTSTRAP_SERVERS here.
+  localPort: 19092
+  # kafka-proxy image used for the AWS MSK IAM sidecar.
+  image: "grepplabs/kafka-proxy:latest"
+  # Workload identity used by the bridge (and shared with the HPS service account).
+  # AWS: IRSA role ARN; GCP: GKE Workload Identity service account email.
+  # The rulebricks.kafka.identityAnnotations helper maps these to the correct SA
+  # annotation; the CLI writes that annotation onto vector.serviceAccount.annotations
+  # and rulebricks.hps.serviceAccount.annotations.
+  awsRoleArn: ""
+  gcpServiceAccountEmail: ""
+#
+# Example vector.extraContainers entry for AWS MSK IAM (generated by the CLI):
+#
+# vector:
+#   extraContainers:
+#     - name: kafka-proxy
+#       image: grepplabs/kafka-proxy:latest
+#       args:
+#         - server
+#         - --bootstrap-server-mapping=b-1.msk.example:9098,127.0.0.1:19092
+#         - --bootstrap-server-mapping=b-2.msk.example:9098,127.0.0.1:19093
+#         - --tls-enable
+#         - --sasl-enable
+#         - --sasl-method=AWS_MSK_IAM
+#         - --sasl-aws-region=us-east-1
+#       ports:
+#         - containerPort: 19092
+#   serviceAccount:
+#     create: true
+#     annotations:
+#       eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/vector-msk-consumer
 
 # =============================================================================
 # SELF-HOSTED DATABASE SETTINGS (Supabase)
@@ -779,10 +855,10 @@ supabase:
 
 # =============================================================================
 # MONITORING & ALERTING
-# Controls cluster metrics and alerting via Prometheus (optional)
+# Controls cluster metrics and alerting via Prometheus
 # =============================================================================
 monitoring:
-  enabled: false
+  enabled: true
 kube-prometheus-stack:
   alertmanager:
     enabled: false
@@ -791,6 +867,10 @@ kube-prometheus-stack:
   prometheus:
     prometheusSpec:
       retention: 30d
+      serviceMonitorSelectorNilUsesHelmValues: false
+      serviceMonitorSelector: {}
+      podMonitorSelectorNilUsesHelmValues: false
+      podMonitorSelector: {}
       storageSpec:
         volumeClaimTemplate:
           spec:
@@ -870,8 +950,8 @@ migrations:
   #   - "deployment": Creates job as regular resource (supports post-rendering)
   #   - "manual": Renders template without hooks (apply separately)
   strategy: "hook"
-  # Time to keep completed jobs (seconds)
-  ttlSecondsAfterFinished: 600
+  # Time to keep completed jobs and their pod logs (seconds, default 30 days)
+  ttlSecondsAfterFinished: 2592000
   # Number of retries before marking job as failed
   backoffLimit: 3
   # Pod restart policy

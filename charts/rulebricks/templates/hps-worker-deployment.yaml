@@ -94,6 +94,13 @@ spec:
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /* Only wait for the in-cluster Kafka service. When external brokers are
+             configured (app.logging.kafkaBrokers set), the service does not exist. */ -}}
+      {{- $externalKafka := false }}
+      {{- if and .Values.app.logging .Values.app.logging.kafkaBrokers }}
+      {{- $externalKafka = true }}
+      {{- end }}
+      {{- if not $externalKafka }}
       initContainers:
         - name: wait-for-kafka
           image: busybox:1.36
@@ -107,9 +114,10 @@ spec:
                 sleep 2
               done
               echo "Kafka is ready!"
+      {{- end }}
       containers:
         - name: hps-worker
-          image: {{ .Values.hps.image.repository }}:worker-{{ .Values.hps.image.tag | default "latest" }}
+          image: {{ .Values.hps.image.repository }}:worker-{{ include "rulebricks-chart.hps.imageTag" . }}
           imagePullPolicy: {{ .Values.hps.image.pullPolicy }}
           resources:
             requests:

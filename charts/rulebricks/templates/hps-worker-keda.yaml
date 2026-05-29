@@ -28,7 +28,8 @@ spec:
       {{- end }}
       bootstrapServers: {{ $kafkaBrokers }}
       consumerGroup: generic-workers
-      topic: solution
+      # Must match the topic HPS actually produces/consumes (HPS applies the prefix).
+      topic: {{ include "rulebricks-chart.kafka.topicPrefix" . }}solution
       lagThreshold: "{{ .Values.hps.workers.keda.lagThreshold | default 100 }}"
       offsetResetPolicy: latest
   # Backup trigger: CPU (in case Kafka metrics fail)

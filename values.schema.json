@@ -23,6 +23,11 @@
           "type": "string",
           "description": "Rulebricks license key"
         },
+        "version": {
+          "type": "string",
+          "pattern": "^$|^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$",
+          "description": "Rulebricks product version used by app, HPS, HPS worker, and migration images"
+        },
         "tlsEnabled": {
           "type": "boolean",
           "description": "Enable TLS/HTTPS"
@@ -33,12 +38,9 @@
         },
         "storage": {
           "type": "object",
-          "description": "Shared object storage configuration for storage-backed features such as decision-log query",
+          "description": "Shared object storage provider and identity plus per-purpose buckets/paths for decision logs and database backups",
           "properties": {
-            "enabled": { "type": "boolean", "default": false },
             "provider": { "type": "string", "enum": ["s3", "azure-blob", "gcs"], "default": "s3" },
-            "bucket": { "type": "string" },
-            "region": { "type": "string" },
             "s3": {
               "type": "object",
               "properties": {
@@ -73,20 +75,26 @@
                 "serviceAccountEmail": { "type": "string" }
               }
             },
-            "paths": {
+            "decisionLogs": {
               "type": "object",
+              "description": "Object storage location for high-volume decision log Parquet files",
               "properties": {
-                "decisionLogs": { "type": "string" },
-                "dbBackups": { "type": "string" }
+                "bucket": { "type": "string" },
+                "region": { "type": "string" },
+                "path": { "type": "string" },
+                "azureContainer": { "type": "string" }
+              }
+            },
+            "dbBackups": {
+              "type": "object",
+              "description": "Object storage location for database backups; unset fields fall back to decisionLogs",
+              "properties": {
+                "bucket": { "type": "string" },
+                "region": { "type": "string" },
+                "path": { "type": "string" },
+                "azureContainer": { "type": "string" }
               }
             }
-          }
-        },
-        "clickhouse": {
-          "type": "object",
-          "description": "Global mirror of ClickHouse enablement for subcharts",
-          "properties": {
-            "enabled": { "type": "boolean", "default": false }
           }
         },
         "smtp": {
@@ -219,7 +227,13 @@
       "properties": {
         "enabled": { "type": "boolean", "default": false },
         "schedule": { "type": "string", "default": "0 2 * * *" },
-        "retentionDays": { "type": "integer", "minimum": 1, "default": 7 },
+        "retentionDays": { "type": "integer", "minimum": 1, "default": 30 },
+        "ttlSecondsAfterFinished": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 2592000,
+          "description": "Time to keep completed backup jobs and their pod logs (seconds)"
+        },
         "serverName": { "type": "string", "default": "supabase" },
         "image": {
           "type": "object",
@@ -233,8 +247,8 @@
         "jobHistory": {
           "type": "object",
           "properties": {
-            "successful": { "type": "integer", "minimum": 0, "default": 3 },
-            "failed": { "type": "integer", "minimum": 0, "default": 3 }
+            "successful": { "type": "integer", "minimum": 0, "default": 30 },
+            "failed": { "type": "integer", "minimum": 0, "default": 30 }
           }
         }
       }
@@ -284,13 +298,18 @@
               "type": "object",
               "properties": {
                 "kafkaBrokers": { "type": "string" },
+                "kafkaTopic": { "type": "string" },
+                "kafkaTopicPrefix": {
+                  "type": "string",
+                  "description": "Prefix namespacing all Kafka topic names (e.g. com.rulebricks.). Empty string disables prefixing."
+                },
                 "kafkaSsl": { "type": "boolean" },
                 "kafkaSasl": {
                   "type": "object",
                   "properties": {
                     "mechanism": {
                       "type": "string",
-                      "enum": ["aws-iam", "scram-sha-256", "scram-sha-512", "plain", ""]
+                      "enum": ["aws-iam", "oauthbearer", "scram-sha-256", "scram-sha-512", "plain", ""]
                     },
                     "region": { "type": "string" },
                     "username": { "type": "string" },
@@ -398,6 +417,42 @@
               }
             }
           }
+        },
+        "redis": {
+          "type": "object",
+          "description": "Redis configuration. Set enabled: false to use an external/managed Redis instance.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "external": {
+              "type": "object",
+              "description": "External Redis connection settings (used when redis.enabled is false).",
+              "properties": {
+                "host": { "type": "string" },
+                "port": { "type": ["integer", "string"], "default": 6379 },
+                "password": { "type": "string", "description": "Inline password. Prefer existingSecret for production." },
+                "existingSecret": { "type": "string", "description": "Name of an existing secret holding the Redis password." },
+                "existingSecretKey": { "type": "string", "default": "redis-password" },
+                "tls": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": { "type": "boolean", "default": false }
+                  }
+                },
+                "httpApi": {
+                  "type": "object",
+                  "description": "Upstash-compatible HTTP API. When enabled, the in-cluster serverless-redis-http bridge is bypassed.",
+                  "properties": {
+                    "enabled": { "type": "boolean", "default": false },
+                    "url": { "type": "string" },
+                    "token": { "type": "string" },
+                    "existingSecret": { "type": "string" },
+                    "existingSecretUrlKey": { "type": "string", "default": "redis-url" },
+                    "existingSecretTokenKey": { "type": "string", "default": "redis-token" }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -472,10 +527,32 @@
         "enabled": { "type": "boolean" }
       }
     },
+    "kafkaBridge": {
+      "type": "object",
+      "description": "Vector Kafka bridge sidecar for token-auth managed Kafka (AWS MSK IAM / GCP OAUTHBEARER) that Vector cannot speak natively.",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "provider": { "type": "string", "enum": ["aws", "gcp", ""] },
+        "region": { "type": "string" },
+        "brokers": { "type": "string" },
+        "localPort": { "type": ["integer", "string"], "default": 19092 },
+        "image": { "type": "string" },
+        "awsRoleArn": { "type": "string" },
+        "gcpServiceAccountEmail": { "type": "string" }
+      }
+    },
     "clickhouse": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean", "default": false }
+        "enabled": { "type": "boolean", "default": true },
+        "queryLimits": {
+          "type": "object",
+          "properties": {
+            "maxMemoryUsage": { "type": "integer", "minimum": 1, "default": 1073741824 },
+            "maxThreads": { "type": "integer", "minimum": 1, "default": 4 },
+            "maxExecutionTime": { "type": "integer", "minimum": 1, "default": 60 }
+          }
+        }
       }
     },
     "external-dns": {
@@ -496,8 +573,8 @@
         },
         "ttlSecondsAfterFinished": {
           "type": "integer",
-          "default": 600,
-          "description": "Time to keep completed jobs (seconds)"
+          "default": 2592000,
+          "description": "Time to keep completed jobs and their pod logs (seconds)"
         },
         "backoffLimit": {
           "type": "integer",
@@ -631,6 +708,51 @@
                     "required": ["kafkaBrokers"],
                     "properties": {
                       "kafkaBrokers": { "type": "string", "minLength": 1 }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "External Redis Validation",
+      "description": "If in-cluster Redis is disabled, an external Redis host must be specified in rulebricks.redis.external.host and must not be empty.",
+      "if": {
+        "properties": {
+          "rulebricks": {
+            "type": "object",
+            "properties": {
+              "redis": {
+                "type": "object",
+                "properties": {
+                  "enabled": { "const": false }
+                },
+                "required": ["enabled"]
+              }
+            },
+            "required": ["redis"]
+          }
+        },
+        "required": ["rulebricks"]
+      },
+      "then": {
+        "properties": {
+          "rulebricks": {
+            "type": "object",
+            "required": ["redis"],
+            "properties": {
+              "redis": {
+                "type": "object",
+                "required": ["external"],
+                "properties": {
+                  "external": {
+                    "type": "object",
+                    "required": ["host"],
+                    "properties": {
+                      "host": { "type": "string", "minLength": 1 }
                     }
                   }
                 }
@@ -856,12 +978,17 @@
             "properties": {
               "storage": {
                 "type": "object",
-                "required": ["enabled", "provider", "bucket", "region"],
+                "required": ["provider", "decisionLogs"],
                 "properties": {
-                  "enabled": { "const": true },
                   "provider": { "type": "string", "enum": ["s3", "azure-blob", "gcs"] },
-                  "bucket": { "type": "string", "minLength": 1 },
-                  "region": { "type": "string", "minLength": 1 }
+                  "decisionLogs": {
+                    "type": "object",
+                    "required": ["bucket", "region"],
+                    "properties": {
+                      "bucket": { "type": "string", "minLength": 1 },
+                      "region": { "type": "string", "minLength": 1 }
+                    }
+                  }
                 }
               }
             }
@@ -892,17 +1019,15 @@
             "properties": {
               "storage": {
                 "type": "object",
-                "required": ["enabled", "provider", "bucket", "region", "paths"],
+                "required": ["provider", "dbBackups"],
                 "properties": {
-                  "enabled": { "const": true },
                   "provider": { "type": "string", "enum": ["s3", "azure-blob", "gcs"] },
-                  "bucket": { "type": "string", "minLength": 1 },
-                  "region": { "type": "string", "minLength": 1 },
-                  "paths": {
+                  "dbBackups": {
                     "type": "object",
-                    "required": ["dbBackups"],
+                    "required": ["bucket", "region"],
                     "properties": {
-                      "dbBackups": { "type": "string", "minLength": 1 }
+                      "bucket": { "type": "string", "minLength": 1 },
+                      "region": { "type": "string", "minLength": 1 }
                     }
                   }
                 }
