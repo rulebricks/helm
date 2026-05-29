@@ -121,8 +121,11 @@ db:
   podAnnotations: {}
   podLabels: {}
   podSecurityContext:
-    {}
-    # fsGroup: 2000
+    # Postgres in the supabase-postgres image runs as uid/gid 999 ("postgres").
+    # Setting fsGroup makes mounted volumes group-accessible to that process; the
+    # volume-permissions init container additionally fixes ownership of the PVC
+    # data dir so initdb can set its 0700 permissions.
+    fsGroup: 999
   securityContext:
     {}
     # capabilities:

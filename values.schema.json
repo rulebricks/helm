@@ -56,7 +56,6 @@
             "azure": {
               "type": "object",
               "properties": {
-                "container": { "type": "string" },
                 "authMode": { "type": "string", "enum": ["workload-identity", "connection-string"], "default": "workload-identity" },
                 "clientId": { "type": "string" },
                 "tenantId": { "type": "string" },
@@ -277,9 +276,46 @@
     "rulebricks": {
       "type": "object",
       "properties": {
+        "metrics": {
+          "type": "object",
+          "description": "Prometheus metrics scraping for the app and HPS",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "serviceMonitor": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "interval": { "type": "string" },
+                "scrapeTimeout": { "type": "string" }
+              }
+            },
+            "app": {
+              "type": "object",
+              "properties": { "path": { "type": "string" } }
+            },
+            "hps": {
+              "type": "object",
+              "properties": { "path": { "type": "string" } }
+            }
+          }
+        },
         "app": {
           "type": "object",
           "properties": {
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": { "type": "string" },
+                "tag": { "type": "string" },
+                "pullPolicy": { "type": "string" }
+              }
+            },
+            "replicas": { "type": "integer", "minimum": 0 },
+            "resources": { "$ref": "#/definitions/resources" },
+            "podLabels": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
             "nodeSelector": {
               "type": "object",
               "description": "Node selector for Rulebricks app pods",
@@ -297,6 +333,7 @@
             "logging": {
               "type": "object",
               "properties": {
+                "enabled": { "type": "boolean" },
                 "kafkaBrokers": { "type": "string" },
                 "kafkaTopic": { "type": "string" },
                 "kafkaTopicPrefix": {
@@ -338,6 +375,21 @@
         "hps": {
           "type": "object",
           "properties": {
+            "enabled": { "type": "boolean" },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": { "type": "string" },
+                "tag": { "type": "string" },
+                "pullPolicy": { "type": "string" }
+              }
+            },
+            "replicas": { "type": "integer", "minimum": 0 },
+            "resources": { "$ref": "#/definitions/resources" },
+            "podLabels": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
             "nodeSelector": {
               "type": "object",
               "description": "Node selector for HPS pods",
@@ -372,6 +424,25 @@
             "workers": {
               "type": "object",
               "properties": {
+                "enabled": { "type": "boolean" },
+                "replicas": { "type": "integer", "minimum": 0 },
+                "resources": { "$ref": "#/definitions/resources" },
+                "podLabels": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string" }
+                },
+                "keda": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "minReplicaCount": { "type": "integer", "minimum": 0 },
+                    "maxReplicaCount": { "type": "integer", "minimum": 0 },
+                    "pollingInterval": { "type": "integer", "minimum": 1 },
+                    "cooldownPeriod": { "type": "integer", "minimum": 0 },
+                    "lagThreshold": { "type": ["integer", "string"] },
+                    "cpuThreshold": { "type": ["integer", "string"] }
+                  }
+                },
                 "nodeSelector": {
                   "type": "object",
                   "description": "Node selector for HPS worker pods",
@@ -410,6 +481,18 @@
         "ingress": {
           "type": "object",
           "properties": {
+            "enabled": { "type": "boolean" },
+            "className": { "type": "string" },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": { "type": "string" },
+                  "pathType": { "type": "string" }
+                }
+              }
+            },
             "app": {
               "type": "object",
               "properties": {
@@ -423,6 +506,20 @@
           "description": "Redis configuration. Set enabled: false to use an external/managed Redis instance.",
           "properties": {
             "enabled": { "type": "boolean", "default": true },
+            "tag": { "type": "string" },
+            "podLabels": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "resources": { "$ref": "#/definitions/resources" },
+            "persistence": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "size": { "type": "string" },
+                "storageClass": { "type": "string" }
+              }
+            },
             "external": {
               "type": "object",
               "description": "External Redis connection settings (used when redis.enabled is false).",
@@ -607,6 +704,87 @@
             "port": { "type": "string", "default": "5432" },
             "existingSecret": { "type": "string" },
             "existingSecretKey": { "type": "string", "default": "password" }
+          }
+        }
+      }
+    },
+    "monitoring": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "kube-prometheus-stack": {
+      "type": "object",
+      "description": "kube-prometheus-stack passthrough. Only remote_write Azure AD auth is validated here; the rest is owned by the subchart.",
+      "properties": {
+        "prometheus": {
+          "type": "object",
+          "properties": {
+            "prometheusSpec": {
+              "type": "object",
+              "properties": {
+                "remoteWrite": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "url": { "type": "string" },
+                      "azureAd": {
+                        "type": "object",
+                        "description": "Azure Monitor managed Prometheus auth. The active identity block must carry a non-empty client ID.",
+                        "allOf": [
+                          {
+                            "if": { "required": ["managedIdentity"] },
+                            "then": {
+                              "properties": {
+                                "managedIdentity": {
+                                  "type": "object",
+                                  "required": ["clientId"],
+                                  "properties": {
+                                    "clientId": { "type": "string", "minLength": 1 }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "if": { "required": ["workloadIdentity"] },
+                            "then": {
+                              "properties": {
+                                "workloadIdentity": {
+                                  "type": "object",
+                                  "required": ["clientId", "tenantId"],
+                                  "properties": {
+                                    "clientId": { "type": "string", "minLength": 1 },
+                                    "tenantId": { "type": "string", "minLength": 1 }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "if": { "required": ["oauth"] },
+                            "then": {
+                              "properties": {
+                                "oauth": {
+                                  "type": "object",
+                                  "required": ["clientId", "tenantId", "clientSecret"],
+                                  "properties": {
+                                    "clientId": { "type": "string", "minLength": 1 },
+                                    "tenantId": { "type": "string", "minLength": 1 }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }

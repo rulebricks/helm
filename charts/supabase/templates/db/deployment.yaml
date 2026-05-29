@@ -32,6 +32,25 @@ spec:
       securityContext:
         {{- toYaml .Values.db.podSecurityContext | nindent 8 }}
       initContainers:
+        {{- if .Values.db.persistence.enabled }}
+        # The supabase-postgres image runs as the non-root "postgres" user, so it
+        # cannot chown/chmod a freshly-attached PVC data dir that the CSI driver
+        # mounts as root (e.g. Azure Disk / EBS). Fix ownership as root before
+        # Postgres' entrypoint runs initdb.
+        - name: volume-permissions
+          image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.db.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - chown -R postgres:postgres /var/lib/postgresql/data
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - mountPath: /var/lib/postgresql/data
+              name: postgres-volume
+              subPath: postgres-data
+        {{- end }}
         - name: init-db
           image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: IfNotPresent

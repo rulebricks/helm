@@ -661,8 +661,12 @@ vector:
         sasl:
           enabled: ${KAFKA_SASL_ENABLED:-false}
           mechanism: "${KAFKA_SASL_MECHANISM:-PLAIN}"
-          username: "${KAFKA_SASL_USERNAME:-}"
-          password: "${KAFKA_SASL_PASSWORD:-}"
+          # username/password are intentionally omitted here. They are only set
+          # for external Kafka with SASL (the CLI injects them from the
+          # vector-kafka-credentials secret). With an empty default
+          # (${KAFKA_SASL_USERNAME:-}) Helm's toYaml drops the quotes and Vector
+          # reads the value as YAML null, which it rejects at startup
+          # ("invalid type: unit value, expected any valid TOML value").
     transforms:
       normalize_logs:
         type: remap
