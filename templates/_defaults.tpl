@@ -14,20 +14,20 @@ timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), enviro
     {{- if eq $provider "s3" }}
     <decision_logs_s3>
       <url>{{ include "rulebricks.storage.s3Url" . }}</url>
-      <format>Parquet</format>
+      <format>JSONEachRow</format>
       <use_environment_credentials>true</use_environment_credentials>
       <structure>{{ include "rulebricks.clickhouse.decisionLogStructure" . }}</structure>
     </decision_logs_s3>
     {{- else if eq $provider "azure-blob" }}
     <decision_logs_azure>
       <url>{{ include "rulebricks.storage.azureUrl" . }}</url>
-      <format>Parquet</format>
+      <format>JSONEachRow</format>
       <structure>{{ include "rulebricks.clickhouse.decisionLogStructure" . }}</structure>
     </decision_logs_azure>
     {{- else if eq $provider "gcs" }}
     <decision_logs_gcs>
       <url>{{ include "rulebricks.storage.gcsUrl" . }}</url>
-      <format>Parquet</format>
+      <format>JSONEachRow</format>
       <structure>{{ include "rulebricks.clickhouse.decisionLogStructure" . }}</structure>
     </decision_logs_gcs>
     {{- end }}
@@ -43,6 +43,11 @@ timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), enviro
       <max_memory_usage>{{ $limits.maxMemoryUsage | default 1073741824 }}</max_memory_usage>
       <max_threads>{{ $limits.maxThreads | default 4 }}</max_threads>
       <max_execution_time>{{ $limits.maxExecutionTime | default 60 }}</max_execution_time>
+      {{- /* Decision logs are read from object storage as gzipped NDJSON.
+             best_effort parses Vector's RFC3339 timestamps into DateTime64;
+             skip_unknown_fields tolerates extra envelope fields. */}}
+      <date_time_input_format>best_effort</date_time_input_format>
+      <input_format_skip_unknown_fields>1</input_format_skip_unknown_fields>
     </default>
   </profiles>
 </clickhouse>
@@ -62,7 +67,7 @@ CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM gcs(decision_lo
 
 {{- define "rulebricks.vector.normalizeLogs" -}}
 # HPS owns the decision-log schema. Vector only parses the Kafka envelope and
-# coerces fields to the Parquet/ClickHouse types below.
+# coerces fields to the JSON/ClickHouse types below.
 parsed, err = parse_json(string!(.message))
 if err == null {
   . = parsed

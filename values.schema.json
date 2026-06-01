@@ -76,7 +76,7 @@
             },
             "decisionLogs": {
               "type": "object",
-              "description": "Object storage location for high-volume decision log Parquet files",
+              "description": "Object storage location for high-volume decision log NDJSON files",
               "properties": {
                 "bucket": { "type": "string" },
                 "region": { "type": "string" },

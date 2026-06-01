@@ -43,7 +43,7 @@ global:
       # Preferred: GKE Workload Identity.
       serviceAccountEmail: ""
     decisionLogs:
-      # High-volume Parquet archive written by Vector and queried by ClickHouse.
+      # High-volume gzipped NDJSON archive written by Vector and queried by ClickHouse.
       bucket: "<decision-log-bucket>"
       region: "<object-storage-region>"
       path: "decision-logs"
@@ -672,7 +672,7 @@ vector:
         type: remap
         inputs:
           - kafka
-        # HPS owns the decision-log schema. Vector owns the Kafka-to-Parquet
+        # HPS owns the decision-log schema. Vector owns the Kafka-to-JSON
         # typing boundary so storage sinks stay stable during rolling deploys.
         source: '{{ include "rulebricks.vector.normalizeLogs" . }}'
     sinks:
@@ -684,7 +684,7 @@ vector:
           codec: json
       # ==== Decision Log Storage Sink ====
       # When clickhouse.enabled and global.storage.decisionLogs are configured, add a
-      # decision_logs sink so ClickHouse can query the Parquet archive directly.
+      # decision_logs sink so ClickHouse can query the NDJSON archive directly.
       # The key prefix MUST match the partition layout used by ClickHouse's
       # named_collection URLs in clickhouse.configdFiles (year=YYYY/month=MM/...).
       # The CLI generates this automatically; hand-installs should set it here.
@@ -696,9 +696,12 @@ vector:
       #   bucket: "your-bucket"
       #   region: "us-east-1"
       #   key_prefix: "decision-logs/year=%Y/month=%m/day=%d/hour=%H/"
-      #   filename_extension: "parquet"
+      #   filename_extension: "ndjson"
+      #   compression: gzip
       #   encoding:
-      #     codec: parquet
+      #     codec: json
+      #   framing:
+      #     method: newline_delimited
       #   batch:
       #     max_bytes: 268435456
       #     timeout_secs: 300
