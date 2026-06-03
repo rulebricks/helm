@@ -123,20 +123,20 @@ azure.workload.identity/use: "true"
 {{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
 {{- $region := include "rulebricks.storage.region" (list . "decisionLogs") -}}
 {{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
-{{- printf "https://%s.s3.%s.amazonaws.com/%s/year=*/month=*/day=*/hour=*/*.ndjson.gz" $bucket $region $path -}}
+{{- printf "https://%s.s3.%s.amazonaws.com/%s/year=*/month=*/day=*/hour=*/*.gz" $bucket $region $path -}}
 {{- end -}}
 
 {{- define "rulebricks.storage.azureUrl" -}}
 {{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
 {{- $container := include "rulebricks.storage.azureContainer" (list . "decisionLogs") -}}
 {{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
-{{- printf "https://%s.blob.core.windows.net/%s/%s/year=*/month=*/day=*/hour=*/*.ndjson.gz" $bucket $container $path -}}
+{{- printf "https://%s.blob.core.windows.net/%s/%s/year=*/month=*/day=*/hour=*/*.gz" $bucket $container $path -}}
 {{- end -}}
 
 {{- define "rulebricks.storage.gcsUrl" -}}
 {{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
 {{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
-{{- printf "https://storage.googleapis.com/%s/%s/year=*/month=*/day=*/hour=*/*.ndjson.gz" $bucket $path -}}
+{{- printf "https://storage.googleapis.com/%s/%s/year=*/month=*/day=*/hour=*/*.gz" $bucket $path -}}
 {{- end -}}
 
 {{- define "rulebricks.storage.cloudDestination" -}}
