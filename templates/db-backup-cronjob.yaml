@@ -1,7 +1,19 @@
 {{- if and .Values.backup .Values.backup.enabled .Values.supabase.enabled .Values.supabase.db.enabled }}
-{{- $storage := .Values.global.storage -}}
+{{- $storage := .Values.global.storage | default dict -}}
 {{- $provider := $storage.provider | default "s3" -}}
-{{- $backupRegion := include "rulebricks.storage.region" (list . "dbBackups") -}}
+{{- $azure := $storage.azure | default dict -}}
+{{- $authMode := $azure.authMode | default "workload-identity" -}}
+{{- $bucket := include "rulebricks.storage.bucket" (list . "dbBackups") -}}
+{{- $region := include "rulebricks.storage.region" (list . "dbBackups") -}}
+{{- $container := include "rulebricks.storage.azureContainer" (list . "dbBackups") -}}
+{{- $path := include "rulebricks.storage.path" (list . "dbBackups") -}}
+{{- $dbImage := printf "%s:%s" .Values.supabase.db.image.repository (.Values.supabase.db.image.tag | default .Chart.AppVersion) -}}
+{{- $rcloneImage := (.Values.backup.rclone | default dict).image | default "rclone/rclone:latest" -}}
+{{- $target := ternary (printf "%s/%s" $container $path) (printf "%s/%s" $bucket $path) (eq $provider "azure-blob") -}}
+# Logical Postgres backup: an init container streams pg_dump over the network into
+# a shared emptyDir, then rclone uploads it to object storage using the workload
+# identity / IRSA / GKE WI already bound to the backup ServiceAccount. No barman,
+# no local PGDATA, no sidecar -- and the artifacts are real dumps, not metadata.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -21,8 +33,8 @@ metadata:
 spec:
   schedule: {{ .Values.backup.schedule | default "0 2 * * *" | quote }}
   concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: {{ .Values.backup.jobHistory.successful | default 30 }}
-  failedJobsHistoryLimit: {{ .Values.backup.jobHistory.failed | default 30 }}
+  successfulJobsHistoryLimit: {{ (.Values.backup.jobHistory | default dict).successful | default 30 }}
+  failedJobsHistoryLimit: {{ (.Values.backup.jobHistory | default dict).failed | default 30 }}
   jobTemplate:
     spec:
       backoffLimit: 1
@@ -45,10 +57,13 @@ spec:
         spec:
           restartPolicy: Never
           serviceAccountName: {{ include "rulebricks.backup.serviceAccountName" . }}
-          containers:
-            - name: backup
-              image: "{{ .Values.backup.image.repository }}:{{ .Values.backup.image.tag | default .Values.supabase.db.image.tag | default .Chart.AppVersion }}"
-              imagePullPolicy: {{ .Values.backup.image.pullPolicy | default "IfNotPresent" }}
+          volumes:
+            - name: work
+              emptyDir: {}
+          initContainers:
+            - name: pg-dump
+              image: {{ $dbImage | quote }}
+              imagePullPolicy: {{ .Values.supabase.db.image.pullPolicy | default "IfNotPresent" }}
               env:
                 - name: PGHOST
                   value: {{ include "rulebricks.supabase.db.fullname" . | quote }}
@@ -66,54 +81,81 @@ spec:
                     secretKeyRef:
                       name: {{ include "rulebricks.supabase.db.secretName" . }}
                       key: {{ .Values.supabase.secret.db.secretRefKey.password | default "password" }}
-                - name: BARMAN_DESTINATION
-                  value: {{ include "rulebricks.storage.cloudDestination" (list . "dbBackups") | quote }}
-                - name: BARMAN_SERVER_NAME
-                  value: {{ .Values.backup.serverName | default "supabase" | quote }}
-                - name: BACKUP_RETENTION_DAYS
-                  value: {{ .Values.backup.retentionDays | default 30 | quote }}
-                {{- if eq $provider "s3" }}
-                - name: AWS_DEFAULT_REGION
-                  value: {{ $backupRegion | quote }}
-                {{- else if eq $provider "azure-blob" }}
-                {{- if eq ($storage.azure.authMode | default "workload-identity") "connection-string" }}
-                - name: AZURE_STORAGE_CONNECTION_STRING
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ required "global.storage.azure.connectionStringSecretRef.name is required for connection-string auth" $storage.azure.connectionStringSecretRef.name }}
-                      key: {{ required "global.storage.azure.connectionStringSecretRef.key is required for connection-string auth" $storage.azure.connectionStringSecretRef.key }}
-                {{- else }}
-                - name: AZURE_CLIENT_ID
-                  value: {{ $storage.azure.clientId | quote }}
-                - name: AZURE_TENANT_ID
-                  value: {{ $storage.azure.tenantId | quote }}
-                {{- end }}
-                {{- end }}
               command:
                 - /bin/bash
                 - -c
                 - |
                   set -euo pipefail
-
-                  PROVIDER_ARGS=({{ include "rulebricks.storage.cloudProviderArgs" . }})
-
-                  echo "Starting Barman base backup for ${BARMAN_SERVER_NAME}"
-                  echo "Destination: ${BARMAN_DESTINATION}"
-                  barman-cloud-backup "${PROVIDER_ARGS[@]}" \
-                    -h "${PGHOST}" \
-                    -p "${PGPORT}" \
-                    -U "${PGUSER}" \
-                    "${BARMAN_DESTINATION}" \
-                    "${BARMAN_SERVER_NAME}"
-
-                  echo "Applying retention policy: ${BACKUP_RETENTION_DAYS} days"
-                  barman-cloud-backup-delete "${PROVIDER_ARGS[@]}" \
-                    --minimum-redundancy 1 \
-                    --retention-policy "RECOVERY WINDOW OF ${BACKUP_RETENTION_DAYS} DAYS" \
-                    "${BARMAN_DESTINATION}" \
-                    "${BARMAN_SERVER_NAME}"
-
-                  echo "Backup completed"
+                  TS=$(date -u +%Y%m%dT%H%M%SZ)
+                  DEST="/work/${TS}"
+                  mkdir -p "${DEST}"
+                  echo "Dumping cluster globals (roles) to ${DEST}/globals.sql"
+                  pg_dumpall -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
+                    --globals-only --no-role-passwords > "${DEST}/globals.sql"
+                  echo "Dumping database ${PGDATABASE} (custom format) to ${DEST}/db.dump"
+                  pg_dump -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" \
+                    -d "${PGDATABASE}" -Fc -f "${DEST}/db.dump"
+                  echo "Logical dump complete: $(ls -la "${DEST}")"
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+          containers:
+            - name: upload
+              image: {{ $rcloneImage | quote }}
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: RETENTION_DAYS
+                  value: {{ .Values.backup.retentionDays | default 30 | quote }}
+                - name: RB_TARGET
+                  value: {{ $target | quote }}
+                {{- if eq $provider "azure-blob" }}
+                - name: RCLONE_CONFIG_DEST_TYPE
+                  value: "azureblob"
+                - name: RCLONE_CONFIG_DEST_ACCOUNT
+                  value: {{ $bucket | quote }}
+                {{- if eq $authMode "connection-string" }}
+                - name: RCLONE_CONFIG_DEST_CONNECTION_STRING
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ required "global.storage.azure.connectionStringSecretRef.name is required for connection-string auth" $azure.connectionStringSecretRef.name }}
+                      key: {{ required "global.storage.azure.connectionStringSecretRef.key is required for connection-string auth" $azure.connectionStringSecretRef.key }}
+                {{- else }}
+                - name: RCLONE_CONFIG_DEST_ENV_AUTH
+                  value: "true"
+                {{- end }}
+                {{- else if eq $provider "gcs" }}
+                - name: RCLONE_CONFIG_DEST_TYPE
+                  value: "google cloud storage"
+                - name: RCLONE_CONFIG_DEST_ENV_AUTH
+                  value: "true"
+                - name: RCLONE_CONFIG_DEST_BUCKET_POLICY_ONLY
+                  value: "true"
+                {{- else }}
+                - name: RCLONE_CONFIG_DEST_TYPE
+                  value: "s3"
+                - name: RCLONE_CONFIG_DEST_PROVIDER
+                  value: "AWS"
+                - name: RCLONE_CONFIG_DEST_ENV_AUTH
+                  value: "true"
+                - name: RCLONE_CONFIG_DEST_REGION
+                  value: {{ $region | quote }}
+                {{- end }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  echo "Uploading dumps to dest:${RB_TARGET}/"
+                  rclone copy /work "dest:${RB_TARGET}/" --create-empty-src-dirs --transfers 4
+                  echo "Pruning backups older than ${RETENTION_DAYS} days"
+                  rclone delete "dest:${RB_TARGET}/" --min-age "${RETENTION_DAYS}d" || true
+                  rclone rmdirs "dest:${RB_TARGET}/" --leave-root || true
+                  echo "Backup uploaded and pruned"
+              {{- with .Values.backup.resources }}
               resources:
-                {{- toYaml .Values.backup.resources | nindent 16 }}
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              volumeMounts:
+                - name: work
+                  mountPath: /work
 {{- end }}

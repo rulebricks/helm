@@ -38,9 +38,11 @@
         },
         "storage": {
           "type": "object",
-          "description": "Shared object storage provider and identity plus per-purpose buckets/paths for decision logs and database backups",
+          "description": "Shared object storage: one provider, one identity, and one bucket/container with per-purpose path prefixes",
           "properties": {
             "provider": { "type": "string", "enum": ["s3", "azure-blob", "gcs"], "default": "s3" },
+            "bucket": { "type": "string", "description": "Single bucket (S3/GCS) or storage account (azure-blob) holding all Rulebricks data" },
+            "region": { "type": "string" },
             "s3": {
               "type": "object",
               "properties": {
@@ -59,6 +61,7 @@
                 "authMode": { "type": "string", "enum": ["workload-identity", "connection-string"], "default": "workload-identity" },
                 "clientId": { "type": "string" },
                 "tenantId": { "type": "string" },
+                "container": { "type": "string", "description": "Single blob container holding all path prefixes" },
                 "connectionStringSecretRef": {
                   "type": "object",
                   "properties": {
@@ -74,24 +77,12 @@
                 "serviceAccountEmail": { "type": "string" }
               }
             },
-            "decisionLogs": {
+            "paths": {
               "type": "object",
-              "description": "Object storage location for high-volume decision log NDJSON files",
+              "description": "Per-purpose key prefixes within the single bucket/container",
               "properties": {
-                "bucket": { "type": "string" },
-                "region": { "type": "string" },
-                "path": { "type": "string" },
-                "azureContainer": { "type": "string" }
-              }
-            },
-            "dbBackups": {
-              "type": "object",
-              "description": "Object storage location for database backups; unset fields fall back to decisionLogs",
-              "properties": {
-                "bucket": { "type": "string" },
-                "region": { "type": "string" },
-                "path": { "type": "string" },
-                "azureContainer": { "type": "string" }
+                "decisionLogs": { "type": "string" },
+                "dbBackups": { "type": "string" }
               }
             }
           }
@@ -1156,17 +1147,10 @@
             "properties": {
               "storage": {
                 "type": "object",
-                "required": ["provider", "decisionLogs"],
+                "required": ["provider", "bucket"],
                 "properties": {
                   "provider": { "type": "string", "enum": ["s3", "azure-blob", "gcs"] },
-                  "decisionLogs": {
-                    "type": "object",
-                    "required": ["bucket", "region"],
-                    "properties": {
-                      "bucket": { "type": "string", "minLength": 1 },
-                      "region": { "type": "string", "minLength": 1 }
-                    }
-                  }
+                  "bucket": { "type": "string", "minLength": 1 }
                 }
               }
             }
@@ -1197,17 +1181,10 @@
             "properties": {
               "storage": {
                 "type": "object",
-                "required": ["provider", "dbBackups"],
+                "required": ["provider", "bucket"],
                 "properties": {
                   "provider": { "type": "string", "enum": ["s3", "azure-blob", "gcs"] },
-                  "dbBackups": {
-                    "type": "object",
-                    "required": ["bucket", "region"],
-                    "properties": {
-                      "bucket": { "type": "string", "minLength": 1 },
-                      "region": { "type": "string", "minLength": 1 }
-                    }
-                  }
+                  "bucket": { "type": "string", "minLength": 1 }
                 }
               }
             }

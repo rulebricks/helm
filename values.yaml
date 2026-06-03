@@ -20,11 +20,15 @@ global:
   externalDnsEnabled: false
   # =============================================================================
   # Shared Object Storage
-  # Configure one cloud provider and identity, then choose separate object
-  # storage locations for high-volume decision logs and smaller DB backups.
+  # One cloud provider, one identity, and one bucket/container hold all Rulebricks
+  # data. Decision logs and DB backups are just path prefixes within it, so adding
+  # more data types later never means another identity or bucket to wire up.
   # =============================================================================
   storage:
     provider: "s3" # s3 | azure-blob | gcs
+    # Single bucket (S3/GCS) or storage account (azure-blob).
+    bucket: "<rulebricks-bucket>"
+    region: "<object-storage-region>"
     s3:
       # Preferred: IAM Roles for Service Accounts (IRSA).
       iamRoleArn: ""
@@ -36,25 +40,18 @@ global:
       authMode: "workload-identity" # workload-identity | connection-string
       clientId: ""
       tenantId: ""
+      # Single blob container holding every prefix below.
+      container: ""
       connectionStringSecretRef:
         name: ""
         key: ""
     gcp:
       # Preferred: GKE Workload Identity.
       serviceAccountEmail: ""
-    decisionLogs:
-      # High-volume gzipped NDJSON archive written by Vector and queried by ClickHouse.
-      bucket: "<decision-log-bucket>"
-      region: "<object-storage-region>"
-      path: "decision-logs"
-      # For azure-blob, bucket is the storage account name.
-      azureContainer: ""
-    dbBackups:
-      # Smaller periodic database backups. Leave empty to reuse decisionLogs.
-      bucket: ""
-      region: ""
-      path: "db-backups"
-      azureContainer: ""
+    # Per-purpose key prefixes within the single bucket/container.
+    paths:
+      decisionLogs: "decision-logs"
+      dbBackups: "db-backups"
   # =============================================================================
   # Global Labels and Annotations
   # Applied to ALL resources rendered by this chart (useful for compliance)
@@ -234,11 +231,11 @@ backup:
   retentionDays: 30
   # Time to keep completed backup jobs and their pod logs (seconds, default 30 days)
   ttlSecondsAfterFinished: 2592000
-  serverName: "supabase"
-  image:
-    repository: rulebricks/supabase-postgres
-    tag: "15.1.0.147-rb1"
-    pullPolicy: IfNotPresent
+  # Cross-cloud uploader. rclone speaks S3 / Azure Blob / GCS and authenticates via
+  # the pod's workload identity (env_auth), so no per-cloud CLI or custom image is
+  # needed. Pin a digest/tag in production. The pg_dump step reuses supabase.db.image.
+  rclone:
+    image: rclone/rclone:latest
   resources:
     requests:
       cpu: 100m

@@ -65,31 +65,33 @@ CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM gcs(decision_lo
 {{- end }}
 {{- end -}}
 
+{{- /*
+HPS owns the decision-log schema; this coerces the Kafka envelope to the
+ClickHouse column types. Statements are ';'-separated and use no '#' comments so
+the script stays valid even when embedded in a single-quoted YAML scalar (which
+folds newlines to spaces). The CLI inlines an equivalent block-scalar form; keep
+the two in sync.
+*/ -}}
 {{- define "rulebricks.vector.normalizeLogs" -}}
-# HPS owns the decision-log schema. Vector only parses the Kafka envelope and
-# coerces fields to the JSON/ClickHouse types below.
-parsed, err = parse_json(string!(.message))
-if err == null {
-  . = parsed
-}
-
-.timestamp = parse_timestamp!(to_string(.timestamp) ?? to_string(now()), format: "%+")
-.api_key = to_string(.api_key) ?? ""
-.user_id = to_string(.user_id) ?? null
-.environment = to_string(.environment) ?? null
-.ip = to_string(.ip) ?? null
-.method = to_string(.method) ?? null
-.url = to_string(.url) ?? ""
-.status = to_int(.status) ?? 0
-.rule_name = to_string(.rule_name) ?? null
-.rule_id = to_string(.rule_id) ?? null
-.rule_slug = to_string(.rule_slug) ?? null
-.rule_version = to_string(.rule_version) ?? null
-.operation = to_string(.operation) ?? null
-.level = to_string(.level) ?? "info"
-.error = to_string(.error) ?? null
-.request = to_string(.request) ?? "null"
-.response = to_string(.response) ?? "null"
-.decision = to_string(.decision) ?? "{}"
+parsed, err = parse_json(string!(.message));
+if err == null { . = parsed };
+.timestamp = parse_timestamp!(to_string(.timestamp) ?? to_string(now()), format: "%+");
+.api_key = to_string(.api_key) ?? "";
+.user_id = to_string(.user_id) ?? null;
+.environment = to_string(.environment) ?? null;
+.ip = to_string(.ip) ?? null;
+.method = to_string(.method) ?? null;
+.url = to_string(.url) ?? "";
+.status = to_int(.status) ?? 0;
+.rule_name = to_string(.rule_name) ?? null;
+.rule_id = to_string(.rule_id) ?? null;
+.rule_slug = to_string(.rule_slug) ?? null;
+.rule_version = to_string(.rule_version) ?? null;
+.operation = to_string(.operation) ?? null;
+.level = to_string(.level) ?? "info";
+.error = to_string(.error) ?? null;
+.request = to_string(.request) ?? "null";
+.response = to_string(.response) ?? "null";
+.decision = to_string(.decision) ?? "{}";
 .params = to_string(.params) ?? "{}"
 {{- end -}}

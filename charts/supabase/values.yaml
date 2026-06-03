@@ -101,9 +101,9 @@ db:
   # Enable database provisioning
   enabled: true
   image:
-    repository: rulebricks/supabase-postgres
+    repository: supabase/postgres
     pullPolicy: IfNotPresent
-    tag: "15.1.0.147-rb1"
+    tag: "15.1.0.147"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
