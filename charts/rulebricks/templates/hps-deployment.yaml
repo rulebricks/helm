@@ -105,18 +105,34 @@ spec:
       {{- end }}
       {{- if not $externalKafka }}
       initContainers:
+        {{- /* Wait for the broker AND the consumer-group coordinator to be
+             serving before HPS starts. On a fresh cluster the coordinator is
+             often still loading after the broker port opens; starting HPS then
+             leaves its consumer unable to join and /ready stuck at 503. JMX is
+             disabled so the Kafka CLI does not try to bind the broker JMX port. */}}
         - name: wait-for-kafka
-          image: busybox:1.36
+          image: {{ .Values.hps.waitForKafka.image }}
           command:
-            - sh
-            - -c
+            - /bin/bash
+          args:
+            - -ec
             - |
-              echo "Waiting for Kafka to be ready..."
-              until nc -z {{ .Release.Name }}-kafka 9092; do
-                echo "Kafka not ready, waiting..."
+              BOOT="{{ .Release.Name }}-kafka:9092"
+              echo "Waiting for Kafka broker..."
+              until JMX_PORT='' KAFKA_JMX_OPTS='' \
+                /opt/bitnami/kafka/bin/kafka-broker-api-versions.sh \
+                --bootstrap-server "$BOOT" >/dev/null 2>&1; do
+                echo "Broker not ready, waiting..."
                 sleep 2
               done
-              echo "Kafka is ready!"
+              echo "Waiting for Kafka group coordinator..."
+              until JMX_PORT='' KAFKA_JMX_OPTS='' \
+                /opt/bitnami/kafka/bin/kafka-consumer-groups.sh \
+                --bootstrap-server "$BOOT" --list >/dev/null 2>&1; do
+                echo "Coordinator not ready, waiting..."
+                sleep 2
+              done
+              echo "Kafka coordinator ready!"
       {{- end }}
       containers:
         - name: hps

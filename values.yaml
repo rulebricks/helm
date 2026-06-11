@@ -312,6 +312,11 @@ rulebricks:
     image:
       repository: index.docker.io/rulebricks/hps
       pullPolicy: Always # HPS image may receive silent updates
+    # Init container image that waits for Kafka (broker + group coordinator)
+    # before HPS starts. Uses the Kafka CLI image; keep aligned with the Kafka
+    # image used by the kafka-topic-align Job.
+    waitForKafka:
+      image: docker.io/rulebricks/kafka:4.0.0-debian-12-r10
     replicas: 3 # Minimum recommended
     podDisruptionBudget:
       enabled: false
