@@ -48,9 +48,9 @@ timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), enviro
 <clickhouse>
   <profiles>
     <default>
-      <max_memory_usage>{{ $limits.maxMemoryUsage | default 1073741824 }}</max_memory_usage>
-      <max_threads>{{ $limits.maxThreads | default 4 }}</max_threads>
-      <max_execution_time>{{ $limits.maxExecutionTime | default 60 }}</max_execution_time>
+      <max_memory_usage>{{ $limits.maxMemoryUsage | default 1073741824 | int64 }}</max_memory_usage>
+      <max_threads>{{ $limits.maxThreads | default 4 | int64 }}</max_threads>
+      <max_execution_time>{{ $limits.maxExecutionTime | default 60 | int64 }}</max_execution_time>
       {{- /* Decision logs are read from object storage as gzipped NDJSON.
              best_effort parses Vector's RFC3339 timestamps into DateTime64;
              skip_unknown_fields tolerates extra envelope fields. */}}
