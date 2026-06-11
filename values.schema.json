@@ -441,7 +441,11 @@
                     "pollingInterval": { "type": "integer", "minimum": 1 },
                     "cooldownPeriod": { "type": "integer", "minimum": 0 },
                     "lagThreshold": { "type": ["integer", "string"] },
-                    "cpuThreshold": { "type": ["integer", "string"] }
+                    "cpuThreshold": { "type": ["integer", "string"] },
+                    "scalingBehavior": {
+                      "type": "object",
+                      "description": "Optional HPA scaling behavior override (scaleUp/scaleDown) rendered into the worker ScaledObject; omit to use the chart's exponential scale-up / smooth scale-down defaults."
+                    }
                   }
                 },
                 "nodeSelector": {

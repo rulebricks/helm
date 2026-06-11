@@ -331,17 +331,21 @@ rulebricks:
         memory: "2Gi"
     workers:
       enabled: true
-      replicas: 4
+      replicas: 8
       podDisruptionBudget:
         enabled: false
         minAvailable: ""
         maxUnavailable: ""
       # Workers are single-threaded Node processes doing CPU-bound rule
-      # evaluation: one full core each (request = limit avoids CFS throttling
-      # mid-batch). Scale OUT for more capacity, not up.
+      # evaluation. The limit is one full core (the single-threaded ceiling)
+      # so a busy worker can burst to a whole CPU; the request sits well below
+      # it so a large warm fleet packs tightly and scale-out replicas schedule
+      # without immediately demanding new nodes. Trade-off: Burstable QoS means
+      # a worker can be CFS-throttled toward its request under genuine node
+      # contention. Scale OUT (replicas) for throughput.
       resources:
         requests:
-          cpu: "1000m"
+          cpu: "250m"
           memory: "1Gi"
         limits:
           cpu: "1000m"
@@ -353,19 +357,30 @@ rulebricks:
       solutionPartitions: 64
       keda:
         enabled: true
-        minReplicaCount: 4
+        # Baseline (non-scaled) fleet: sized so steady-state throughput needs
+        # no scaling event at all; bursts scale out from here exponentially
+        # (see scalingBehavior defaults in the worker ScaledObject template).
+        minReplicaCount: 8
         # Bounded by solutionPartitions (a worker beyond the partition count
-        # would sit idle).
-        maxReplicaCount: 48
-        pollingInterval: 10
+        # would sit idle). Equal to solutionPartitions: the fleet is
+        # effectively unbounded up to the partition ceiling; the cluster
+        # autoscaler's node ceiling is the real capacity limit.
+        maxReplicaCount: 64
+        # Poll fast so bursts are detected within seconds.
+        pollingInterval: 5
         cooldownPeriod: 300
         # Lag is measured in MESSAGES. With chunked bulk dispatch (HPS splits
         # batches into <=CHUNK_MAX_ITEMS-payload messages) a message is a
         # bounded unit of work (~50-150ms), so:
         #   lagThreshold ~= target drain seconds * per-worker messages/sec
-        # 100 messages ~= 10-15s of backlog for one worker at defaults.
-        lagThreshold: 100
+        # 50 messages ~= 5-8s of backlog for one worker: one replica is added
+        # per ~5s of fleet backlog, biasing toward early scale-out.
+        lagThreshold: 50
         cpuThreshold: 25
+        # Optional override for the HPA scaling behavior rendered into the
+        # worker ScaledObject; leave unset to use the chart's aggressive
+        # exponential scale-up / smooth scale-down defaults.
+        # scalingBehavior: {}
 
   ingress:
     enabled: true

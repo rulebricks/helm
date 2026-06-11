@@ -17,6 +17,36 @@ spec:
   maxReplicaCount: {{ .Values.hps.workers.keda.maxReplicaCount | default 48 }}
   pollingInterval: {{ .Values.hps.workers.keda.pollingInterval | default 15 }}  # Check interval in seconds
   cooldownPeriod: {{ .Values.hps.workers.keda.cooldownPeriod | default 300 }}  # Wait before scaling down in seconds
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        {{- if .Values.hps.workers.keda.scalingBehavior }}
+        {{- toYaml .Values.hps.workers.keda.scalingBehavior | nindent 8 }}
+        {{- else }}
+        {{- /* Rule traffic is bursty (idle -> firehose). Scale-up is
+             exponential: act immediately (no stabilization) and double the
+             fleet (or add 8 pods, whichever is greater) every 15s, so
+             min -> max takes ~3-4 doubling periods. Scale-down is smooth: wait
+             out a 5-minute quiet window, then shed at most 25% of replicas per
+             minute so a brief lull between bursts never collapses the fleet. */}}
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          selectPolicy: Max
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 15
+            - type: Pods
+              value: 8
+              periodSeconds: 15
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          selectPolicy: Max
+          policies:
+            - type: Percent
+              value: 25
+              periodSeconds: 60
+        {{- end }}
   triggers:
   # Primary triggers: Kafka lag for each topic
   - type: kafka
