@@ -574,7 +574,7 @@ clickhouse:
     10-query-limits.xml: '{{ include "rulebricks.clickhouse.queryLimitsXml" . }}'
     11-named-collection-access.xml: '{{ include "rulebricks.clickhouse.userAccessXml" . }}'
   initdbScripts:
-    01-decision-logs-view.sql: '{{ include "rulebricks.clickhouse.decisionLogsViewSql" . }}'
+    01-decision-logs-view.sh: '{{ include "rulebricks.clickhouse.decisionLogsViewScript" . }}'
 
 # Ingress Controller (Traefik)
 traefik:

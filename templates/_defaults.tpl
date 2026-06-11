@@ -83,16 +83,29 @@ This MUST be mounted under users.d (not config.d) to take effect.
 </clickhouse>
 {{- end -}}
 
-{{- define "rulebricks.clickhouse.decisionLogsViewSql" -}}
-{{- $provider := .Values.global.storage.provider | default "s3" }}
-CREATE DATABASE IF NOT EXISTS rulebricks;
-{{- if eq $provider "s3" }}
-CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM s3(decision_logs_s3);
-{{- else if eq $provider "azure-blob" }}
-CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM azureBlobStorage(decision_logs_azure);
-{{- else if eq $provider "gcs" }}
-CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM gcs(decision_logs_gcs);
-{{- end }}
+{{- /*
+Decision-logs view bootstrap, mounted into the ClickHouse subchart's
+initdbScripts. The Bitnami ClickHouse image ONLY runs *.sh init scripts: it
+skips other files with "supported formats are: .sh" and will not even start the
+init flow unless a .sh file is present, so this MUST be a shell script, not raw
+SQL (a prior .sql version was silently never executed -> "Database rulebricks
+does not exist"). It runs clickhouse-client against the locally-started server
+during init; with ClickHouse persistence disabled the data dir is ephemeral, so
+this idempotent script re-creates the database + view on every fresh pod. The
+admin user (CLICKHOUSE_ADMIN_USER) carries the NAMED COLLECTION grants the view
+needs. Keep the rendered output on a SINGLE line: the subchart serializes initdb
+values as a single-quoted YAML scalar, which folds newlines to spaces and would
+otherwise corrupt a multi-line script.
+*/ -}}
+{{- define "rulebricks.clickhouse.decisionLogsViewScript" -}}
+{{- $provider := .Values.global.storage.provider | default "s3" -}}
+{{- $source := "s3(decision_logs_s3)" -}}
+{{- if eq $provider "azure-blob" -}}
+{{- $source = "azureBlobStorage(decision_logs_azure)" -}}
+{{- else if eq $provider "gcs" -}}
+{{- $source = "gcs(decision_logs_gcs)" -}}
+{{- end -}}
+clickhouse-client --host 127.0.0.1 --user "${CLICKHOUSE_ADMIN_USER:-default}" --password "${CLICKHOUSE_ADMIN_PASSWORD:-}" --multiquery "CREATE DATABASE IF NOT EXISTS rulebricks; CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM {{ $source }};"
 {{- end -}}
 
 {{- /*
