@@ -159,22 +159,19 @@ kubectl port-forward -n rulebricks svc/rulebricks-kube-prometheus-stack-promethe
 <details>
 <summary><strong>Shared Object Storage and Database Backups</strong></summary>
 
-Rulebricks uses one shared cloud provider and identity for storage-backed features, while allowing separate buckets, regions, and prefixes for high-volume decision logs and smaller database backups. If a DB backup field is left empty, it falls back to the decision-log location.
+Rulebricks uses one shared cloud provider, identity, and bucket/container for all storage-backed features. Decision logs and database backups are just key prefixes within that single bucket, configured under `global.storage.paths.*`.
 
 ```yaml
 global:
   storage:
     provider: s3 # s3, azure-blob, or gcs
+    bucket: my-rulebricks-data
+    region: us-west-2
     s3:
       iamRoleArn: arn:aws:iam::123456789012:role/rulebricks-storage
-    decisionLogs:
-      bucket: my-rulebricks-decision-logs
-      region: us-west-2
-      path: decision-logs
-    dbBackups:
-      bucket: my-rulebricks-db-backups
-      region: us-west-2
-      path: db-backups
+    paths:
+      decisionLogs: decision-logs
+      dbBackups: db-backups
 
 backup:
   enabled: true
@@ -186,7 +183,7 @@ backup:
     failed: 30
 ```
 
-Upgrade note: older values that used `global.storage.bucket`, `global.storage.region`, and `global.storage.paths.*` should move those fields under `global.storage.decisionLogs.*` and, when backups are enabled, `global.storage.dbBackups.*`.
+Upgrade note: older values that split storage into `global.storage.decisionLogs.*` and `global.storage.dbBackups.*` (per-purpose buckets/regions) are still honored as overrides, but new installs should use the unified `global.storage.bucket`, `global.storage.region`, and `global.storage.paths.*` shape shown above.
 
 Backups use Barman cloud tooling and are available only for self-hosted Supabase. By default, restorable backup data is retained for 30 days, and completed backup Jobs and their pod logs are retained for 30 days through both CronJob history limits and Kubernetes Job TTL. The default history limits assume the default daily schedule; increase `backup.jobHistory.successful` and `backup.jobHistory.failed` if you run backups more frequently and need every completed Job to remain visible for the full 30-day TTL window.
 

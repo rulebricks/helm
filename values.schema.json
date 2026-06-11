@@ -218,6 +218,11 @@
         "enabled": { "type": "boolean", "default": false },
         "schedule": { "type": "string", "default": "0 2 * * *" },
         "retentionDays": { "type": "integer", "minimum": 1, "default": 30 },
+        "superuser": {
+          "type": "string",
+          "default": "supabase_admin",
+          "description": "Postgres superuser role used for logical dumps/restores so it can read schemas owned by supabase_admin (auth, storage, realtime, etc.)"
+        },
         "ttlSecondsAfterFinished": {
           "type": "integer",
           "minimum": 0,
@@ -418,6 +423,11 @@
                 "enabled": { "type": "boolean" },
                 "replicas": { "type": "integer", "minimum": 0 },
                 "resources": { "$ref": "#/definitions/resources" },
+                "solutionPartitions": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Partition count of the (prefixed) solution request topic. Must match kafka.provisioning.topics for the solution topic; hard ceiling on worker fleet concurrency, so keda.maxReplicaCount must not exceed it."
+                },
                 "podLabels": {
                   "type": "object",
                   "additionalProperties": { "type": "string" }
@@ -612,7 +622,33 @@
     "kafka": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": { "type": "boolean" },
+        "provisioning": {
+          "type": "object",
+          "description": "Explicit topic management (create + idempotent alignment of existing topics via postScript). Topic names must carry the configured kafkaTopicPrefix.",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "numPartitions": { "type": "integer", "minimum": 1 },
+            "replicationFactor": { "type": "integer", "minimum": 1 },
+            "postScript": { "type": "string" },
+            "topics": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "partitions": { "type": "integer", "minimum": 1 },
+                  "replicationFactor": { "type": "integer", "minimum": 1 },
+                  "config": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" }
+                  }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        }
       }
     },
     "kafkaBridge": {

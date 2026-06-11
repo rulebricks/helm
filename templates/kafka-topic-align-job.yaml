@@ -1,0 +1,133 @@
+{{- /*
+Kafka topic alignment Job.
+
+The kafka subchart's provisioning Job creates topics with --create
+--if-not-exists, which cannot MODIFY topics that already exist from earlier
+releases. This Job runs after it on every install/upgrade and idempotently
+converges live topics to the declared state in .Values.kafka.provisioning.topics:
+raises partition counts (never decreases - Kafka cannot) and (re)applies
+per-topic configs (retention, segment, max.message.bytes).
+
+Single source of truth: the SAME topics list drives creation (subchart job)
+and alignment (this job). There is no duplicated script in values files.
+
+Only rendered for in-cluster Kafka (kafka.enabled) with provisioning enabled.
+The in-cluster client listener is PLAINTEXT, so no client.properties is needed.
+External/managed Kafka topics are customer-managed; see the CLI docs for the
+required topic configuration.
+*/}}
+{{- if and .Values.kafka.enabled (.Values.kafka.provisioning).enabled }}
+{{- $prefix := include "rulebricks.kafka.topicPrefix" . }}
+{{- $topics := .Values.kafka.provisioning.topics | default list }}
+{{- /*
+Render-time consistency guard: HPS/Vector/KEDA address topics as
+<prefix><base>; provisioning MUST declare exactly those names or traffic
+lands on auto-created topics with default (wrong) partitions/retention/size.
+This catches both drift directions (prefixed topics with an empty prefix,
+unprefixed topics with the default prefix).
+*/}}
+{{- if $topics }}
+{{- $names := list }}
+{{- range $topics }}{{- $names = append $names .name }}{{- end }}
+{{- range $base := list "solution" "solution-response" "logs" }}
+{{- $expected := printf "%s%s" $prefix $base }}
+{{- if not (has $expected $names) }}
+{{- fail (printf "kafka.provisioning.topics must include %q (kafkaTopicPrefix is %q). Found: %s. Topic names must carry the SAME prefix HPS/Vector/KEDA use, or the cluster will run on auto-created topics with default settings." $expected $prefix (join ", " $names)) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $image := .Values.kafka.image | default dict }}
+{{- $imageRef := printf "%s/%s:%s" ($image.registry | default "docker.io") ($image.repository | default "rulebricks/kafka") ($image.tag | default "4.0.0-debian-12-r10") }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-kafka-topic-align
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-kafka-topic-align
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: kafka-topic-align
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    {{- /* Weight 10: run after the kafka subchart provisioning job (weight 0)
+         so newly created topics are visible; ordering is not required for
+         correctness (align skips missing topics) but keeps logs sensible. */}}
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 4
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}-kafka-topic-align
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        rulebricks.com/workload-group: infrastructure
+    spec:
+      restartPolicy: OnFailure
+      terminationGracePeriodSeconds: 0
+      initContainers:
+        - name: wait-for-kafka
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Kafka to be ready..."
+              until nc -z {{ .Release.Name }}-kafka 9092; do
+                echo "Kafka not ready, waiting..."
+                sleep 2
+              done
+              echo "Kafka is ready!"
+      containers:
+        - name: kafka-topic-align
+          image: {{ $imageRef }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          command:
+            - /bin/bash
+          args:
+            - -ec
+            - |
+              BOOTSTRAP="{{ .Release.Name }}-kafka:9092"
+
+              align_topic() {
+                local topic="$1"; local partitions="$2"; local configs="$3"
+                local current
+                current=$(/opt/bitnami/kafka/bin/kafka-topics.sh --describe \
+                  --bootstrap-server "$BOOTSTRAP" \
+                  --topic "$topic" 2>/dev/null | grep -o 'PartitionCount: *[0-9]*' | head -1 | grep -o '[0-9]*')
+                if [[ -z "$current" ]]; then
+                  echo "align_topic: $topic not found; skipping"
+                  return 0
+                fi
+                if [[ "$current" -lt "$partitions" ]]; then
+                  echo "align_topic: increasing $topic partitions $current -> $partitions"
+                  /opt/bitnami/kafka/bin/kafka-topics.sh --alter \
+                    --bootstrap-server "$BOOTSTRAP" \
+                    --topic "$topic" --partitions "$partitions"
+                fi
+                if [[ -n "$configs" ]]; then
+                  echo "align_topic: applying configs to $topic: $configs"
+                  /opt/bitnami/kafka/bin/kafka-configs.sh --alter \
+                    --bootstrap-server "$BOOTSTRAP" \
+                    --entity-type topics --entity-name "$topic" \
+                    --add-config "$configs"
+                fi
+              }
+
+              {{- range $topic := $topics }}
+              {{- $pairs := list }}
+              {{- range $k, $v := ($topic.config | default dict) }}
+              {{- $pairs = append $pairs (printf "%s=%s" $k $v) }}
+              {{- end }}
+              align_topic {{ $topic.name | quote }} {{ $topic.partitions | default $.Values.kafka.provisioning.numPartitions | default 12 }} {{ join "," $pairs | quote }}
+              {{- end }}
+
+              echo "Topic alignment complete."
+{{- end }}

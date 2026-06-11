@@ -16,8 +16,15 @@ spec:
     - port: 80
       targetPort: 3000
 ---
+{{- /* Workers are stateless Kafka consumers. A Deployment (not StatefulSet)
+     creates pods in parallel, so KEDA scale-out delivers burst capacity in
+     seconds instead of one OrderedReady pod at a time.
+     UPGRADE NOTE: releases prior to this change shipped a StatefulSet with
+     the same name; Helm replaces the workload kind during upgrade. Workers
+     briefly cycle and the Kafka queue absorbs the gap (in-flight messages
+     are redelivered to the new pods). */}}
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
   namespace: {{ .Release.Namespace }}
@@ -25,7 +32,6 @@ metadata:
     {{- include "rulebricks-chart.labels" . | nindent 4 }}
     app.kubernetes.io/component: hps-worker
 spec:
-  serviceName: {{ include "rulebricks-chart.hps-worker.fullname" . }}
   replicas: {{ .Values.hps.workers.replicas | default 3 }}
   selector:
     matchLabels:
@@ -120,12 +126,15 @@ spec:
           image: {{ .Values.hps.image.repository }}:worker-{{ include "rulebricks-chart.hps.imageTag" . }}
           imagePullPolicy: {{ .Values.hps.image.pullPolicy }}
           resources:
+            {{- /* Workers do CPU-bound rule evaluation on a single-threaded
+                 runtime: a full core each (request = limit) avoids CFS
+                 throttling mid-batch. Scale out, not up. */}}
             requests:
-              cpu: {{ .Values.hps.workers.resources.requests.cpu | default "250m" }}
-              memory: {{ .Values.hps.workers.resources.requests.memory | default "256Mi" }}
+              cpu: {{ .Values.hps.workers.resources.requests.cpu | default "1000m" }}
+              memory: {{ .Values.hps.workers.resources.requests.memory | default "1Gi" }}
             limits:
-              cpu: {{ .Values.hps.workers.resources.limits.cpu | default "500m" }}
-              memory: {{ .Values.hps.workers.resources.limits.memory | default "512Mi" }}
+              cpu: {{ .Values.hps.workers.resources.limits.cpu | default "1000m" }}
+              memory: {{ .Values.hps.workers.resources.limits.memory | default "1Gi" }}
           envFrom:
             - configMapRef:
                 name: {{ include "rulebricks-chart.app.configmap" . }}

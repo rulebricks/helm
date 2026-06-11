@@ -19,8 +19,16 @@ timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), enviro
       <structure>{{ include "rulebricks.clickhouse.decisionLogStructure" . }}</structure>
     </decision_logs_s3>
     {{- else if eq $provider "azure-blob" }}
+    {{- /* azureBlobStorage named collections take storage_account_url + container
+           + blob_path (NOT a single `url` like s3); a `url` key is rejected with
+           "Unexpected key url in named collection". */}}
+    {{- $account := include "rulebricks.storage.bucket" (list . "decisionLogs") }}
+    {{- $container := include "rulebricks.storage.azureContainer" (list . "decisionLogs") }}
+    {{- $path := include "rulebricks.storage.path" (list . "decisionLogs") }}
     <decision_logs_azure>
-      <url>{{ include "rulebricks.storage.azureUrl" . }}</url>
+      <storage_account_url>{{ printf "https://%s.blob.core.windows.net" $account }}</storage_account_url>
+      <container>{{ $container }}</container>
+      <blob_path>{{ printf "%s/year=*/month=*/day=*/hour=*/*.gz" $path }}</blob_path>
       <format>JSONEachRow</format>
       <structure>{{ include "rulebricks.clickhouse.decisionLogStructure" . }}</structure>
     </decision_logs_azure>
@@ -50,6 +58,28 @@ timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), enviro
       <input_format_skip_unknown_fields>1</input_format_skip_unknown_fields>
     </default>
   </profiles>
+</clickhouse>
+{{- end -}}
+
+{{- /*
+Named-collection access for the ClickHouse admin user. The decision_logs view
+reads from a named collection (decision_logs_s3 / _azure / _gcs); without these
+flags the user has access_management but no NAMED COLLECTION grant, so the initdb
+view creation fails with "Not enough privileges ... NAMED COLLECTION ... ACCESS_DENIED".
+This MUST be mounted under users.d (not config.d) to take effect.
+*/ -}}
+{{- /* Rendered in the clickhouse subchart context, so auth lives at .Values.auth
+       (mirrors queryLimitsXml using .Values.queryLimits). */ -}}
+{{- define "rulebricks.clickhouse.userAccessXml" -}}
+{{- $user := .Values.auth.username | default "rulebricks" -}}
+<clickhouse>
+  <users>
+    <{{ $user }}>
+      <named_collection_control>1</named_collection_control>
+      <show_named_collections>1</show_named_collections>
+      <show_named_collections_secrets>1</show_named_collections_secrets>
+    </{{ $user }}>
+  </users>
 </clickhouse>
 {{- end -}}
 

@@ -71,11 +71,11 @@ spec:
                   value: "5432"
                 - name: PGDATABASE
                   value: "postgres"
+                # Dump as a superuser so we can lock/read schemas owned by
+                # supabase_admin (auth, storage, realtime, etc.); the secret's
+                # `username` role (postgres) is not a superuser in Supabase.
                 - name: PGUSER
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "rulebricks.supabase.db.secretName" . }}
-                      key: {{ .Values.supabase.secret.db.secretRefKey.username | default "username" }}
+                  value: {{ .Values.backup.superuser | default "supabase_admin" | quote }}
                 - name: PGPASSWORD
                   valueFrom:
                     secretKeyRef:

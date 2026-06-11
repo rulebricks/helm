@@ -229,6 +229,9 @@ backup:
   enabled: false
   schedule: "0 2 * * *"
   retentionDays: 30
+  # Postgres role used for logical dumps/restores. Must be a superuser so it can
+  # read schemas owned by supabase_admin (auth, storage, realtime, etc.).
+  superuser: supabase_admin
   # Time to keep completed backup jobs and their pod logs (seconds, default 30 days)
   ttlSecondsAfterFinished: 2592000
   # Cross-cloud uploader. rclone speaks S3 / Azure Blob / GCS and authenticates via
@@ -328,13 +331,35 @@ rulebricks:
         enabled: false
         minAvailable: ""
         maxUnavailable: ""
+      # Workers are single-threaded Node processes doing CPU-bound rule
+      # evaluation: one full core each (request = limit avoids CFS throttling
+      # mid-batch). Scale OUT for more capacity, not up.
+      resources:
+        requests:
+          cpu: "1000m"
+          memory: "1Gi"
+        limits:
+          cpu: "1000m"
+          memory: "1Gi"
+      # Partition count of the (prefixed) "solution" request topic. MUST match
+      # kafka.provisioning.topics[com.rulebricks.solution].partitions below.
+      # This is the hard ceiling on worker fleet concurrency; keda.maxReplicaCount
+      # must stay <= this value.
+      solutionPartitions: 64
       keda:
         enabled: true
         minReplicaCount: 4
-        maxReplicaCount: 12 # Matched to Kafka partition count
+        # Bounded by solutionPartitions (a worker beyond the partition count
+        # would sit idle).
+        maxReplicaCount: 48
         pollingInterval: 10
         cooldownPeriod: 300
-        lagThreshold: 50 # Scale when consumer lag exceeds this threshold
+        # Lag is measured in MESSAGES. With chunked bulk dispatch (HPS splits
+        # batches into <=CHUNK_MAX_ITEMS-payload messages) a message is a
+        # bounded unit of work (~50-150ms), so:
+        #   lagThreshold ~= target drain seconds * per-worker messages/sec
+        # 100 messages ~= 10-15s of backlog for one worker at defaults.
+        lagThreshold: 100
         cpuThreshold: 25
 
   ingress:
@@ -374,11 +399,57 @@ kafka:
     enabled: false
   # Kafka broker configuration
   overrideConfiguration:
+    # Safety net only: the real application topics are created explicitly by
+    # kafka.provisioning below with per-topic partitions/retention/size.
     auto.create.topics.enable: "true"
     log.retention.hours: "24"
     default.replication.factor: "1"
     offsets.topic.replication.factor: "1"
-    num.partitions: "12" # Must be >= maxReplicaCount for workers to enable parallel consumption
+    num.partitions: "12" # Default for auto-created topics only (see provisioning)
+  # Explicit topic management. Two post-install/post-upgrade Jobs consume this
+  # single topics list: the kafka subchart provisioning Job CREATES topics
+  # (--if-not-exists), and the parent chart's kafka-topic-align Job
+  # (templates/kafka-topic-align-job.yaml) idempotently ALIGNS pre-existing
+  # topics (partition increases, retention/size configs) so upgrades of
+  # existing installs converge without manual steps.
+  #
+  # NOTE: topic names are written with the default topic prefix
+  # (rulebricks.app.logging.kafkaTopicPrefix = "com.rulebricks."). If you
+  # change the prefix, change these names to match -- the CLI does this
+  # automatically.
+  #
+  provisioning:
+    enabled: true
+    replicationFactor: 1
+    numPartitions: 12
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+    topics:
+      - name: com.rulebricks.solution
+        partitions: 64
+        replicationFactor: 1
+        config:
+          retention.ms: "300000"
+          segment.ms: "300000"
+          segment.bytes: "67108864"
+          retention.bytes: "67108864"
+          max.message.bytes: "2097152"
+      - name: com.rulebricks.solution-response
+        partitions: 64
+        replicationFactor: 1
+        config:
+          retention.ms: "300000"
+          segment.ms: "300000"
+          segment.bytes: "67108864"
+          retention.bytes: "67108864"
+          max.message.bytes: "2097152"
+      - name: com.rulebricks.logs
+        partitions: 24
+        replicationFactor: 1
+        config:
+          retention.ms: "86400000"
+          retention.bytes: "268435456"
+          max.message.bytes: "2097152"
   controller:
     replicaCount: 1
     podLabels:
@@ -392,7 +463,10 @@ kafka:
         memory: "3Gi"
     persistence:
       enabled: true
-      size: 10Gi
+      # Sized against the per-topic retention.bytes caps above (see disk math
+      # in the provisioning comment); 10Gi left no headroom once log volume
+      # grew. Kafka halts hard on a full disk.
+      size: 20Gi
       storageClass: gp3
     # Tune heap options for your needs
     heapOpts: "-Xmx1g -Xms1g -XX:+UseZGC -XX:+AlwaysPreTouch"
@@ -411,8 +485,17 @@ kafka:
         value: "1048576"
       - name: KAFKA_CFG_SOCKET_REQUEST_MAX_BYTES
         value: "209715200"
+      # Broker-wide max record size; per-chunk decision logs and chunked bulk
+      # messages stay far below this, but it must exceed every per-topic
+      # max.message.bytes set in provisioning above.
+      - name: KAFKA_CFG_MESSAGE_MAX_BYTES
+        value: "2097152"
+      - name: KAFKA_CFG_REPLICA_FETCH_MAX_BYTES
+        value: "4194304"
+      # Broker-wide default retention bytes per partition; per-topic configs
+      # above override this for the application topics.
       - name: KAFKA_CFG_LOG_RETENTION_BYTES
-        value: "4294967296"
+        value: "536870912"
       - name: KAFKA_CFG_LOG_SEGMENT_BYTES
         value: "1073741824"
       - name: KAFKA_CFG_NUM_REPLICA_FETCHERS
@@ -423,8 +506,8 @@ kafka:
         value: "268435456"
       - name: KAFKA_CFG_LOG_CLEANER_IO_BUFFER_SIZE
         value: "1048576"
-      - name: KAFKA_CFG_MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION
-        value: "10"
+      # (Removed KAFKA_CFG_MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION: that is a
+      # producer-client config; the broker ignores it.)
   broker:
     podLabels:
       rulebricks.com/workload-group: infrastructure
@@ -476,8 +559,15 @@ clickhouse:
     maxThreads: 4
     maxExecutionTime: 60
   configdFiles:
+    # Server-level named collections belong in config.d (the <clickhouse> root).
     09-decision-log-storage.xml: '{{ include "rulebricks.clickhouse.decisionLogStorageXml" . }}'
+  usersdFiles:
+    # <profiles> and <users> are read from the users config tree, so these MUST be
+    # in users.d. If placed in config.d they are silently ignored (query limits
+    # unset, date_time_input_format stays "basic" and decision_logs DateTime64
+    # parsing fails).
     10-query-limits.xml: '{{ include "rulebricks.clickhouse.queryLimitsXml" . }}'
+    11-named-collection-access.xml: '{{ include "rulebricks.clickhouse.userAccessXml" . }}'
   initdbScripts:
     01-decision-logs-view.sql: '{{ include "rulebricks.clickhouse.decisionLogsViewSql" . }}'
 
@@ -680,8 +770,9 @@ vector:
         encoding:
           codec: json
       # ==== Decision Log Storage Sink ====
-      # When clickhouse.enabled and global.storage.decisionLogs are configured, add a
-      # decision_logs sink so ClickHouse can query the NDJSON archive directly.
+      # When clickhouse.enabled and global.storage (bucket + paths.decisionLogs)
+      # are configured, add a decision_logs sink so ClickHouse can query the
+      # NDJSON archive directly.
       # The key prefix MUST match the partition layout used by ClickHouse's
       # named_collection URLs in clickhouse.configdFiles (year=YYYY/month=MM/...).
       # The CLI generates this automatically; hand-installs should set it here.

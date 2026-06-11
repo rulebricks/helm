@@ -141,9 +141,14 @@ spec:
             periodSeconds: {{ .Values.app.livenessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.app.livenessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.app.livenessProbe.failureThreshold }}
+          {{- /* Readiness gates on the Kafka response consumer owning
+               partitions (/ready returns 503 until group join); pods must not
+               receive traffic while they would have to guess response
+               partitions. Liveness stays on /health (process-alive). Requires
+               an HPS image that serves /ready (ships with this chart version). */}}
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 3000
             initialDelaySeconds: {{ .Values.app.readinessProbe.initialDelaySeconds }}
             periodSeconds: {{ .Values.app.readinessProbe.periodSeconds }}
@@ -161,8 +166,12 @@ spec:
           env:
             - name: HPS_REPLICAS
               value: "{{ .Values.hps.replicas }}"
+            {{- /* MAX_WORKERS is HPS's view of the solution topic partition
+                 count (fallback partition estimation + health reporting).
+                 Decoupled from keda.maxReplicaCount, which is a replica
+                 bound, not a partition count. */}}
             - name: MAX_WORKERS
-              value: "{{ .Values.hps.workers.keda.maxReplicaCount | default 8 }}"
+              value: "{{ .Values.hps.workers.solutionPartitions | default (.Values.hps.workers.keda.maxReplicaCount | default 8) }}"
             {{- with .Values.app.logging.kafkaSasl }}
             {{- if .existingSecret }}
             # Optional external Kafka SASL credentials secret

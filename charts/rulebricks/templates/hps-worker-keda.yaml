@@ -9,10 +9,12 @@ metadata:
     app.kubernetes.io/component: hps-worker-scaler
 spec:
   scaleTargetRef:
-    kind: StatefulSet
+    apiVersion: apps/v1
+    kind: Deployment
     name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
   minReplicaCount: {{ .Values.hps.workers.keda.minReplicaCount | default 3 }}
-  maxReplicaCount: {{ .Values.hps.workers.keda.maxReplicaCount | default 50 }}
+  {{- /* Bounded by the solution topic partition count: workers beyond it sit idle. */}}
+  maxReplicaCount: {{ .Values.hps.workers.keda.maxReplicaCount | default 48 }}
   pollingInterval: {{ .Values.hps.workers.keda.pollingInterval | default 15 }}  # Check interval in seconds
   cooldownPeriod: {{ .Values.hps.workers.keda.cooldownPeriod | default 300 }}  # Wait before scaling down in seconds
   triggers:
@@ -30,6 +32,8 @@ spec:
       consumerGroup: generic-workers
       # Must match the topic HPS actually produces/consumes (HPS applies the prefix).
       topic: {{ include "rulebricks-chart.kafka.topicPrefix" . }}solution
+      # Lag is in MESSAGES; with chunked bulk dispatch each message is a
+      # bounded unit of work, so this approximates seconds of fleet backlog.
       lagThreshold: "{{ .Values.hps.workers.keda.lagThreshold | default 100 }}"
       offsetResetPolicy: latest
   # Backup trigger: CPU (in case Kafka metrics fail)
