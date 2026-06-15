@@ -36,6 +36,13 @@
           "type": "boolean",
           "description": "Enable external-dns integration for automatic DNS record management"
         },
+        "priorityClasses": {
+          "type": "object",
+          "description": "Release-scoped scheduling priority tiers: <release>-critical (1000000) for stateful infrastructure and <release>-burst (-5) for the worker fleet, so critical pods always preempt burst workers.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true }
+          }
+        },
         "storage": {
           "type": "object",
           "description": "Shared object storage: one provider, one identity, and one bucket/container with per-purpose path prefixes",
@@ -381,6 +388,45 @@
               }
             },
             "replicas": { "type": "integer", "minimum": 0 },
+            "keda": {
+              "type": "object",
+              "description": "Gather-plane autoscaler: scales HPS on response-topic lag. Conservative one-pod-at-a-time behavior because HPS scale events rebalance the response consumer group and can time out in-flight requests.",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "minReplicaCount": { "type": "integer", "minimum": 0 },
+                "maxReplicaCount": { "type": "integer", "minimum": 0 },
+                "pollingInterval": { "type": "integer", "minimum": 1 },
+                "cooldownPeriod": { "type": "integer", "minimum": 0 },
+                "lagThreshold": { "type": ["integer", "string"] },
+                "cpuThreshold": { "type": ["integer", "string"] }
+              }
+            },
+            "imagePrepull": {
+              "type": "object",
+              "description": "DaemonSet that pre-pulls the HPS server + worker images onto every node so burst scale-outs skip the image pull on fresh nodes.",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "pauseImage": { "type": "string" },
+                "nodeSelector": {
+                  "type": "object",
+                  "description": "Node selector for the prepull DaemonSet; empty by default so it reaches every node.",
+                  "additionalProperties": { "type": "string" }
+                },
+                "tolerations": {
+                  "type": "array",
+                  "description": "Tolerations for the prepull DaemonSet; defaults to [{operator: Exists}] so it reaches every node. Override to scope it.",
+                  "items": { "$ref": "#/definitions/toleration" }
+                },
+                "resources": {
+                  "type": "object",
+                  "description": "Per-container resources for the prepull DaemonSet (near-zero by default so it never affects bin-packing).",
+                  "properties": {
+                    "init": { "$ref": "#/definitions/resources" },
+                    "pause": { "$ref": "#/definitions/resources" }
+                  }
+                }
+              }
+            },
             "resources": { "$ref": "#/definitions/resources" },
             "podLabels": {
               "type": "object",
@@ -431,6 +477,10 @@
                 "podLabels": {
                   "type": "object",
                   "additionalProperties": { "type": "string" }
+                },
+                "priorityClassName": {
+                  "type": "string",
+                  "description": "PriorityClass for worker pods; defaults to the release-scoped burst class (<release>-burst) when global.priorityClasses.enabled, making workers the first preemption victims."
                 },
                 "keda": {
                   "type": "object",
@@ -744,6 +794,66 @@
       "properties": {
         "enabled": { "type": "boolean" }
       }
+    },
+    "tracing": {
+      "type": "object",
+      "description": "Distributed tracing: in-cluster OpenTelemetry Collector that forwards OTLP spans to a customer-managed Elastic APM endpoint (BYO).",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "samplingRatio": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+        "collector": {
+          "type": "object",
+          "properties": {
+            "image": { "type": "string" },
+            "replicas": { "type": "integer", "minimum": 1, "default": 1 },
+            "memoryLimitMiB": { "type": "integer", "minimum": 64, "default": 400 },
+            "resources": { "$ref": "#/definitions/resources" },
+            "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+            "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+            "tolerations": { "type": "array", "items": { "$ref": "#/definitions/toleration" } },
+            "affinity": { "type": "object" }
+          }
+        },
+        "elastic": {
+          "type": "object",
+          "description": "Customer-managed Elastic APM target for OTLP spans.",
+          "properties": {
+            "endpoint": { "type": "string", "description": "OTLP endpoint of the Elastic APM server / managed integration" },
+            "authMode": { "type": "string", "enum": ["secret-token", "api-key", "none"], "default": "secret-token" },
+            "secretToken": { "type": "string" },
+            "apiKey": { "type": "string" },
+            "existingSecret": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "secretTokenKey": { "type": "string", "default": "secret-token" },
+                "apiKeyKey": { "type": "string", "default": "api-key" }
+              }
+            },
+            "tlsInsecureSkipVerify": { "type": "boolean", "default": false }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "enabled": { "const": true } },
+            "required": ["enabled"]
+          },
+          "then": {
+            "required": ["elastic"],
+            "properties": {
+              "elastic": {
+                "type": "object",
+                "required": ["endpoint"],
+                "properties": {
+                  "endpoint": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "kube-prometheus-stack": {
       "type": "object",

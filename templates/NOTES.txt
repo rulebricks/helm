@@ -87,3 +87,53 @@ RULEBRICKS INSTALLATION - 1/2 – DNS SETUP REQUIRED
 
 =============================================================================
 {{- end }}
+
+{{- /* Advisory only: surface priorityClass/priorityClassName inconsistencies so
+       a silent scheduler deadlock ("no PriorityClass ... was found") is caught
+       early. Never fail the release here. */ -}}
+{{- $pcEnabled := true }}
+{{- if and .Values.global .Values.global.priorityClasses (hasKey .Values.global.priorityClasses "enabled") }}
+{{- $pcEnabled = .Values.global.priorityClasses.enabled }}
+{{- end }}
+{{- $criticalNames := list }}
+{{- if and .Values.kafka .Values.kafka.controller .Values.kafka.controller.priorityClassName }}
+{{- $criticalNames = append $criticalNames (printf "kafka.controller.priorityClassName=%s" .Values.kafka.controller.priorityClassName) }}
+{{- end }}
+{{- if and .Values.clickhouse .Values.clickhouse.priorityClassName }}
+{{- $criticalNames = append $criticalNames (printf "clickhouse.priorityClassName=%s" .Values.clickhouse.priorityClassName) }}
+{{- end }}
+{{- if and .Values.supabase .Values.supabase.db .Values.supabase.db.priorityClassName }}
+{{- $criticalNames = append $criticalNames (printf "supabase.db.priorityClassName=%s" .Values.supabase.db.priorityClassName) }}
+{{- end }}
+{{- if and (not $pcEnabled) (gt (len $criticalNames) 0) }}
+
+=============================================================================
+WARNING: PriorityClass mismatch – critical pods will NOT schedule
+=============================================================================
+
+global.priorityClasses.enabled is false, so the release-scoped PriorityClasses
+({{ .Release.Name }}-critical / {{ .Release.Name }}-burst) are NOT created, but
+these values still reference a critical PriorityClass:
+{{- range $criticalNames }}
+  - {{ . }}
+{{- end }}
+
+The scheduler will reject those pods with "no PriorityClass ... was found" and
+the install will hang (kafka/clickhouse/supabase-db never start).
+
+Fix: either set global.priorityClasses.enabled=true, OR clear those
+priorityClassName values so the pods run at default priority.
+=============================================================================
+{{- else if and $pcEnabled (eq (len $criticalNames) 0) }}
+
+=============================================================================
+NOTE: Critical infrastructure is running at default scheduling priority
+=============================================================================
+
+global.priorityClasses.enabled is true (PriorityClasses were created), but no
+critical priorityClassName is set for kafka/clickhouse/supabase-db. These pods
+will NOT preempt burst workers to reschedule during an aggressive scale-out.
+
+To enable preemption, set their priorityClassName to "{{ .Release.Name }}-critical".
+=============================================================================
+{{- end }}

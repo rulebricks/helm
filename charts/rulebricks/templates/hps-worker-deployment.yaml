@@ -56,6 +56,22 @@ spec:
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}
       serviceAccountName: {{ include "rulebricks-chart.hps-worker.serviceAccountName" . }}
+      {{- /* Burst-tier scheduling priority: workers are the first preemption
+           victims so critical infrastructure (kafka, clickhouse, db) can
+           always reschedule during an aggressive scale-out. Defaults to the
+           release-scoped burst PriorityClass created by the parent chart;
+           override via hps.workers.priorityClassName. */ -}}
+      {{- /* Default true, but respect an explicit global.priorityClasses.enabled=false.
+           Mirrors templates/priorityclasses.yaml so the burst class is only
+           referenced when it is actually created. */ -}}
+      {{- $pcEnabled := true }}
+      {{- if and .Values.global .Values.global.priorityClasses (hasKey .Values.global.priorityClasses "enabled") }}
+        {{- $pcEnabled = .Values.global.priorityClasses.enabled }}
+      {{- end }}
+      {{- $burstPC := .Values.hps.workers.priorityClassName | default (ternary (printf "%s-burst" .Release.Name) "" $pcEnabled) }}
+      {{- with $burstPC }}
+      priorityClassName: {{ . }}
+      {{- end }}
       {{- /* Node selector: component-level overrides global */ -}}
       {{- $workerNodeSelector := .Values.hps.workers.nodeSelector | default dict }}
       {{- if and (not $workerNodeSelector) .Values.global .Values.global.scheduling }}
@@ -65,37 +81,37 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- /* Tolerations: component-level overrides global */ -}}
+      {{- /* Tolerations: component-level overrides global. The burst-pool
+           toleration is ALWAYS appended (additive): cluster-setup can provide
+           a dedicated worker pool tainted rulebricks.com/pool=burst:NoSchedule
+           (one big Deallocate-parked node, a spot pool, or a Karpenter
+           NodePool), and workers must be able to land there. On clusters
+           without that taint the toleration is inert. */ -}}
       {{- $workerTolerations := .Values.hps.workers.tolerations | default list }}
       {{- if and (not $workerTolerations) .Values.global .Values.global.scheduling }}
         {{- $workerTolerations = .Values.global.scheduling.tolerations | default list }}
       {{- end }}
-      {{- with $workerTolerations }}
+      {{- $workerTolerations = append $workerTolerations (dict "key" "rulebricks.com/pool" "operator" "Equal" "value" "burst" "effect" "NoSchedule") }}
       tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- /* Affinity precedence: worker affinity > global scheduling affinity > soft default anti-affinity */ -}}
+        {{- toYaml $workerTolerations | nindent 8 }}
+      {{- /* Affinity precedence: worker affinity > global scheduling affinity > soft default anti-affinity.
+           Workers always gain a SOFT preference for nodes labeled
+           rulebricks.com/pool=burst (unless the resolved affinity already
+           defines its own nodeAffinity, which then wins). Soft = clusters
+           without the label schedule exactly as before. */ -}}
       {{- $workerAffinity := .Values.hps.workers.affinity | default dict }}
       {{- if and (not $workerAffinity) .Values.global .Values.global.scheduling }}
         {{- $workerAffinity = .Values.global.scheduling.affinity | default dict }}
       {{- end }}
-      {{- with $workerAffinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- else }}
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: rulebricks.com/workload-group
-                  operator: In
-                  values:
-                  - infrastructure
-              topologyKey: kubernetes.io/hostname
+      {{- if not $workerAffinity }}
+        {{- $workerAffinity = dict "podAntiAffinity" (dict "preferredDuringSchedulingIgnoredDuringExecution" (list (dict "weight" 100 "podAffinityTerm" (dict "labelSelector" (dict "matchExpressions" (list (dict "key" "rulebricks.com/workload-group" "operator" "In" "values" (list "infrastructure")))) "topologyKey" "kubernetes.io/hostname")))) }}
       {{- end }}
+      {{- if not (hasKey $workerAffinity "nodeAffinity") }}
+        {{- $burstNodeAffinity := dict "preferredDuringSchedulingIgnoredDuringExecution" (list (dict "weight" 100 "preference" (dict "matchExpressions" (list (dict "key" "rulebricks.com/pool" "operator" "In" "values" (list "burst")))))) }}
+        {{- $workerAffinity = merge (dict "nodeAffinity" $burstNodeAffinity) $workerAffinity }}
+      {{- end }}
+      affinity:
+        {{- toYaml $workerAffinity | nindent 8 }}
       {{- with .Values.hps.workers.topologySpreadConstraints }}
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}

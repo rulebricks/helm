@@ -136,6 +136,46 @@ hps:
   waitForKafka:
     image: docker.io/rulebricks/kafka:4.0.0-debian-12-r10
   replicas: 1
+  # Gather-plane autoscaler (see templates/hps-keda.yaml). Conservative by
+  # design: HPS scale events rebalance the response consumer group and can
+  # time out in-flight requests, so pods are added/removed one at a time
+  # behind long stabilization windows.
+  keda:
+    enabled: false
+    minReplicaCount: 2
+    maxReplicaCount: 8
+    pollingInterval: 15
+    cooldownPeriod: 600
+    lagThreshold: 300
+    cpuThreshold: 60
+  # Pre-pull the HPS server + worker images onto every node (DaemonSet) so
+  # burst scale-outs skip the image pull on freshly provisioned nodes.
+  imagePrepull:
+    enabled: true
+    # Resident container that keeps the pulled images on the node.
+    pauseImage: registry.k8s.io/pause:3.9
+    # Broad by default so the prepull reaches every node (spot pools,
+    # arch-tainted pools, etc.). Scope it by overriding nodeSelector and/or
+    # tolerations (e.g. to a dedicated burst pool).
+    nodeSelector: {}
+    tolerations:
+      - operator: Exists
+    # Near-zero footprint so the DaemonSet never affects bin-packing.
+    resources:
+      init:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
+      pause:
+        requests:
+          cpu: 5m
+          memory: 16Mi
+        limits:
+          cpu: 10m
+          memory: 32Mi
   # Node scheduling configuration. Custom affinity can include stricter rules
   # if your platform team requires them.
   nodeSelector: {}

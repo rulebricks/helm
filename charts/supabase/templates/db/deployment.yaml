@@ -9,6 +9,8 @@ spec:
   {{- if not .Values.db.autoscaling.enabled }}
   replicas: {{ .Values.db.replicaCount }}
   {{- end }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "supabase.db.selectorLabels" . | nindent 6 }}
@@ -29,6 +31,9 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "supabase.db.serviceAccountName" . }}
+      {{- with .Values.db.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       securityContext:
         {{- toYaml .Values.db.podSecurityContext | nindent 8 }}
       initContainers:

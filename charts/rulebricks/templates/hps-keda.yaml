@@ -1,0 +1,79 @@
+{{- /*
+HPS gather-plane autoscaler.
+
+HPS pods do double duty: they serve HTTP AND consume/parse every chunk
+response from the solution-response topic (the "gather plane"). Gather work
+scales linearly with request rate, so a fixed replica count becomes the
+system's throughput ceiling (observed in load testing: response-topic lag
+accumulates, latency climbs, client throughput plateaus while workers and
+Kafka sit idle).
+
+WHY THIS SCALER IS DELIBERATELY CONSERVATIVE (unlike the worker scaler):
+workers send each response to an EXPLICIT partition chosen at request time
+from the partitions the originating HPS pod owned at that moment
+(selectResponsePartition). Every HPS scale event rebalances the response
+consumer group (kafkajs eager protocol), so partition ownership moves and
+responses for in-flight requests can land on a pod with no registered
+handler - those requests time out. Scale events must therefore be RARE and
+one-pod-at-a-time: long stabilization windows, single-pod policies. Do NOT
+copy the worker scaler's exponential behavior here until the app gains
+sticky assignment or cross-pod handler handoff.
+*/}}
+{{- if and .Values.hps .Values.hps.enabled (.Values.hps.keda).enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "rulebricks-chart.hps.fullname" . }}-scaler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hps-scaler
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: {{ include "rulebricks-chart.hps.fullname" . }}
+  minReplicaCount: {{ .Values.hps.keda.minReplicaCount | default (.Values.hps.replicas | default 2) }}
+  maxReplicaCount: {{ .Values.hps.keda.maxReplicaCount | default 8 }}
+  pollingInterval: {{ .Values.hps.keda.pollingInterval | default 15 }}
+  cooldownPeriod: {{ .Values.hps.keda.cooldownPeriod | default 600 }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 60
+          selectPolicy: Max
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 120
+        scaleDown:
+          stabilizationWindowSeconds: 900
+          selectPolicy: Max
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 300
+  triggers:
+    # Primary: response-topic lag for the gather consumer group. Lag here
+    # means responses are waiting to be parsed/dispatched - the direct
+    # signal that the gather plane is the bottleneck.
+    - type: kafka
+      metadata:
+        {{- $kafkaBrokers := "" }}
+        {{- if and .Values.app .Values.app.logging .Values.app.logging.kafkaBrokers }}
+          {{- $kafkaBrokers = .Values.app.logging.kafkaBrokers }}
+        {{- else }}
+          {{- $kafkaBrokers = (include "rulebricks-chart.kafka.bootstrapServers" .) }}
+        {{- end }}
+        bootstrapServers: {{ $kafkaBrokers }}
+        consumerGroup: hps-response-consumer
+        topic: {{ include "rulebricks-chart.kafka.topicPrefix" . }}solution-response
+        lagThreshold: "{{ .Values.hps.keda.lagThreshold | default 300 }}"
+        offsetResetPolicy: latest
+    # Fallback: CPU (event-loop pressure shows up as CPU on the hps container).
+    - type: cpu
+      metadata:
+        type: Utilization
+        value: "{{ .Values.hps.keda.cpuThreshold | default 60 }}"
+{{- end }}

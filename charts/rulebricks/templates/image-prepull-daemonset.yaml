@@ -1,0 +1,74 @@
+{{- /*
+Image pre-pull DaemonSet: warms the HPS server and worker images onto every
+node (including freshly autoscaled and spot nodes) so the first real pod on a
+new node skips the 20-40s image pull during a burst scale-out. initContainers
+run `node -e ""` (both images are Node-based) and exit immediately; the pause
+main container keeps the DaemonSet pod resident so the kubelet retains the
+images. Requests are near-zero so this never affects bin-packing.
+*/}}
+{{- $prepull := (.Values.hps).imagePrepull | default dict }}
+{{- /* Default true, but respect an explicit `enabled: false` (a plain
+     `| default true` would treat the boolean false as empty and re-enable it). */ -}}
+{{- $prepullEnabled := true }}
+{{- if hasKey $prepull "enabled" }}
+{{- $prepullEnabled = $prepull.enabled }}
+{{- end }}
+{{- if and .Values.hps .Values.hps.enabled $prepullEnabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "rulebricks-chart.hps.fullname" . }}-image-prepull
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: image-prepull
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}-image-prepull
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 100%
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}-image-prepull
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: image-prepull
+    spec:
+      imagePullSecrets:
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
+      {{- /* Reach every node by default (spot pools, arch-tainted pools, etc.).
+           Override prepull.tolerations / prepull.nodeSelector to scope the
+           prepull to a subset of nodes (e.g. a burst pool only). */}}
+      {{- $prepullTolerations := $prepull.tolerations | default (list (dict "operator" "Exists")) }}
+      tolerations:
+        {{- toYaml $prepullTolerations | nindent 8 }}
+      {{- with $prepull.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $prepullResources := $prepull.resources | default dict }}
+      {{- $initResources := $prepullResources.init | default (dict "requests" (dict "cpu" "10m" "memory" "32Mi") "limits" (dict "cpu" "100m" "memory" "128Mi")) }}
+      {{- $pauseResources := $prepullResources.pause | default (dict "requests" (dict "cpu" "5m" "memory" "16Mi") "limits" (dict "cpu" "10m" "memory" "32Mi")) }}
+      initContainers:
+        - name: prepull-hps
+          image: {{ .Values.hps.image.repository }}:{{ include "rulebricks-chart.hps.imageTag" . }}
+          imagePullPolicy: IfNotPresent
+          command: ["node", "-e", "process.exit(0)"]
+          resources:
+            {{- toYaml $initResources | nindent 12 }}
+        - name: prepull-hps-worker
+          image: {{ .Values.hps.image.repository }}:worker-{{ include "rulebricks-chart.hps.imageTag" . }}
+          imagePullPolicy: IfNotPresent
+          command: ["node", "-e", "process.exit(0)"]
+          resources:
+            {{- toYaml $initResources | nindent 12 }}
+      containers:
+        - name: pause
+          image: {{ $prepull.pauseImage | default "registry.k8s.io/pause:3.9" }}
+          resources:
+            {{- toYaml $pauseResources | nindent 12 }}
+{{- end }}

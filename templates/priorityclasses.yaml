@@ -1,0 +1,51 @@
+{{- /*
+Scheduling priority tiers for the Rulebricks stack.
+
+Why these exist: the burst worker fleet scales out aggressively (KEDA can take
+it from min to max in under a minute) and can consume every schedulable CPU in
+the cluster. Without priority tiers, a restarted stateful pod (e.g. the Kafka
+broker) sits Pending behind the very workers that depend on it - observed in
+load testing as a full pipeline deadlock: broker evicted -> workers stuck in
+wait-for-kafka init -> lag pinned -> KEDA holds max replicas -> broker can
+never reschedule.
+
+  <release>-critical (1000000): kafka / clickhouse / supabase-db. Always able
+    to preempt burst workers AND default-priority pods to reschedule.
+  <release>-burst (-5): hps-worker fleet. Strictly the first preemption
+    victims; every unclassified pod (priority 0) also outranks them. The value
+    stays ABOVE the cluster-autoscaler expendable-pods cutoff (-10) so Pending
+    burst workers still trigger node scale-up.
+
+Names are release-scoped because PriorityClass is cluster-scoped and one
+cluster can host multiple Rulebricks deployments.
+*/ -}}
+{{- $pc := (.Values.global).priorityClasses | default dict }}
+{{- /* Default true, but respect an explicit `enabled: false` (a plain
+     `| default true` would treat the boolean false as empty and re-enable it). */ -}}
+{{- $pcEnabled := true }}
+{{- if hasKey $pc "enabled" }}
+{{- $pcEnabled = $pc.enabled }}
+{{- end }}
+{{- if $pcEnabled }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ .Release.Name }}-critical
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+value: 1000000
+globalDefault: false
+description: "Rulebricks critical infrastructure (kafka, clickhouse, db): preempts burst workers and default-priority pods so the stateful core always reschedules."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ .Release.Name }}-burst
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+value: -5
+globalDefault: false
+description: "Rulebricks burst worker fleet: first preemption victims; above the cluster-autoscaler expendable cutoff (-10) so pending workers still trigger node scale-up."
+{{- end }}
