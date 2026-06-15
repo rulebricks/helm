@@ -348,6 +348,45 @@ TLS Secret name - used by cert-manager Certificate and Ingress
 
 {{/*
 ===========================================
+Tracing Helpers (OpenTelemetry)
+===========================================
+*/}}
+
+{{/*
+OpenTelemetry env vars for a workload, emitted only when global.tracing.enabled.
+The OTLP endpoint is the in-cluster collector deployed by the parent chart; its
+name is derived from the release name (see templates/otel-collector-*.yaml).
+The application tracing bootstraps (HPS src/tracing.js, app instrumentation.js)
+are no-ops unless OTEL_EXPORTER_OTLP_ENDPOINT is set, so this is the single
+switch that turns tracing on for a pod.
+Usage: {{ include "rulebricks-chart.tracing.env" (dict "root" . "serviceName" "rulebricks-hps") | nindent 12 }}
+*/}}
+{{- define "rulebricks-chart.tracing.env" -}}
+{{- $root := .root -}}
+{{- $svc := .serviceName -}}
+{{- $tracing := ($root.Values.global | default dict).tracing | default dict -}}
+{{- if $tracing.enabled -}}
+- name: OTEL_TRACING_ENABLED
+  value: "1"
+- name: OTEL_EXPORTER_OTLP_ENDPOINT
+  value: "http://{{ $root.Release.Name }}-otel-collector.{{ $root.Release.Namespace }}.svc.cluster.local:4318"
+- name: OTEL_EXPORTER_OTLP_PROTOCOL
+  value: "http/json"
+- name: OTEL_SERVICE_NAME
+  value: {{ $svc | quote }}
+- name: OTEL_TRACES_SAMPLER
+  value: "parentbased_traceidratio"
+- name: OTEL_TRACES_SAMPLER_ARG
+  value: {{ $tracing.samplingRatio | default 1.0 | quote }}
+{{- with ($root.Values.global | default dict).version }}
+- name: RULEBRICKS_VERSION
+  value: {{ . | quote }}
+{{- end }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+===========================================
 Scheduling Helpers
 Consolidated functions for nodeSelector, tolerations, affinity
 ===========================================

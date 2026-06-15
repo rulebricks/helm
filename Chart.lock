@@ -29,8 +29,11 @@ dependencies:
 - name: vector
   repository: https://helm.vector.dev
   version: 0.52.0
+- name: vector
+  repository: https://helm.vector.dev
+  version: 0.52.0
 - name: external-dns
   repository: https://kubernetes-sigs.github.io/external-dns/
   version: 1.14.5
-digest: sha256:7e80da15ef7cf7c94a6df3e52519782b78e43cb39a29fba02232b05eab3741af
-generated: "2026-05-26T13:07:10.059946-07:00"
+digest: sha256:4d63bd87036511ce5cf6a9d743bf61c6802d1d5840f110be810bb9c1ff5b2b6e
+generated: "2026-06-15T12:44:44.161454-07:00"

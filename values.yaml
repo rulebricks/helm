@@ -65,6 +65,107 @@ global:
       decisionLogs: "decision-logs"
       dbBackups: "db-backups"
   # =============================================================================
+  # Distributed Tracing (OpenTelemetry)
+  # Deploys an in-cluster OpenTelemetry Collector (parent-chart templates) that
+  # receives OTLP spans from the Next.js app, the HPS gather plane, HPS workers,
+  # and Traefik, then forwards them to a customer-managed Elastic APM endpoint
+  # (BYO; e.g. Elastic Cloud or the Elastic add-on from AWS Marketplace).
+  # Self-hosted only. Lives under global so the rulebricks subchart deployments
+  # can read it and emit OTLP to the collector.
+  #
+  # Apps emit OTLP to the in-cluster collector service:
+  #   http://<release>-otel-collector.<namespace>.svc.cluster.local:4318  (HTTP)
+  #   http://<release>-otel-collector.<namespace>.svc.cluster.local:4317  (gRPC)
+  # =============================================================================
+  tracing:
+    enabled: false
+    # Trace destination the in-cluster collector exports to. One of:
+    #   elastic       -> Elastic APM / Elastic Cloud (OTLP/HTTP)        [default]
+    #   otlp          -> any generic OTLP/HTTP backend (Tempo, Honeycomb,
+    #                    Jaeger, vendor OTLP gateways, AWS/Azure OTLP ingestion)
+    #   azure-monitor -> Azure Monitor / Application Insights
+    # AWS- and Azure-compatible: pick `otlp` for a vendor-neutral endpoint or
+    # `azure-monitor` for Azure-native ingestion. The app/HPS/worker
+    # instrumentation is unchanged regardless of destination.
+    destination: "elastic"
+    # Head-sampling ratio applied by the application SDKs (0.0 - 1.0). The
+    # collector forwards everything it receives; control volume at the source.
+    samplingRatio: 1.0
+    collector:
+      # otel/opentelemetry-collector-contrib carries the otlphttp + azuremonitor
+      # exporters used by all destinations below.
+      image: "otel/opentelemetry-collector-contrib:0.119.0"
+      replicas: 1
+      # Soft cap (MiB) for the memory_limiter processor before it back-pressures.
+      memoryLimitMiB: 400
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+      podLabels:
+        rulebricks.com/workload-group: infrastructure
+      nodeSelector: {}
+      tolerations: []
+      affinity: {}
+    # destination: elastic -- Customer-managed Elastic APM (BYO). The collector
+    # forwards every received span to this OTLP endpoint.
+    elastic:
+      # OTLP endpoint of the Elastic APM Server / managed APM integration, e.g.
+      # https://<deployment>.apm.<region>.cloud.es.io:443
+      endpoint: ""
+      # Auth mode for the Elastic endpoint:
+      #   secret-token -> Authorization: Bearer <token>
+      #   api-key      -> Authorization: ApiKey <key>
+      #   none         -> no Authorization header
+      authMode: "secret-token"
+      # Inline credential (dev/eval only). For production reference an existing
+      # secret via existingSecret below instead of inlining here.
+      secretToken: ""
+      apiKey: ""
+      existingSecret:
+        name: ""
+        secretTokenKey: "secret-token"
+        apiKeyKey: "api-key"
+      # Skip TLS verification for the Elastic endpoint (NOT recommended).
+      tlsInsecureSkipVerify: false
+    # destination: otlp -- generic OTLP/HTTP backend.
+    otlp:
+      # Full OTLP/HTTP traces endpoint of the backend, e.g.
+      #   https://otlp-gateway-<region>.grafana.net/otlp        (Grafana Cloud)
+      #   https://api.honeycomb.io                              (Honeycomb)
+      endpoint: ""
+      # Auth mode for the generic endpoint:
+      #   none    -> no auth header
+      #   bearer  -> Authorization: Bearer <token>
+      #   api-key -> Authorization: ApiKey <token>
+      #   header  -> <headerName>: <token>   (e.g. x-honeycomb-team)
+      authMode: "none"
+      # Header name used when authMode is "header".
+      headerName: "Authorization"
+      # Inline credential for bearer/api-key/header modes (dev/eval only); use
+      # existingSecret in production.
+      token: ""
+      apiKey: ""
+      headerValue: ""
+      existingSecret:
+        name: ""
+        tokenKey: "token"
+      # Extra static (non-secret) headers added to every export request.
+      headers: {}
+      # Skip TLS verification for the endpoint (NOT recommended).
+      tlsInsecureSkipVerify: false
+    # destination: azure-monitor -- Azure Monitor / Application Insights.
+    azureMonitor:
+      # Application Insights connection string (carries the ingestion endpoint
+      # and instrumentation key). Inline for dev/eval; use existingSecret in prod.
+      connectionString: ""
+      existingSecret:
+        name: ""
+        connectionStringKey: "connection-string"
+  # =============================================================================
   # Global Labels and Annotations
   # Applied to ALL resources rendered by this chart (useful for compliance)
   # =============================================================================
@@ -267,7 +368,7 @@ backup:
 # This is the core Rulebricks application stack. It is preconfigured to run as-
 # is, but you will likely need to manually tune component resources and
 # other configurations to your business's performance requirements.
-# We highly recommend you keep Traefik and Kafka internal to the cluster– our
+# We highly recommend you keep Traefik and Kafka internal to the cluster - our
 # solver directly depends on their configurations.
 # =============================================================================
 rulebricks:
@@ -699,6 +800,22 @@ traefik:
         # ClickHouse ServiceMonitors on by default and let operators opt into
         # this after Prometheus Operator CRDs are installed.
         enabled: false
+  # Distributed tracing (Traefik v3 OTLP). When global.tracing.enabled, the
+  # ingress becomes the ROOT span of every request and propagates the W3C
+  # traceparent header to the app/HPS backends - so a trace shows the full
+  # lineage starting at the edge. The endpoint must point at the in-cluster
+  # OpenTelemetry Collector deployed by this chart; because the collector
+  # service name is release-scoped (<release>-otel-collector) and this static
+  # values file cannot template the release name, the CLI fills the concrete
+  # endpoint automatically. For hand-installs, uncomment and set <release>:
+  #
+  # tracing:
+  #   otlp:
+  #     enabled: true
+  #     http:
+  #       enabled: true
+  #       endpoint: "http://<release>-otel-collector:4318/v1/traces"
+  tracing: {}
   persistence:
     enabled: false
 
@@ -946,6 +1063,100 @@ kafkaBridge:
 #       eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/vector-msk-consumer
 
 # =============================================================================
+# APPLICATION / CONTAINER LOG SHIPPING (Vector agent DaemonSet)
+# A SECOND Vector deployment (role: Agent) that tails all Kubernetes pod logs
+# (kubernetes_logs source) and ships them to a customer-managed Elasticsearch
+# (BYO; e.g. the Elastic add-on from AWS Marketplace). This is DISTINCT from the
+# decision-log `vector` aggregator above (Kafka -> object storage/ClickHouse);
+# decision logs stay in ClickHouse and are NOT double-written to Elastic.
+#
+# The agent parses structured JSON log lines and lifts trace_id/span_id so app
+# logs join distributed traces in Kibana. Disabled by default; the CLI generates
+# the elasticsearch sink (endpoint + auth) from features.logging.appLogs. For
+# hand-installs, enable below and replace the console sink with an elasticsearch
+# sink (commented example included).
+# =============================================================================
+vector-agent:
+  enabled: false
+  role: "Agent"
+  podLabels:
+    rulebricks.com/workload-group: infrastructure
+  # Tolerate every taint so the DaemonSet runs on ALL nodes - including the
+  # tainted burst/spot pools where HPS workers land and ARM64-tainted nodes.
+  # Without this the agent would silently miss worker (rule-evaluation) logs.
+  tolerations:
+    - operator: Exists
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  customConfig:
+    data_dir: /vector-data-dir
+    sources:
+      kubernetes_logs:
+        type: kubernetes_logs
+        # Skip both Vector deployments: the aggregator (app.kubernetes.io/name=vector)
+        # re-emits decision logs on stdout via its console sink (those belong in
+        # ClickHouse, not Elasticsearch), and the agent itself (vector-agent) to
+        # avoid a self-scrape loop. All other pods are still collected.
+        extra_label_selector: "app.kubernetes.io/name notin (vector,vector-agent)"
+    transforms:
+      app_logs:
+        type: remap
+        inputs:
+          - kubernetes_logs
+        # Parse structured JSON log lines (app + HPS emit JSON to stdout) to
+        # lift trace_id/span_id for logs<->traces correlation in Kibana, and
+        # flatten the most useful Kubernetes metadata. Plain (non-JSON) lines
+        # pass through untouched.
+        source: |
+          parsed, err = parse_json(to_string(.message) ?? "")
+          if err == null && is_object(parsed) {
+            .log = parsed
+            .trace_id = parsed.trace_id
+            .span_id = parsed.span_id
+            if exists(parsed.level) { .level = to_string(parsed.level) ?? "info" }
+          }
+          .pod = .kubernetes.pod_name
+          .namespace = .kubernetes.pod_namespace
+          .container = .kubernetes.container_name
+          .node = .kubernetes.pod_node_name
+    sinks:
+      # Default console sink keeps the agent valid when enabled without an
+      # Elasticsearch endpoint configured. The CLI replaces this with the
+      # elasticsearch sink below.
+      console:
+        type: console
+        inputs:
+          - app_logs
+        encoding:
+          codec: json
+      # ==== Elasticsearch sink (CLI-generated; hand-install example) ====
+      # elasticsearch:
+      #   type: elasticsearch
+      #   inputs:
+      #     - app_logs
+      #   endpoints:
+      #     - "https://<your-elasticsearch-host>:9200"
+      #   mode: bulk
+      #   bulk:
+      #     index: "rulebricks-app-logs"
+      #   # Basic auth:
+      #   auth:
+      #     strategy: basic
+      #     user: "elastic"
+      #     password: "<password>"
+      #   # API key auth (alternative): drop `auth` and set a request header:
+      #   # request:
+      #   #   headers:
+      #   #     Authorization: "ApiKey <base64-api-key>"
+      #   tls:
+      #     verify_certificate: true
+
+# =============================================================================
 # SELF-HOSTED DATABASE SETTINGS (Supabase)
 # Set enabled: false to use an external Supabase instance instead
 # =============================================================================
@@ -1059,7 +1270,20 @@ kube-prometheus-stack:
   alertmanager:
     enabled: false
   grafana:
+    # In-cluster Grafana is opt-in (the CLI enables it for the local-grafana
+    # monitoring destination). When enabled, the dashboard sidecar imports the
+    # provisioned Rulebricks dashboards from ConfigMaps labeled
+    # grafana_dashboard="1" (see templates/grafana-dashboards-configmap.yaml).
     enabled: false
+    sidecar:
+      dashboards:
+        enabled: true
+        label: grafana_dashboard
+        labelValue: "1"
+        searchNamespace: ALL
+        folderAnnotation: grafana_folder
+        provider:
+          foldersFromFilesStructure: true
   prometheus:
     prometheusSpec:
       retention: 30d
@@ -1095,63 +1319,6 @@ kube-prometheus-stack:
       #         password:
       #           name: prometheus-remote-write
       #           key: password
-
-# =============================================================================
-# DISTRIBUTED TRACING (OpenTelemetry)
-# Deploys an in-cluster OpenTelemetry Collector that receives OTLP spans from
-# the Next.js app, the HPS gather plane, HPS workers, and Traefik, then forwards
-# them to a customer-managed Elastic APM endpoint (BYO; e.g. Elastic Cloud or the
-# Elastic add-on from AWS Marketplace). Self-hosted only.
-#
-# Apps emit OTLP to the in-cluster collector service:
-#   http://<release>-otel-collector.<namespace>.svc.cluster.local:4318  (HTTP)
-#   http://<release>-otel-collector.<namespace>.svc.cluster.local:4317  (gRPC)
-# The CLI wires those endpoints onto the app/HPS deployments automatically.
-# =============================================================================
-tracing:
-  enabled: false
-  collector:
-    # otel/opentelemetry-collector-contrib carries the elasticsearch/otlp exporters.
-    image: "otel/opentelemetry-collector-contrib:0.119.0"
-    replicas: 1
-    # Soft cap (MiB) for the memory_limiter processor before it back-pressures.
-    memoryLimitMiB: 400
-    resources:
-      requests:
-        cpu: "100m"
-        memory: "256Mi"
-      limits:
-        cpu: "500m"
-        memory: "512Mi"
-    podLabels:
-      rulebricks.com/workload-group: infrastructure
-    nodeSelector: {}
-    tolerations: []
-    affinity: {}
-  # Customer-managed Elastic APM (BYO). The collector forwards every received
-  # span to this OTLP endpoint.
-  elastic:
-    # OTLP endpoint of the Elastic APM Server / managed APM integration, e.g.
-    # https://<deployment>.apm.<region>.cloud.es.io:443
-    endpoint: ""
-    # Auth mode for the Elastic endpoint:
-    #   secret-token -> Authorization: Bearer <token>
-    #   api-key      -> Authorization: ApiKey <key>
-    #   none         -> no Authorization header
-    authMode: "secret-token"
-    # Inline credential (dev/eval only). For production reference an existing
-    # secret via existingSecret below instead of inlining here.
-    secretToken: ""
-    apiKey: ""
-    existingSecret:
-      name: ""
-      secretTokenKey: "secret-token"
-      apiKeyKey: "api-key"
-    # Skip TLS verification for the Elastic endpoint (NOT recommended).
-    tlsInsecureSkipVerify: false
-  # Head-sampling ratio applied by the application SDKs (0.0 - 1.0). The
-  # collector forwards everything it receives; control volume at the source.
-  samplingRatio: 1.0
 
 # =============================================================================
 # EXTERNAL SECRETS OPERATOR INTEGRATION (overlay-facing metadata)

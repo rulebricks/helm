@@ -122,6 +122,12 @@ metrics:
     path: /api/metrics
   hps:
     path: /metrics
+  worker:
+    # HPS workers expose Prometheus metrics on this path (served by the small
+    # metrics HTTP server inside the bundled worker). Scraped via the headless
+    # worker Service + ServiceMonitor.
+    path: /metrics
+    port: 3000
 
 hps:
   enabled: true

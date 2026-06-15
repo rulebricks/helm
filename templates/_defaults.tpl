@@ -4,7 +4,7 @@ dominate the user-facing values.yaml.
 */}}
 
 {{- define "rulebricks.clickhouse.decisionLogStructure" -}}
-timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), request String, response String, decision String, params Nullable(String)
+timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), trace_id Nullable(String), span_id Nullable(String), request String, response String, decision String, params Nullable(String)
 {{- end -}}
 
 {{- define "rulebricks.clickhouse.decisionLogStorageXml" -}}
@@ -133,6 +133,8 @@ if err == null { . = parsed };
 .operation = to_string(.operation) ?? null;
 .level = to_string(.level) ?? "info";
 .error = to_string(.error) ?? null;
+.trace_id = to_string(.trace_id) ?? null;
+.span_id = to_string(.span_id) ?? null;
 .request = to_string(.request) ?? "null";
 .response = to_string(.response) ?? "null";
 .decision = to_string(.decision) ?? "{}";

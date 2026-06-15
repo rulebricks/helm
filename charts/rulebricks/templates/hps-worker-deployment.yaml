@@ -13,8 +13,10 @@ spec:
     app.kubernetes.io/name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
   ports:
-    - port: 80
-      targetPort: 3000
+    - name: metrics
+      port: 80
+      targetPort: {{ .Values.metrics.worker.port | default 3000 }}
+      protocol: TCP
 ---
 {{- /* Workers are stateless Kafka consumers. A Deployment (not StatefulSet)
      creates pods in parallel, so KEDA scale-out delivers burst capacity in
@@ -158,6 +160,12 @@ spec:
         - name: hps-worker
           image: {{ .Values.hps.image.repository }}:worker-{{ include "rulebricks-chart.hps.imageTag" . }}
           imagePullPolicy: {{ .Values.hps.image.pullPolicy }}
+          {{- if .Values.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.worker.port | default 3000 }}
+              protocol: TCP
+          {{- end }}
           resources:
             {{- /* Workers do CPU-bound rule evaluation on a single-threaded
                  runtime: a full core each (request = limit) avoids CFS
@@ -197,6 +205,8 @@ spec:
                   key: {{ .existingSecretPasswordKey | default "KAFKA_SASL_PASSWORD" }}
             {{- end }}
             {{- end }}
+            {{- /* OpenTelemetry tracing env (no-op unless global.tracing.enabled) */ -}}
+            {{- include "rulebricks-chart.tracing.env" (dict "root" . "serviceName" "rulebricks-hps-worker") | nindent 12 }}
             {{- /* Extra environment variables */ -}}
             {{- with .Values.hps.workers.extraEnv }}
             {{- toYaml . | nindent 12 }}

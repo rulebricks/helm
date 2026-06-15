@@ -196,6 +196,8 @@ spec:
                   key: {{ .existingSecretPasswordKey | default "KAFKA_SASL_PASSWORD" }}
             {{- end }}
             {{- end }}
+            {{- /* OpenTelemetry tracing env (no-op unless global.tracing.enabled) */ -}}
+            {{- include "rulebricks-chart.tracing.env" (dict "root" . "serviceName" "rulebricks-app") | nindent 12 }}
             {{- /* Extra environment variables from values */ -}}
             {{- with .Values.app.extraEnv }}
             {{- toYaml . | nindent 12 }}

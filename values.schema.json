@@ -176,6 +176,134 @@
             }
           }
         },
+        "tracing": {
+          "type": "object",
+          "description": "Distributed tracing: in-cluster OpenTelemetry Collector that forwards OTLP spans from the app/HPS/workers/Traefik to a pluggable backend (Elastic APM, a generic OTLP/HTTP endpoint, or Azure Monitor).",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "destination": { "type": "string", "enum": ["elastic", "otlp", "azure-monitor"], "default": "elastic" },
+            "samplingRatio": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+            "collector": {
+              "type": "object",
+              "properties": {
+                "image": { "type": "string" },
+                "replicas": { "type": "integer", "minimum": 1, "default": 1 },
+                "memoryLimitMiB": { "type": "integer", "minimum": 64, "default": 400 },
+                "resources": { "$ref": "#/definitions/resources" },
+                "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+                "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+                "tolerations": { "type": "array", "items": { "$ref": "#/definitions/toleration" } },
+                "affinity": { "type": "object" }
+              }
+            },
+            "elastic": {
+              "type": "object",
+              "description": "Customer-managed Elastic APM target for OTLP spans (destination: elastic).",
+              "properties": {
+                "endpoint": { "type": "string", "description": "OTLP endpoint of the Elastic APM server / managed integration" },
+                "authMode": { "type": "string", "enum": ["secret-token", "api-key", "none"], "default": "secret-token" },
+                "secretToken": { "type": "string" },
+                "apiKey": { "type": "string" },
+                "existingSecret": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "secretTokenKey": { "type": "string", "default": "secret-token" },
+                    "apiKeyKey": { "type": "string", "default": "api-key" }
+                  }
+                },
+                "tlsInsecureSkipVerify": { "type": "boolean", "default": false }
+              }
+            },
+            "otlp": {
+              "type": "object",
+              "description": "Generic OTLP/HTTP backend (destination: otlp).",
+              "properties": {
+                "endpoint": { "type": "string", "description": "OTLP/HTTP traces endpoint of the backend" },
+                "authMode": { "type": "string", "enum": ["none", "bearer", "api-key", "header"], "default": "none" },
+                "headerName": { "type": "string", "default": "Authorization" },
+                "token": { "type": "string" },
+                "apiKey": { "type": "string" },
+                "headerValue": { "type": "string" },
+                "existingSecret": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "tokenKey": { "type": "string", "default": "token" }
+                  }
+                },
+                "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+                "tlsInsecureSkipVerify": { "type": "boolean", "default": false }
+              }
+            },
+            "azureMonitor": {
+              "type": "object",
+              "description": "Azure Monitor / Application Insights target (destination: azure-monitor).",
+              "properties": {
+                "connectionString": { "type": "string", "description": "Application Insights connection string" },
+                "existingSecret": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "connectionStringKey": { "type": "string", "default": "connection-string" }
+                  }
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "comment": "Default/absent destination is treated as elastic.",
+              "if": {
+                "properties": { "enabled": { "const": true } },
+                "required": ["enabled"],
+                "not": { "required": ["destination"] }
+              },
+              "then": {
+                "required": ["elastic"],
+                "properties": {
+                  "elastic": { "type": "object", "required": ["endpoint"], "properties": { "endpoint": { "type": "string", "minLength": 1 } } }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": { "enabled": { "const": true }, "destination": { "const": "elastic" } },
+                "required": ["enabled", "destination"]
+              },
+              "then": {
+                "required": ["elastic"],
+                "properties": {
+                  "elastic": { "type": "object", "required": ["endpoint"], "properties": { "endpoint": { "type": "string", "minLength": 1 } } }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": { "enabled": { "const": true }, "destination": { "const": "otlp" } },
+                "required": ["enabled", "destination"]
+              },
+              "then": {
+                "required": ["otlp"],
+                "properties": {
+                  "otlp": { "type": "object", "required": ["endpoint"], "properties": { "endpoint": { "type": "string", "minLength": 1 } } }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": { "enabled": { "const": true }, "destination": { "const": "azure-monitor" } },
+                "required": ["enabled", "destination"]
+              },
+              "then": {
+                "required": ["azureMonitor"],
+                "properties": {
+                  "azureMonitor": { "type": "object", "required": ["connectionString"], "properties": { "connectionString": { "type": "string", "minLength": 1 } } }
+                }
+              }
+            }
+          ]
+        },
         "labels": {
           "type": "object",
           "description": "Global labels applied to all resources",
@@ -794,66 +922,6 @@
       "properties": {
         "enabled": { "type": "boolean" }
       }
-    },
-    "tracing": {
-      "type": "object",
-      "description": "Distributed tracing: in-cluster OpenTelemetry Collector that forwards OTLP spans to a customer-managed Elastic APM endpoint (BYO).",
-      "properties": {
-        "enabled": { "type": "boolean", "default": false },
-        "samplingRatio": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
-        "collector": {
-          "type": "object",
-          "properties": {
-            "image": { "type": "string" },
-            "replicas": { "type": "integer", "minimum": 1, "default": 1 },
-            "memoryLimitMiB": { "type": "integer", "minimum": 64, "default": 400 },
-            "resources": { "$ref": "#/definitions/resources" },
-            "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
-            "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
-            "tolerations": { "type": "array", "items": { "$ref": "#/definitions/toleration" } },
-            "affinity": { "type": "object" }
-          }
-        },
-        "elastic": {
-          "type": "object",
-          "description": "Customer-managed Elastic APM target for OTLP spans.",
-          "properties": {
-            "endpoint": { "type": "string", "description": "OTLP endpoint of the Elastic APM server / managed integration" },
-            "authMode": { "type": "string", "enum": ["secret-token", "api-key", "none"], "default": "secret-token" },
-            "secretToken": { "type": "string" },
-            "apiKey": { "type": "string" },
-            "existingSecret": {
-              "type": "object",
-              "properties": {
-                "name": { "type": "string" },
-                "secretTokenKey": { "type": "string", "default": "secret-token" },
-                "apiKeyKey": { "type": "string", "default": "api-key" }
-              }
-            },
-            "tlsInsecureSkipVerify": { "type": "boolean", "default": false }
-          }
-        }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": { "enabled": { "const": true } },
-            "required": ["enabled"]
-          },
-          "then": {
-            "required": ["elastic"],
-            "properties": {
-              "elastic": {
-                "type": "object",
-                "required": ["endpoint"],
-                "properties": {
-                  "endpoint": { "type": "string", "minLength": 1 }
-                }
-              }
-            }
-          }
-        }
-      ]
     },
     "kube-prometheus-stack": {
       "type": "object",

@@ -1,6 +1,6 @@
 {{- if and .Values.global.tlsEnabled .Values.global.externalDnsEnabled }}
 =============================================================================
-RULEBRICKS INSTALLATION – COMPLETE (Automatic DNS)
+RULEBRICKS INSTALLATION - COMPLETE (Automatic DNS)
 =============================================================================
 
 External-DNS is managing your DNS records automatically.
@@ -26,7 +26,7 @@ To check certificate status:
 =============================================================================
 {{- else if .Values.global.tlsEnabled }}
 =============================================================================
-RULEBRICKS INSTALLATION – 2/2 – COMPLETE
+RULEBRICKS INSTALLATION - 2/2 - COMPLETE
 =============================================================================
 
 Welcome to Rulebricks.
@@ -40,7 +40,7 @@ https://{{ .Values.global.domain }}/auth/signup
 =============================================================================
 {{- else if .Values.global.externalDnsEnabled }}
 =============================================================================
-RULEBRICKS INSTALLATION – ALMOST THERE
+RULEBRICKS INSTALLATION - ALMOST THERE
 =============================================================================
 
 External-DNS is creating your DNS records automatically.
@@ -64,7 +64,7 @@ TIP: Next time, install with both flags for single-phase setup:
 =============================================================================
 {{- else }}
 =============================================================================
-RULEBRICKS INSTALLATION - 1/2 – DNS SETUP REQUIRED
+RULEBRICKS INSTALLATION - 1/2 - DNS SETUP REQUIRED
 =============================================================================
 
 1. Get your LoadBalancer Address:
@@ -108,7 +108,7 @@ RULEBRICKS INSTALLATION - 1/2 – DNS SETUP REQUIRED
 {{- if and (not $pcEnabled) (gt (len $criticalNames) 0) }}
 
 =============================================================================
-WARNING: PriorityClass mismatch – critical pods will NOT schedule
+WARNING: PriorityClass mismatch - critical pods will NOT schedule
 =============================================================================
 
 global.priorityClasses.enabled is false, so the release-scoped PriorityClasses

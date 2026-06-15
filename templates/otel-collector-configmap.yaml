@@ -1,0 +1,106 @@
+{{- $tracing := .Values.global.tracing | default dict }}
+{{- if $tracing.enabled }}
+{{- $destination := $tracing.destination | default "elastic" }}
+{{- $elastic := $tracing.elastic | default dict }}
+{{- $otlp := $tracing.otlp | default dict }}
+{{- $elasticAuthMode := $elastic.authMode | default "secret-token" }}
+{{- $otlpAuthMode := $otlp.authMode | default "none" }}
+{{- $memLimit := ($tracing.collector).memoryLimitMiB | default 400 | int }}
+{{- $insecure := false }}
+{{- if eq $destination "otlp" }}{{- $insecure = ($otlp.tlsInsecureSkipVerify | default false) }}{{- else }}{{- $insecure = ($elastic.tlsInsecureSkipVerify | default false) }}{{- end }}
+{{- $exporterName := "otlphttp/elastic" }}
+{{- if eq $destination "otlp" }}{{- $exporterName = "otlphttp/generic" }}{{- else if eq $destination "azure-monitor" }}{{- $exporterName = "azuremonitor" }}{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-otel-collector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: tracing
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  # OpenTelemetry Collector config. The trace destination is pluggable
+  # (global.tracing.destination = elastic | otlp | azure-monitor). Endpoints and
+  # credentials are injected via env (TRACING_OTLP_ENDPOINT / TRACING_AUTH_TOKEN
+  # / AZURE_MONITOR_CONNECTION_STRING) so secrets never live in the ConfigMap.
+  # ${env:VAR} is expanded by the collector at startup.
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: {{ $memLimit }}
+        spike_limit_mib: {{ div $memLimit 4 }}
+      batch:
+        timeout: 5s
+        send_batch_size: 512
+      resource:
+        attributes:
+          - key: deployment.environment
+            value: {{ .Release.Namespace | quote }}
+            action: upsert
+          - key: k8s.cluster.namespace
+            value: {{ .Release.Namespace | quote }}
+            action: upsert
+    exporters:
+      {{- if eq $destination "elastic" }}
+      # Elastic APM (Elastic Cloud / self-hosted APM Server) over OTLP/HTTP.
+      otlphttp/elastic:
+        endpoint: ${env:TRACING_OTLP_ENDPOINT}
+        {{- if ne $elasticAuthMode "none" }}
+        headers:
+          {{- if eq $elasticAuthMode "api-key" }}
+          Authorization: "ApiKey ${env:TRACING_AUTH_TOKEN}"
+          {{- else }}
+          Authorization: "Bearer ${env:TRACING_AUTH_TOKEN}"
+          {{- end }}
+        {{- end }}
+        tls:
+          insecure_skip_verify: {{ $insecure }}
+      {{- else if eq $destination "otlp" }}
+      # Generic OTLP/HTTP backend (Grafana Tempo, Honeycomb, Jaeger, vendor
+      # OTLP gateways, AWS/Azure OTLP ingestion endpoints, etc.).
+      otlphttp/generic:
+        endpoint: ${env:TRACING_OTLP_ENDPOINT}
+        {{- if or (ne $otlpAuthMode "none") $otlp.headers }}
+        headers:
+          {{- if eq $otlpAuthMode "bearer" }}
+          Authorization: "Bearer ${env:TRACING_AUTH_TOKEN}"
+          {{- else if eq $otlpAuthMode "api-key" }}
+          Authorization: "ApiKey ${env:TRACING_AUTH_TOKEN}"
+          {{- else if eq $otlpAuthMode "header" }}
+          {{ $otlp.headerName | default "Authorization" }}: "${env:TRACING_AUTH_TOKEN}"
+          {{- end }}
+          {{- range $k, $v := $otlp.headers }}
+          {{ $k }}: {{ $v | quote }}
+          {{- end }}
+        {{- end }}
+        tls:
+          insecure_skip_verify: {{ $insecure }}
+      {{- else if eq $destination "azure-monitor" }}
+      # Azure Monitor / Application Insights (azuremonitor exporter, bundled in
+      # the otel contrib image). Connection string carries the ingestion
+      # endpoint + instrumentation key.
+      azuremonitor:
+        connection_string: ${env:AZURE_MONITOR_CONNECTION_STRING}
+      {{- end }}
+      debug:
+        verbosity: basic
+    service:
+      telemetry:
+        logs:
+          level: info
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [{{ $exporterName }}]
+{{- end }}

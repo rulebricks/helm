@@ -1,0 +1,27 @@
+{{- /*
+  Provisioned Grafana dashboards for in-cluster Grafana (kube-prometheus-stack).
+  The Grafana dashboard sidecar imports any ConfigMap labeled
+  grafana_dashboard="1" in the search namespace. Rendered only when in-cluster
+  Grafana is enabled (the CLI's local-grafana monitoring destination). Dashboard
+  JSON is read raw via .Files.Glob so Grafana's {{ label }} legend formats are
+  not interpreted by Helm.
+*/ -}}
+{{- $kps := index .Values "kube-prometheus-stack" | default dict }}
+{{- $grafana := $kps.grafana | default dict }}
+{{- if $grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-dashboards
+  namespace: {{ .Release.Namespace }}
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: grafana-dashboards
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    grafana_folder: "Rulebricks"
+data:
+{{ (.Files.Glob "dashboards/*.json").AsConfig | indent 2 }}
+{{- end }}

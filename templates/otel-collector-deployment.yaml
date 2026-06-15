@@ -1,0 +1,140 @@
+{{- $tracing := .Values.global.tracing | default dict }}
+{{- if $tracing.enabled }}
+{{- $collector := $tracing.collector | default dict }}
+{{- $destination := $tracing.destination | default "elastic" }}
+{{- $elastic := $tracing.elastic | default dict }}
+{{- $otlp := $tracing.otlp | default dict }}
+{{- $azure := $tracing.azureMonitor | default dict }}
+{{- $elasticAuthMode := $elastic.authMode | default "secret-token" }}
+{{- $otlpAuthMode := $otlp.authMode | default "none" }}
+{{- /* Resolve the OTLP endpoint (elastic/otlp destinations) injected as env. */}}
+{{- $endpoint := "" }}
+{{- if eq $destination "otlp" }}{{- $endpoint = ($otlp.endpoint | default "") }}{{- else if eq $destination "elastic" }}{{- $endpoint = ($elastic.endpoint | default "") }}{{- end }}
+{{- /* Whether a credential secret env (TRACING_AUTH_TOKEN) is required. */}}
+{{- $needsToken := false }}
+{{- if and (eq $destination "elastic") (ne $elasticAuthMode "none") }}{{- $needsToken = true }}{{- end }}
+{{- if and (eq $destination "otlp") (ne $otlpAuthMode "none") }}{{- $needsToken = true }}{{- end }}
+{{- /* Resolve credential secret name/key per destination + existingSecret. */}}
+{{- $tokenSecretName := "" }}
+{{- $tokenSecretKey := "token" }}
+{{- if eq $destination "elastic" }}
+{{- $existing := $elastic.existingSecret | default dict }}
+{{- if $existing.name }}
+{{- $tokenSecretName = $existing.name }}
+{{- if eq $elasticAuthMode "api-key" }}{{- $tokenSecretKey = ($existing.apiKeyKey | default "api-key") }}{{- else }}{{- $tokenSecretKey = ($existing.secretTokenKey | default "secret-token") }}{{- end }}
+{{- else }}
+{{- $tokenSecretName = printf "%s-otel-elastic" .Release.Name }}
+{{- end }}
+{{- else if eq $destination "otlp" }}
+{{- $existing := $otlp.existingSecret | default dict }}
+{{- if $existing.name }}
+{{- $tokenSecretName = $existing.name }}
+{{- $tokenSecretKey = ($existing.tokenKey | default "token") }}
+{{- else }}
+{{- $tokenSecretName = printf "%s-otel-otlp" .Release.Name }}
+{{- end }}
+{{- end }}
+{{- /* Azure Monitor connection-string secret. */}}
+{{- $azSecretName := printf "%s-otel-azure-monitor" .Release.Name }}
+{{- $azSecretKey := "connection-string" }}
+{{- $azExisting := $azure.existingSecret | default dict }}
+{{- if $azExisting.name }}
+{{- $azSecretName = $azExisting.name }}
+{{- $azSecretKey = ($azExisting.connectionStringKey | default "connection-string") }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-otel-collector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: tracing
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ $collector.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: otel-collector
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: otel-collector
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: tracing
+        {{- with $collector.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # Roll the collector when its config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/otel-collector-configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with $collector.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $collector.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $collector.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: otel-collector
+          image: {{ $collector.image | default "otel/opentelemetry-collector-contrib:0.119.0" | quote }}
+          args:
+            - "--config=/conf/config.yaml"
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+          env:
+            {{- if or (eq $destination "elastic") (eq $destination "otlp") }}
+            - name: TRACING_OTLP_ENDPOINT
+              value: {{ $endpoint | quote }}
+            {{- if $needsToken }}
+            - name: TRACING_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $tokenSecretName | quote }}
+                  key: {{ $tokenSecretKey | quote }}
+            {{- end }}
+            {{- else if eq $destination "azure-monitor" }}
+            - name: AZURE_MONITOR_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $azSecretName | quote }}
+                  key: {{ $azSecretKey | quote }}
+            {{- end }}
+          {{- with $collector.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+          readinessProbe:
+            tcpSocket:
+              port: 4318
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 4318
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-otel-collector
+            items:
+              - key: config.yaml
+                path: config.yaml
+{{- end }}
