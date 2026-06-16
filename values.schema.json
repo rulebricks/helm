@@ -854,9 +854,11 @@
         "queryLimits": {
           "type": "object",
           "properties": {
-            "maxMemoryUsage": { "type": "integer", "minimum": 1, "default": 1073741824 },
+            "maxMemoryUsage": { "type": "integer", "minimum": 1, "default": 4294967296 },
             "maxThreads": { "type": "integer", "minimum": 1, "default": 4 },
-            "maxExecutionTime": { "type": "integer", "minimum": 1, "default": 60 }
+            "maxExecutionTime": { "type": "integer", "minimum": 1, "default": 120 },
+            "maxRowsToRead": { "type": "integer", "minimum": 1, "default": 50000000 },
+            "readOverflowMode": { "type": "string", "enum": ["throw", "break"], "default": "break" }
           }
         }
       }

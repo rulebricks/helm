@@ -206,8 +206,11 @@ hps:
     enabled: false
     minAvailable: ""
     maxUnavailable: ""
-  # Extra environment variables
-  extraEnv: []
+  # Extra environment variables.
+  # FLOW_CHUNK_MAX_ITEMS is an important throughput dial.
+  extraEnv:
+    - name: FLOW_CHUNK_MAX_ITEMS
+      value: "500"
   extraEnvFrom: []
   resources:
     requests:

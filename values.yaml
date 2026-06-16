@@ -748,11 +748,16 @@ clickhouse:
     enabled: false
   resources:
     requests:
-      cpu: "200m"
-      memory: "512Mi"
-    limits:
-      cpu: "1000m"
+      cpu: "500m"
       memory: "2Gi"
+    limits:
+      # Decision-log queries read gzipped NDJSON straight from object storage and
+      # aggregate in memory, so they are CPU- and memory-hungry. The previous
+      # 1 CPU / 2Gi ceiling caused MEMORY_LIMIT_EXCEEDED (server cap ~1.8Gi) and
+      # TIMEOUT_EXCEEDED from CPU throttling. Give the single replica real
+      # headroom (server memory cap becomes ~5.4Gi at 0.9 x 6Gi).
+      cpu: "2"
+      memory: "6Gi"
   serviceAccount:
     create: true
     annotations: {}
@@ -760,10 +765,24 @@ clickhouse:
     enabled: true
     serviceMonitor:
       enabled: true
+  # Enables the system log tables (query_log, etc.). Off by default to save
+  # memory; safe to keep on now that the replica has headroom, and essential for
+  # diagnosing slow/failed decision-log queries after the fact.
+  sampling:
+    enabled: true
   queryLimits:
-    maxMemoryUsage: 1073741824
+    # Per-query memory ceiling. Kept below the server cap so a single runaway
+    # decision-log query fails (code 241) instead of starving the whole server.
+    maxMemoryUsage: 4294967296
     maxThreads: 4
-    maxExecutionTime: 60
+    # Raised from 60s: large decision-log scans legitimately run longer.
+    maxExecutionTime: 120
+    # Safety valve so a query can never read an unbounded number of records and
+    # OOM the server. With readOverflowMode "break", hitting the cap returns the
+    # rows gathered so far (partial result) instead of raising an error; set it
+    # to "throw" if you would rather fail loudly than return partial data.
+    maxRowsToRead: 50000000
+    readOverflowMode: break
   configdFiles:
     # Server-level named collections belong in config.d (the <clickhouse> root).
     09-decision-log-storage.xml: '{{ include "rulebricks.clickhouse.decisionLogStorageXml" . }}'
@@ -893,13 +912,19 @@ vector:
     rulebricks.com/workload-group: infrastructure
   role: "Stateless-Aggregator"
   replicas: 2
+  # The decision_logs object-storage sink buffers a whole uncompressed batch
+  # (customConfig sinks.decision_logs.batch.max_bytes, ~64 MiB from the CLI) in
+  # memory before flushing. The previous 256Mi limit was smaller than that batch,
+  # so under load Vector was OOMKilled before it could ever write a blob - which
+  # silently disabled decision-log export. Keep limits.memory comfortably above
+  # the configured batch size.
   resources:
     requests:
-      cpu: "50m"
-      memory: "128Mi"
-    limits:
-      cpu: "200m"
+      cpu: "250m"
       memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
   service:
     enabled: true
     ports:

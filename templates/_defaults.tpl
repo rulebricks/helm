@@ -48,14 +48,27 @@ timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), enviro
 <clickhouse>
   <profiles>
     <default>
-      <max_memory_usage>{{ $limits.maxMemoryUsage | default 1073741824 | int64 }}</max_memory_usage>
+      <max_memory_usage>{{ $limits.maxMemoryUsage | default 4294967296 | int64 }}</max_memory_usage>
       <max_threads>{{ $limits.maxThreads | default 4 | int64 }}</max_threads>
-      <max_execution_time>{{ $limits.maxExecutionTime | default 60 | int64 }}</max_execution_time>
+      <max_execution_time>{{ $limits.maxExecutionTime | default 120 | int64 }}</max_execution_time>
+      {{- /* Hard cap on rows scanned per query so an unbounded decision-log read
+             can't OOM the server. read_overflow_mode=break returns the rows
+             gathered so far instead of throwing once the cap is hit. */}}
+      <max_rows_to_read>{{ $limits.maxRowsToRead | default 50000000 | int64 }}</max_rows_to_read>
+      <read_overflow_mode>{{ $limits.readOverflowMode | default "break" }}</read_overflow_mode>
       {{- /* Decision logs are read from object storage as gzipped NDJSON.
              best_effort parses Vector's RFC3339 timestamps into DateTime64;
              skip_unknown_fields tolerates extra envelope fields. */}}
       <date_time_input_format>best_effort</date_time_input_format>
       <input_format_skip_unknown_fields>1</input_format_skip_unknown_fields>
+      {{- /* Decision logs are laid out as year=/month=/day=/hour= Hive partitions
+             in object storage. Enabling this exposes those path segments as the
+             decision_logs view's year/month/day/hour columns AND lets a query that
+             filters on them prune whole files at listing time instead of scanning
+             all of history. MUST be a profile (session) setting: when set inline in
+             the view's own SETTINGS the predicate does not push down and pruning is
+             silently lost. */}}
+      <use_hive_partitioning>1</use_hive_partitioning>
     </default>
   </profiles>
 </clickhouse>
@@ -105,7 +118,17 @@ otherwise corrupt a multi-line script.
 {{- else if eq $provider "gcs" -}}
 {{- $source = "gcs(decision_logs_gcs)" -}}
 {{- end -}}
-clickhouse-client --host 127.0.0.1 --user "${CLICKHOUSE_ADMIN_USER:-default}" --password "${CLICKHOUSE_ADMIN_PASSWORD:-}" --multiquery "CREATE DATABASE IF NOT EXISTS rulebricks; CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT * FROM {{ $source }};"
+{{- /* The view exposes the Hive path partitions (year/month/day/hour) as stable
+       UInt columns so callers can prune by partition. The CAST is deliberate: the
+       raw Hive virtual columns come back as LowCardinality with an inference-
+       dependent base type (String for zero-padded values like '06', Int otherwise),
+       so a plain `SELECT *, year, ...` would yield a fragile, shifting schema. CAST
+       normalizes them to fixed UInt; pruning still pushes down because the Hive
+       setting is enabled at the profile level (see queryLimitsXml), not inline.
+       use_hive_partitioning + allow_suspicious_low_cardinality_types are passed on
+       the create so the columns resolve at bootstrap regardless of profile load
+       order. Keep on a SINGLE line (the initdb scalar folds newlines to spaces). */ -}}
+clickhouse-client --host 127.0.0.1 --user "${CLICKHOUSE_ADMIN_USER:-default}" --password "${CLICKHOUSE_ADMIN_PASSWORD:-}" --use_hive_partitioning=1 --allow_suspicious_low_cardinality_types=1 --multiquery "CREATE DATABASE IF NOT EXISTS rulebricks; CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT *, CAST(year AS UInt16) AS year, CAST(month AS UInt8) AS month, CAST(day AS UInt8) AS day, CAST(hour AS UInt8) AS hour FROM {{ $source }};"
 {{- end -}}
 
 {{- /*
