@@ -39,13 +39,17 @@ app:
     enabled: false
     minAvailable: ""
     maxUnavailable: ""
+  # Baseline app sizing. The Next.js app runs a CPU-bound startup pass (runtime
+  # NEXT_PUBLIC_* placeholder substitution across the .next build) before it
+  # serves on :3000; a too-small CPU limit makes that overrun the liveness probe
+  # window and crash-loop the pod, so keep a real baseline here.
   resources:
     requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
       cpu: 500m
       memory: 512Mi
+    limits:
+      cpu: "2000m"
+      memory: 2Gi
   # Extra environment variables to inject (list of name/value or valueFrom objects)
   # Example:
   #   - name: HOSTNAME

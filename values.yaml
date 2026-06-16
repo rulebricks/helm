@@ -387,6 +387,18 @@ rulebricks:
     image:
       repository: index.docker.io/rulebricks/app
       pullPolicy: IfNotPresent
+    replicas: 1
+    # The Next.js app does a CPU-bound startup pass (runtime NEXT_PUBLIC_*
+    # placeholder substitution across the .next build) before it begins serving
+    # on :3000. A too-small CPU limit makes that overrun the liveness probe
+    # window and crash-loop the pod, so keep a real baseline here.
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+      limits:
+        cpu: "2000m"
+        memory: "2Gi"
     podDisruptionBudget:
       enabled: false
       minAvailable: ""
