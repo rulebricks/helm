@@ -542,7 +542,7 @@
                 },
                 "tolerations": {
                   "type": "array",
-                  "description": "Tolerations for the prepull DaemonSet; defaults to [{operator: Exists}] so it reaches every node. Override to scope it.",
+                  "description": "Tolerations for the prepull DaemonSet; defaults to the Rulebricks burst-pool taint only. Add explicit architecture tolerations as needed; avoid bare {operator: Exists} because it also tolerates shutdown, out-of-service, and unreachable nodes.",
                   "items": { "$ref": "#/definitions/toleration" }
                 },
                 "resources": {
@@ -686,7 +686,7 @@
         },
         "redis": {
           "type": "object",
-          "description": "Redis configuration. Set enabled: false to use an external/managed Redis instance.",
+          "description": "Valkey/Redis-compatible configuration. The redis key is retained for compatibility. Set enabled: false to use an external/managed endpoint.",
           "properties": {
             "enabled": { "type": "boolean", "default": true },
             "tag": { "type": "string" },
@@ -705,12 +705,12 @@
             },
             "external": {
               "type": "object",
-              "description": "External Redis connection settings (used when redis.enabled is false).",
+              "description": "External Valkey/Redis-compatible connection settings (used when redis.enabled is false).",
               "properties": {
                 "host": { "type": "string" },
                 "port": { "type": ["integer", "string"], "default": 6379 },
                 "password": { "type": "string", "description": "Inline password. Prefer existingSecret for production." },
-                "existingSecret": { "type": "string", "description": "Name of an existing secret holding the Redis password." },
+                "existingSecret": { "type": "string", "description": "Name of an existing secret holding the Valkey/Redis-compatible password." },
                 "existingSecretKey": { "type": "string", "default": "redis-password" },
                 "tls": {
                   "type": "object",
@@ -732,6 +732,132 @@
                 }
               }
             }
+          }
+        },
+        "cache": {
+          "type": "object",
+          "description": "Optional Valkey observability and management components.",
+          "properties": {
+            "valkeyAdmin": {
+              "type": "object",
+              "description": "Official Valkey Admin web console. Disabled by default and internal-only unless explicitly exposed through authenticated ingress.",
+              "properties": {
+                "enabled": { "type": "boolean", "default": false },
+                "replicas": { "type": "integer", "minimum": 1 },
+                "exposure": { "type": "string", "enum": ["internal", "ingress"], "default": "internal" },
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "repository": { "type": "string" },
+                    "tag": { "type": "string" },
+                    "pullPolicy": { "type": "string" }
+                  }
+                },
+                "service": {
+                  "type": "object",
+                  "properties": {
+                    "type": { "type": "string" },
+                    "port": { "type": ["integer", "string"] }
+                  }
+                },
+                "ingress": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": { "type": "boolean", "default": false },
+                    "className": { "type": "string" },
+                    "hostname": { "type": "string" },
+                    "annotations": { "type": "object", "additionalProperties": { "type": "string" } },
+                    "path": { "type": "string" },
+                    "pathType": { "type": "string" },
+                    "allowedIPs": { "type": "array", "items": { "type": "string" } },
+                    "basicAuth": {
+                      "type": "object",
+                      "description": "Traefik BasicAuth credentials. users must be htpasswd-formatted entries; prefer CLI generation.",
+                      "properties": {
+                        "users": { "type": "array", "items": { "type": "string" } },
+                        "existingSecret": { "type": "string" },
+                        "existingSecretKey": { "type": "string", "default": "users" }
+                      }
+                    }
+                  }
+                },
+                "resources": { "$ref": "#/definitions/resources" },
+                "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+                "tolerations": { "type": "array", "items": { "$ref": "#/definitions/toleration" } },
+                "affinity": { "type": "object" },
+                "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+                "podAnnotations": { "type": "object", "additionalProperties": { "type": "string" } }
+              }
+            },
+            "redisExporter": {
+              "type": "object",
+              "description": "Prometheus exporter for Valkey/Redis-compatible cache metrics.",
+              "properties": {
+                "enabled": { "type": "boolean", "default": false },
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "repository": { "type": "string" },
+                    "tag": { "type": "string" },
+                    "pullPolicy": { "type": "string" }
+                  }
+                },
+                "service": {
+                  "type": "object",
+                  "properties": { "port": { "type": ["integer", "string"] } }
+                },
+                "serviceMonitor": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "interval": { "type": "string" },
+                    "scrapeTimeout": { "type": "string" }
+                  }
+                },
+                "resources": { "$ref": "#/definitions/resources" },
+                "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+                "tolerations": { "type": "array", "items": { "$ref": "#/definitions/toleration" } },
+                "affinity": { "type": "object" },
+                "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+                "podAnnotations": { "type": "object", "additionalProperties": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "kafkaExporter": {
+          "type": "object",
+          "description": "Prometheus exporter for Kafka topic and consumer-group lag metrics.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "image": {
+              "type": "object",
+              "properties": {
+                "repository": { "type": "string" },
+                "tag": { "type": "string" },
+                "pullPolicy": { "type": "string" }
+              }
+            },
+            "service": {
+              "type": "object",
+              "properties": { "port": { "type": ["integer", "string"] } }
+            },
+            "serviceMonitor": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "interval": { "type": "string" },
+                "scrapeTimeout": { "type": "string" }
+              }
+            },
+            "brokers": { "type": "string" },
+            "topicFilter": { "type": "string" },
+            "groupFilter": { "type": "string" },
+            "resources": { "$ref": "#/definitions/resources" },
+            "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
+            "tolerations": { "type": "array", "items": { "$ref": "#/definitions/toleration" } },
+            "affinity": { "type": "object" },
+            "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+            "podAnnotations": { "type": "object", "additionalProperties": { "type": "string" } }
           }
         }
       }
@@ -1107,8 +1233,8 @@
       }
     },
     {
-      "title": "External Redis Validation",
-      "description": "If in-cluster Redis is disabled, an external Redis host must be specified in rulebricks.redis.external.host and must not be empty.",
+      "title": "External Valkey/Redis-Compatible Validation",
+      "description": "If in-cluster Valkey is disabled, an external Valkey/Redis-compatible host must be specified in rulebricks.redis.external.host and must not be empty.",
       "if": {
         "properties": {
           "rulebricks": {
@@ -1419,6 +1545,88 @@
                 "required": ["enabled"],
                 "properties": {
                   "enabled": { "const": true }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Valkey Admin Ingress Auth Validation",
+      "description": "Valkey Admin has no built-in authentication. If exposed through ingress, Traefik BasicAuth must be configured using htpasswd users or an existing Secret.",
+      "if": {
+        "properties": {
+          "rulebricks": {
+            "type": "object",
+            "properties": {
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "valkeyAdmin": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": { "const": true },
+                      "exposure": { "const": "ingress" },
+                      "ingress": {
+                        "type": "object",
+                        "properties": {
+                          "enabled": { "const": true }
+                        },
+                        "required": ["enabled"]
+                      }
+                    },
+                    "required": ["enabled", "exposure", "ingress"]
+                  }
+                },
+                "required": ["valkeyAdmin"]
+              }
+            },
+            "required": ["cache"]
+          }
+        },
+        "required": ["rulebricks"]
+      },
+      "then": {
+        "properties": {
+          "rulebricks": {
+            "type": "object",
+            "properties": {
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "valkeyAdmin": {
+                    "type": "object",
+                    "properties": {
+                      "ingress": {
+                        "type": "object",
+                        "properties": {
+                          "basicAuth": {
+                            "type": "object",
+                            "anyOf": [
+                              {
+                                "required": ["existingSecret"],
+                                "properties": {
+                                  "existingSecret": { "type": "string", "minLength": 1 }
+                                }
+                              },
+                              {
+                                "required": ["users"],
+                                "properties": {
+                                  "users": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "items": { "type": "string", "minLength": 1 }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["basicAuth"]
+                      }
+                    }
+                  }
                 }
               }
             }

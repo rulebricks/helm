@@ -140,7 +140,7 @@ spec:
                   name: {{ include "rulebricks-chart.app.secretName" . | trim }}
                   key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "openaiApiKey" "default" "OPENAI_API_KEY") | trim }}
             {{- end }}
-            # Redis HTTP API endpoint/token
+            # Redis-compatible HTTP API endpoint/token
             {{- if and (not .Values.redis.enabled) .Values.redis.external .Values.redis.external.httpApi .Values.redis.external.httpApi.enabled .Values.redis.external.httpApi.existingSecret }}
             # External HTTP API (e.g. Upstash) credentials sourced from an existing secret
             - name: UPSTASH_REDIS_REST_URL
@@ -166,7 +166,7 @@ spec:
                   name: {{ include "rulebricks-chart.app.configmap" . }}
                   key: KV_REST_API_TOKEN
             {{- end }}
-            {{- /* External Redis password: injected at runtime so it never lands in a ConfigMap.
+            {{- /* External Valkey/Redis-compatible password: injected at runtime so it never lands in a ConfigMap.
                    REDIS_PASSWORD must precede REDIS_URL for Kubernetes $(VAR) expansion. */ -}}
             {{- if eq (include "rulebricks-chart.redis.hasAuth" .) "true" }}
             - name: REDIS_PASSWORD

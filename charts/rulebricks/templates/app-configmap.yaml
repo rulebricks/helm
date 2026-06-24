@@ -45,16 +45,16 @@ data:
   SANITY_PROJECT_ID: "0tthc473"
   SANITY_API_DATASET: "production"
   {{- if .Values.redis.enabled }}
-  # Redis HTTP service - using templated service name
+  # Redis-compatible HTTP service - using templated service name
   KV_REST_API_URL: {{ printf "http://%s.%s.svc.cluster.local" (include "rulebricks-chart.serverless-redis-http.fullname" .) .Release.Namespace | quote }}
   KV_REST_API_TOKEN: "local_redis"
-  # Raw redis URL for direct solutions
+  # Raw redis:// URL for direct Valkey/Redis-compatible clients
   REDIS_URL: {{ printf "redis://%s.%s.svc.cluster.local:6379" (include "rulebricks-chart.redis.fullname" .) .Release.Namespace | quote }}
   {{- else }}
-  # Redis HTTP API settings (internal bridge or external HTTP API)
+  # Redis-compatible HTTP API settings (internal bridge or external HTTP API)
   KV_REST_API_URL: {{ include "rulebricks-chart.redis.httpUrl" . | quote }}
   KV_REST_API_TOKEN: {{ include "rulebricks-chart.redis.httpToken" . | quote }}
-  # Raw redis URL for direct Redis clients
+  # Raw redis:// URL for direct Valkey/Redis-compatible clients
   REDIS_URL: {{ include "rulebricks-chart.redis.connectionString" . | quote }}
   {{- end }}
   NODE_ENV: "production"

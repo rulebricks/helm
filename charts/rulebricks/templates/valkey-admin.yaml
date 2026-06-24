@@ -1,0 +1,218 @@
+{{- $cache := .Values.cache | default dict -}}
+{{- $admin := $cache.valkeyAdmin | default dict -}}
+{{- if $admin.enabled }}
+{{- $name := include "rulebricks-chart.valkeyAdmin.fullname" . -}}
+{{- $image := $admin.image | default dict -}}
+{{- $service := $admin.service | default dict -}}
+{{- $resources := $admin.resources | default dict -}}
+{{- $servicePort := ($service.port | default 8080) -}}
+{{- $ingress := $admin.ingress | default dict -}}
+{{- $basicAuth := $ingress.basicAuth | default dict -}}
+{{- $basicAuthSecret := $basicAuth.existingSecret | default (printf "%s-basic-auth" $name) -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey-admin
+spec:
+  replicas: {{ $admin.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: valkey-admin
+        {{- if and .Values.global .Values.global.podLabels }}
+        {{- toYaml .Values.global.podLabels | nindent 8 }}
+        {{- end }}
+        {{- with $admin.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $admin.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with $admin.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $admin.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $admin.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: valkey-admin
+          image: {{ printf "%s:%s" ($image.repository | default "valkey/valkey-admin") ($image.tag | default "1.0.1") | quote }}
+          imagePullPolicy: {{ $image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: DEPLOYMENT_MODE
+              value: "Web"
+            - name: VALKEY_HOST
+              {{- if .Values.redis.enabled }}
+              value: {{ include "rulebricks-chart.redis.fullname" . | quote }}
+              {{- else }}
+              value: {{ .Values.redis.external.host | quote }}
+              {{- end }}
+            - name: VALKEY_PORT
+              {{- if .Values.redis.enabled }}
+              value: "6379"
+              {{- else }}
+              value: {{ .Values.redis.external.port | default 6379 | quote }}
+              {{- end }}
+            - name: VALKEY_TLS
+              value: {{ ternary "true" "false" (and (not .Values.redis.enabled) .Values.redis.external .Values.redis.external.tls .Values.redis.external.tls.enabled) | quote }}
+            {{- if eq (include "rulebricks-chart.redis.hasAuth" .) "true" }}
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- include "rulebricks-chart.redis.passwordSecretRef" . | nindent 18 }}
+            {{- end }}
+            {{- with $admin.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml $resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey-admin
+spec:
+  type: {{ $service.type | default "ClusterIP" }}
+  ports:
+    - name: http
+      port: {{ $servicePort }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- if and (eq ($admin.exposure | default "internal") "ingress") $ingress.enabled (not $basicAuth.existingSecret) $basicAuth.users }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $basicAuthSecret }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey-admin
+type: Opaque
+stringData:
+  users: |-
+    {{- range $basicAuth.users }}
+    {{ . }}
+    {{- end }}
+{{- end }}
+{{- if and (eq ($admin.exposure | default "internal") "ingress") $ingress.enabled }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $name }}-basic-auth
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey-admin
+spec:
+  basicAuth:
+    secret: {{ $basicAuthSecret }}
+{{- if $ingress.allowedIPs }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $name }}-ip-whitelist
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey-admin
+spec:
+  ipWhiteList:
+    sourceRange:
+      {{- range $ingress.allowedIPs }}
+      - {{ . | quote }}
+      {{- end }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey-admin
+  annotations:
+    {{- with $ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if and .Values.global .Values.global.externalDnsEnabled }}
+    external-dns.alpha.kubernetes.io/hostname: {{ $ingress.hostname | default (printf "valkey-admin.%s" .Values.global.domain) }}
+    external-dns.alpha.kubernetes.io/ttl: "300"
+    {{- end }}
+    {{- $middlewares := list (printf "%s-%s-basic-auth@kubernetescrd" .Release.Namespace $name) -}}
+    {{- if $ingress.allowedIPs }}
+      {{- $middlewares = append $middlewares (printf "%s-%s-ip-whitelist@kubernetescrd" .Release.Namespace $name) -}}
+    {{- end }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ join "," $middlewares }}
+    {{- if eq (include "rulebricks-chart.tlsEnabled" .) "true" }}
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    {{- else }}
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.tls: "false"
+    {{- end }}
+spec:
+  ingressClassName: {{ $ingress.className | default "traefik" }}
+  {{- if eq (include "rulebricks-chart.tlsEnabled" .) "true" }}
+  tls:
+    - hosts:
+        - {{ $ingress.hostname | default (printf "valkey-admin.%s" .Values.global.domain) }}
+      secretName: {{ include "rulebricks-chart.tls.secretName" . }}
+  {{- end }}
+  rules:
+    - host: {{ $ingress.hostname | default (printf "valkey-admin.%s" .Values.global.domain) | quote }}
+      http:
+        paths:
+          - path: {{ $ingress.path | default "/" }}
+            pathType: {{ $ingress.pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  number: {{ $servicePort }}
+{{- end }}
+{{- end }}

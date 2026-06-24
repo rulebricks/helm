@@ -197,21 +197,42 @@ All service references MUST use these helpers
 */}}
 
 {{/*
-Redis service name
+Valkey service name (redis suffix retained for compatibility)
 */}}
 {{- define "rulebricks-chart.redis.fullname" -}}
 {{- printf "%s-redis" .Release.Name | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
-Serverless Redis HTTP service name
+Serverless Redis-compatible HTTP service name
 */}}
 {{- define "rulebricks-chart.serverless-redis-http.fullname" -}}
 {{- printf "%s-serverless-redis-http" .Release.Name | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
-Redis PVC name
+Valkey Admin console service name
+*/}}
+{{- define "rulebricks-chart.valkeyAdmin.fullname" -}}
+{{- printf "%s-valkey-admin" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Redis/Valkey exporter service name
+*/}}
+{{- define "rulebricks-chart.redisExporter.fullname" -}}
+{{- printf "%s-redis-exporter" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Kafka exporter service name
+*/}}
+{{- define "rulebricks-chart.kafkaExporter.fullname" -}}
+{{- printf "%s-kafka-exporter" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Valkey PVC name (redis suffix retained for compatibility)
 */}}
 {{- define "rulebricks-chart.redis.pvc" -}}
 {{- printf "%s-redis-data" .Release.Name | trunc 63 | trimSuffix "-" }}
@@ -450,33 +471,33 @@ Usage: {{ include "rulebricks-chart.scheduling" (dict "Values" .Values "componen
 
 {{/*
 ===========================================
-Redis Connection Helpers
+Valkey/Redis-Compatible Connection Helpers
 ===========================================
 */}}
 
 {{/*
-Redis HTTP API URL
-Returns the URL for the Redis HTTP API (Upstash-compatible)
+Redis-compatible HTTP API URL
+Returns the URL for the Redis-compatible HTTP API (Upstash-compatible)
 Handles both internal serverless-redis-http and external Upstash
 */}}
 {{- define "rulebricks-chart.redis.httpUrl" -}}
 {{- if .Values.redis.enabled }}
-{{- /* Internal Redis - use serverless-redis-http service */ -}}
+{{- /* Internal Valkey - use serverless-redis-http service */ -}}
 http://{{ include "rulebricks-chart.serverless-redis-http.fullname" . }}
 {{- else if .Values.redis.external.httpApi.enabled }}
 {{- /* External HTTP API (e.g., Upstash) */ -}}
 {{- .Values.redis.external.httpApi.url }}
 {{- else }}
-{{- /* External Redis but no HTTP API - use serverless-redis-http bridge */ -}}
+{{- /* External Valkey/Redis-compatible endpoint but no HTTP API - use serverless-redis-http bridge */ -}}
 http://{{ include "rulebricks-chart.serverless-redis-http.fullname" . }}
 {{- end }}
 {{- end }}
 
 {{/*
-Redis connection string
-Returns a redis:// or rediss:// connection URL for internal or external Redis.
+Redis-compatible connection string
+Returns a redis:// or rediss:// connection URL for internal Valkey or an external compatible endpoint.
 This form omits credentials; use rulebricks-chart.redis.connectionStringAuth when
-external Redis requires a password so the secret is injected at runtime instead.
+the external endpoint requires a password so the secret is injected at runtime instead.
 */}}
 {{- define "rulebricks-chart.redis.connectionString" -}}
 {{- if .Values.redis.enabled }}
@@ -490,8 +511,8 @@ redis://{{ include "rulebricks-chart.redis.fullname" . }}:6379
 {{- end }}
 
 {{/*
-Redis external auth detection
-Returns "true" when using external Redis (redis.enabled: false) that is protected by
+Valkey/Redis-compatible external auth detection
+Returns "true" when using an external endpoint (redis.enabled: false) that is protected by
 a password, supplied either inline (external.password) or via an existing secret
 (external.existingSecret). Empty string otherwise.
 */}}
@@ -504,7 +525,7 @@ true
 {{- end }}
 
 {{/*
-Redis connection string with runtime password substitution
+Redis-compatible connection string with runtime password substitution
 Emits a literal $(REDIS_PASSWORD) reference that Kubernetes expands from the
 REDIS_PASSWORD env var at container start, so the password never lands in a ConfigMap.
 The consuming container must define REDIS_PASSWORD (from a Secret) earlier in its env list.
@@ -518,7 +539,7 @@ Note: passwords are not URL-encoded; use URL-safe credentials or an existing sec
 {{- end }}
 
 {{/*
-Redis password Secret reference
+Valkey/Redis-compatible password Secret reference
 Returns a secretKeyRef (name + key) block body for the REDIS_PASSWORD env var.
 Uses the user-provided existing secret when set, otherwise the chart-managed app secret.
 */}}
@@ -533,18 +554,18 @@ key: REDIS_PASSWORD
 {{- end }}
 
 {{/*
-Redis HTTP API Token
-Returns the token for authenticating to the Redis HTTP API
+Redis-compatible HTTP API Token
+Returns the token for authenticating to the Redis-compatible HTTP API
 */}}
 {{- define "rulebricks-chart.redis.httpToken" -}}
 {{- if .Values.redis.enabled }}
-{{- /* Internal Redis - default token */ -}}
+{{- /* Internal Valkey - default token */ -}}
 local_redis
 {{- else if .Values.redis.external.httpApi.enabled }}
 {{- /* External HTTP API token */ -}}
 {{- .Values.redis.external.httpApi.token }}
 {{- else }}
-{{- /* External Redis but no HTTP API - use serverless-redis-http bridge */ -}}
+{{- /* External Valkey/Redis-compatible endpoint but no HTTP API - use serverless-redis-http bridge */ -}}
 local_redis
 {{- end }}
 {{- end }}

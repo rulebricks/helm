@@ -458,17 +458,20 @@ rulebricks:
       lagThreshold: 300
       cpuThreshold: 60
     # Pre-pull HPS server + worker images onto every node so burst scale-outs
-    # skip the 20-40s image pull on freshly provisioned (incl. spot) nodes.
+    # skip the 20-40s image pull on freshly provisioned nodes.
     # Innocuous by design: near-zero requests, separate DaemonSet (a bad pull
-    # never blocks real workloads). Tolerations are broad on purpose so the
-    # prepull reaches EVERY node (spot/arch-tainted pools); scope it with
-    # nodeSelector/tolerations if you only want it on the burst pool.
+    # never blocks real workloads). Tolerations are explicit so the prepull
+    # reaches active burst/architecture pools without targeting shutdown,
+    # out-of-service, or unreachable nodes.
     imagePrepull:
       enabled: true
       # pauseImage: registry.k8s.io/pause:3.9
       # nodeSelector: {}
       # tolerations:
-      #   - operator: Exists
+      #   - key: rulebricks.com/pool
+      #     operator: Equal
+      #     value: burst
+      #     effect: NoSchedule
       # resources:
       #   init:
       #     requests: { cpu: 10m, memory: 32Mi }
@@ -561,7 +564,7 @@ rulebricks:
       - path: /
         pathType: Prefix
 
-  # Redis is used heavily
+  # Valkey-backed cache (redis key retained for compatibility)
   redis:
     podLabels:
       rulebricks.com/workload-group: infrastructure
@@ -576,6 +579,34 @@ rulebricks:
       enabled: true
       size: "4Gi"
       storageClass: gp3
+
+  # Optional Valkey observability and management.
+  cache:
+    valkeyAdmin:
+      # Official Valkey Admin web console (Apache-2.0). Disabled by default and
+      # internal-only unless explicitly exposed through authenticated ingress.
+      enabled: false
+      exposure: internal # internal | ingress
+      ingress:
+        enabled: false
+        # Defaults to valkey-admin.<global.domain> when exposure=ingress.
+        hostname: ""
+        basicAuth:
+          # Traefik BasicAuth users in htpasswd format. The CLI should generate
+          # this so plaintext passwords never land in values.yaml.
+          users: []
+        allowedIPs: []
+      podLabels:
+        rulebricks.com/workload-group: infrastructure
+    redisExporter:
+      enabled: true
+      podLabels:
+        rulebricks.com/workload-group: infrastructure
+
+  kafkaExporter:
+    enabled: true
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
 
 # Message Queue (Kafka)
 kafka:
@@ -827,10 +858,10 @@ traefik:
     prometheus:
       enabled: true
       serviceMonitor:
-        # Traefik validates CRD presence during render. Keep app/HPS/Kafka/
-        # ClickHouse ServiceMonitors on by default and let operators opt into
-        # this after Prometheus Operator CRDs are installed.
-        enabled: false
+        # Edge metrics are important for end-to-end request visibility. The
+        # umbrella chart installs Prometheus Operator CRDs with monitoring, so
+        # keep this on by default for self-hosted installs.
+        enabled: true
   # Distributed tracing (Traefik v3 OTLP). When global.tracing.enabled, the
   # ingress becomes the ROOT span of every request and propagates the W3C
   # traceparent header to the app/HPS backends - so a trace shows the full
@@ -1102,27 +1133,30 @@ kafkaBridge:
 # =============================================================================
 # APPLICATION / CONTAINER LOG SHIPPING (Vector agent DaemonSet)
 # A SECOND Vector deployment (role: Agent) that tails all Kubernetes pod logs
-# (kubernetes_logs source) and ships them to a customer-managed Elasticsearch
-# (BYO; e.g. the Elastic add-on from AWS Marketplace). This is DISTINCT from the
+# (kubernetes_logs source) and ships them to a customer-managed log backend
+# (BYO Elasticsearch/Kibana, Grafana Loki, or generic HTTP). This is DISTINCT from the
 # decision-log `vector` aggregator above (Kafka -> object storage/ClickHouse);
 # decision logs stay in ClickHouse and are NOT double-written to Elastic.
 #
 # The agent parses structured JSON log lines and lifts trace_id/span_id so app
-# logs join distributed traces in Kibana. Disabled by default; the CLI generates
-# the elasticsearch sink (endpoint + auth) from features.logging.appLogs. For
-# hand-installs, enable below and replace the console sink with an elasticsearch
-# sink (commented example included).
+# logs join distributed traces in Kibana/Grafana. Disabled by default; the CLI
+# generates the sink (Elasticsearch, Loki, or generic HTTP) from
+# features.logging.appLogs. For hand-installs, enable below and replace the
+# console sink with a backend sink (examples included).
 # =============================================================================
 vector-agent:
   enabled: false
   role: "Agent"
   podLabels:
     rulebricks.com/workload-group: infrastructure
-  # Tolerate every taint so the DaemonSet runs on ALL nodes - including the
-  # tainted burst/spot pools where HPS workers land and ARM64-tainted nodes.
-  # Without this the agent would silently miss worker (rule-evaluation) logs.
+  # Tolerate active Rulebricks worker pools without tolerating shutdown,
+  # out-of-service, or unreachable node taints. Add explicit architecture
+  # tolerations here if those pools are tainted.
   tolerations:
-    - operator: Exists
+    - key: rulebricks.com/pool
+      operator: Equal
+      value: burst
+      effect: NoSchedule
   resources:
     requests:
       cpu: "100m"
@@ -1192,6 +1226,28 @@ vector-agent:
       #   #     Authorization: "ApiKey <base64-api-key>"
       #   tls:
       #     verify_certificate: true
+      # ==== Loki sink (CLI-generated; hand-install example) ====
+      # loki:
+      #   type: loki
+      #   inputs:
+      #     - app_logs
+      #   endpoint: "https://<your-loki-host>/loki/api/v1/push"
+      #   labels:
+      #     app: rulebricks
+      #     namespace: "{{ namespace }}"
+      #     pod: "{{ pod }}"
+      #     container: "{{ container }}"
+      #   encoding:
+      #     codec: json
+      # ==== Generic HTTP sink (CLI-generated; hand-install example) ====
+      # generic_http:
+      #   type: http
+      #   inputs:
+      #     - app_logs
+      #   uri: "https://logs.example.com/ingest"
+      #   method: post
+      #   encoding:
+      #     codec: json
 
 # =============================================================================
 # SELF-HOSTED DATABASE SETTINGS (Supabase)

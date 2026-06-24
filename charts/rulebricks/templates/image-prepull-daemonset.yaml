@@ -1,6 +1,6 @@
 {{- /*
 Image pre-pull DaemonSet: warms the HPS server and worker images onto every
-node (including freshly autoscaled and spot nodes) so the first real pod on a
+node (including freshly autoscaled burst nodes) so the first real pod on a
 new node skips the 20-40s image pull during a burst scale-out. initContainers
 run `node -e ""` (both images are Node-based) and exit immediately; the pause
 main container keeps the DaemonSet pod resident so the kubelet retains the
@@ -40,10 +40,11 @@ spec:
     spec:
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}
-      {{- /* Reach every node by default (spot pools, arch-tainted pools, etc.).
-           Override prepull.tolerations / prepull.nodeSelector to scope the
-           prepull to a subset of nodes (e.g. a burst pool only). */}}
-      {{- $prepullTolerations := $prepull.tolerations | default (list (dict "operator" "Exists")) }}
+      {{- /* Reach the Rulebricks burst pool by default without tolerating
+           shutdown, out-of-service, or unreachable node taints. Add explicit
+           prepull.tolerations for architecture taints when needed. */}}
+      {{- $defaultPrepullTolerations := list (dict "key" "rulebricks.com/pool" "operator" "Equal" "value" "burst" "effect" "NoSchedule") }}
+      {{- $prepullTolerations := $prepull.tolerations | default $defaultPrepullTolerations }}
       tolerations:
         {{- toYaml $prepullTolerations | nindent 8 }}
       {{- with $prepull.nodeSelector }}

@@ -466,7 +466,7 @@ To send rule execution logs to S3:
 
 The default chart does not require node labels, taints, architecture selectors, hard affinity, or multiple nodes. A single shared node pool is supported as long as the cluster has enough CPU, memory, and storage for the requested pods.
 
-By default, pod templates are labeled with `rulebricks.com/workload-group`. Infrastructure includes the frontend app, Redis, Kafka, Supabase, Traefik, KEDA, cert-manager, and Vector. The compute path is HPS and HPS workers.
+By default, pod templates are labeled with `rulebricks.com/workload-group`. Infrastructure includes the frontend app, Valkey, Kafka, Supabase, Traefik, KEDA, cert-manager, and Vector. The compute path is HPS and HPS workers.
 
 HPS and HPS workers use soft pod anti-affinity to prefer nodes that do not already run `rulebricks.com/workload-group=infrastructure` pods. This keeps one-node deployments valid while biasing CPU-intensive compute pods away from core services when additional nodes are available.
 
@@ -590,9 +590,9 @@ For Gateway API, set `supabase.studio.ingress.type: gateway-api` and configure `
 </details>
 
 <details>
-<summary><strong>External Redis</strong></summary>
+<summary><strong>External Valkey / Redis-Compatible Cache</strong></summary>
 
-Use an external/managed Redis instance (ElastiCache, Azure Cache for Redis, Memorystore, Upstash, etc.) instead of the bundled deployment. Set `rulebricks.redis.enabled: false` and provide connection details under `rulebricks.redis.external`.
+Use an external/managed Valkey or Redis-compatible endpoint instead of the bundled Valkey deployment. Set `rulebricks.redis.enabled: false` and provide connection details under `rulebricks.redis.external`. The `redis` key is retained for compatibility with existing chart values.
 
 Basic TCP connection with inline password:
 
@@ -601,7 +601,7 @@ rulebricks:
   redis:
     enabled: false
     external:
-      host: "redis.example.com"
+      host: "valkey.example.com"
       port: 6379
       password: "super-secret"   # injected at runtime; never written to a ConfigMap
       tls:
@@ -615,8 +615,8 @@ rulebricks:
   redis:
     enabled: false
     external:
-      host: "redis.example.com"
-      existingSecret: "my-redis-auth"
+      host: "valkey.example.com"
+      existingSecret: "my-valkey-auth"
       existingSecretKey: "redis-password"
       tls:
         enabled: true
@@ -629,7 +629,7 @@ rulebricks:
   redis:
     enabled: false
     external:
-      host: "redis.example.com"   # still required for the direct Redis client
+      host: "valkey.example.com"  # still required for the direct Valkey/Redis-compatible client
       httpApi:
         enabled: true
         # inline:
@@ -641,7 +641,7 @@ rulebricks:
         existingSecretTokenKey: "redis-token"
 ```
 
-When `rulebricks.redis.enabled` is `false`, the chart skips the internal Redis Deployment/Service/PVC and points both the app and the `serverless-redis-http` bridge at your external instance. Passwords are injected via env at container start (using `$(REDIS_PASSWORD)` expansion) so they never land in a ConfigMap. The schema requires `external.host` to be set whenever Redis is disabled.
+When `rulebricks.redis.enabled` is `false`, the chart skips the internal Valkey Deployment and Redis-compatible Service/PVC names, then points both the app and the `serverless-redis-http` bridge at your external instance. Passwords are injected via env at container start (using `$(REDIS_PASSWORD)` expansion) so they never land in a ConfigMap. The schema requires `external.host` to be set whenever the bundled cache is disabled.
 
 </details>
 

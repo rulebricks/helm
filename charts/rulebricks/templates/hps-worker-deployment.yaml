@@ -86,8 +86,8 @@ spec:
       {{- /* Tolerations: component-level overrides global. The burst-pool
            toleration is ALWAYS appended (additive): cluster-setup can provide
            a dedicated worker pool tainted rulebricks.com/pool=burst:NoSchedule
-           (one big Deallocate-parked node, a spot pool, or a Karpenter
-           NodePool), and workers must be able to land there. On clusters
+           (one large parked/on-demand node, or a future Karpenter NodePool),
+           and workers must be able to land there. On clusters
            without that taint the toleration is inert. */ -}}
       {{- $workerTolerations := .Values.hps.workers.tolerations | default list }}
       {{- if and (not $workerTolerations) .Values.global .Values.global.scheduling }}

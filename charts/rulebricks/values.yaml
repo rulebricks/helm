@@ -164,12 +164,15 @@ hps:
     enabled: true
     # Resident container that keeps the pulled images on the node.
     pauseImage: registry.k8s.io/pause:3.9
-    # Broad by default so the prepull reaches every node (spot pools,
-    # arch-tainted pools, etc.). Scope it by overriding nodeSelector and/or
-    # tolerations (e.g. to a dedicated burst pool).
+    # Tolerate the Rulebricks burst pool without tolerating shutdown,
+    # out-of-service, or unreachable node taints. Add explicit architecture
+    # tolerations here if those pools are tainted.
     nodeSelector: {}
     tolerations:
-      - operator: Exists
+      - key: rulebricks.com/pool
+        operator: Equal
+        value: burst
+        effect: NoSchedule
     # Near-zero footprint so the DaemonSet never affects bin-packing.
     resources:
       init:
@@ -266,9 +269,10 @@ hps:
       cooldownPeriod: 300 # Wait before scaling down (seconds)
 
 redis:
-  # Deploy internal Redis (set to false to use external)
+  # Deploy bundled Valkey (set to false to use an external Valkey/Redis-compatible endpoint).
+  # The redis key is retained for compatibility with existing chart overrides.
   enabled: true
-  tag: "7.2"
+  tag: "9.1.0"
   persistence:
     enabled: true
     size: "4Gi"
@@ -280,7 +284,7 @@ redis:
   resources: {}
   livenessProbe: {}
   readinessProbe: {}
-  # Serverless Redis HTTP configuration
+  # Serverless Redis-compatible HTTP bridge configuration
   serverlessHttp:
     resources: {}
     livenessProbe: {}
@@ -293,9 +297,9 @@ redis:
     limits:
       cpu: "500m"
       memory: "4Gi"
-  # External Redis configuration (used when redis.enabled: false)
+  # External Valkey/Redis-compatible configuration (used when redis.enabled: false)
   external:
-    # Host of the external Redis server
+    # Host of the external Valkey/Redis-compatible server
     host: ""
     # Port (default: 6379)
     port: 6379
@@ -307,15 +311,112 @@ redis:
     # TLS configuration
     tls:
       enabled: false
-    # For Upstash/serverless Redis HTTP API
+    # For Upstash/serverless Redis-compatible HTTP API
     httpApi:
-      # If using Upstash or similar HTTP-based Redis
+      # If using Upstash or a similar HTTP-based Redis-compatible service
       enabled: false
       url: ""
       token: ""
       existingSecret: ""
       existingSecretUrlKey: "redis-url"
       existingSecretTokenKey: "redis-token"
+
+cache:
+  valkeyAdmin:
+    # Official Valkey Admin web console (Apache-2.0). Disabled by default.
+    enabled: false
+    image:
+      repository: valkey/valkey-admin
+      tag: "1.0.1"
+      pullPolicy: IfNotPresent
+    replicas: 1
+    # "internal" renders only a ClusterIP service. Operators can use
+    # kubectl port-forward for zero public surface. "ingress" requires
+    # BasicAuth users and exposes the console behind Traefik.
+    exposure: internal # internal | ingress
+    service:
+      type: ClusterIP
+      port: 8080
+    ingress:
+      enabled: false
+      className: traefik
+      hostname: "" # Defaults to valkey-admin.<global.domain>
+      annotations: {}
+      path: /
+      pathType: Prefix
+      basicAuth:
+        # Traefik BasicAuth users in htpasswd format. The CLI should generate
+        # this so plaintext passwords never land in values.yaml.
+        users: []
+        existingSecret: ""
+        existingSecretKey: users
+      allowedIPs: []
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    podLabels: {}
+    podAnnotations: {}
+  redisExporter:
+    enabled: true
+    image:
+      repository: oliver006/redis_exporter
+      tag: "v1.66.0"
+      pullPolicy: IfNotPresent
+    service:
+      port: 9121
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      scrapeTimeout: 10s
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "250m"
+        memory: "256Mi"
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    podLabels: {}
+    podAnnotations: {}
+
+kafkaExporter:
+  enabled: true
+  image:
+    repository: danielqsj/kafka-exporter
+    tag: "v1.9.0"
+    pullPolicy: IfNotPresent
+  service:
+    port: 9308
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+  # Empty means the chart derives the in-cluster Kafka service. For external
+  # Kafka, set comma-separated bootstrap brokers here or via the CLI mapping.
+  brokers: ""
+  topicFilter: ".*"
+  groupFilter: ".*"
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podLabels: {}
+  podAnnotations: {}
 
 ingress:
   enabled: true

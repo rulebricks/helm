@@ -1,0 +1,129 @@
+{{- $cache := .Values.cache | default dict -}}
+{{- $exporter := $cache.redisExporter | default dict -}}
+{{- if $exporter.enabled }}
+{{- $name := include "rulebricks-chart.redisExporter.fullname" . -}}
+{{- $image := $exporter.image | default dict -}}
+{{- $service := $exporter.service | default dict -}}
+{{- $resources := $exporter.resources | default dict -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: redis-exporter
+        {{- if and .Values.global .Values.global.podLabels }}
+        {{- toYaml .Values.global.podLabels | nindent 8 }}
+        {{- end }}
+        {{- with $exporter.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $exporter.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with $exporter.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $exporter.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $exporter.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: redis-exporter
+          image: {{ printf "%s:%s" ($image.repository | default "oliver006/redis_exporter") ($image.tag | default "v1.66.0") | quote }}
+          imagePullPolicy: {{ $image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: metrics
+              containerPort: 9121
+              protocol: TCP
+          env:
+            - name: REDIS_ADDR
+              value: {{ include "rulebricks-chart.redis.connectionString" . | quote }}
+            {{- if eq (include "rulebricks-chart.redis.hasAuth" .) "true" }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- include "rulebricks-chart.redis.passwordSecretRef" . | nindent 18 }}
+            {{- end }}
+            {{- with $exporter.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml $resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-exporter
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: {{ $service.port | default 9121 }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- $serviceMonitor := $exporter.serviceMonitor | default dict -}}
+{{- if and ($serviceMonitor.enabled | default true) .Values.metrics .Values.metrics.serviceMonitor .Values.metrics.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-exporter
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: redis-exporter
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ $serviceMonitor.interval | default .Values.metrics.serviceMonitor.interval | default "30s" }}
+      scrapeTimeout: {{ $serviceMonitor.scrapeTimeout | default .Values.metrics.serviceMonitor.scrapeTimeout | default "10s" }}
+{{- end }}
+{{- end }}

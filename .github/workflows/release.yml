@@ -80,7 +80,7 @@ jobs:
             --set global.email=ops@example.com \
             --set rulebricks.ingress.enabled=false
 
-      - name: Template External Redis And Auth Install
+      - name: Template External Valkey And Auth Install
         run: |
           helm template rulebricks . \
             --namespace rulebricks \
@@ -88,7 +88,7 @@ jobs:
             --set global.email=ops@example.com \
             --set global.externalAuth.enabled=true \
             --set rulebricks.redis.enabled=false \
-            --set rulebricks.redis.external.host=redis.example.com
+            --set rulebricks.redis.external.host=valkey.example.com
 
   changes:
     name: Detect Release Changes
