@@ -857,6 +857,7 @@ traefik:
   metrics:
     prometheus:
       enabled: true
+      disableAPICheck: true
       serviceMonitor:
         # Edge metrics are important for end-to-end request visibility. The
         # umbrella chart installs Prometheus Operator CRDs with monitoring, so
