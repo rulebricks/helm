@@ -5,6 +5,13 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      release_chart:
+        description: Force a chart release even when path filters would not match
+        required: true
+        default: true
+        type: boolean
 
 env:
   REGISTRY: ghcr.io
@@ -93,14 +100,15 @@ jobs:
   changes:
     name: Detect Release Changes
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     outputs:
-      chart: ${{ steps.filter.outputs.chart }}
+      chart: ${{ github.event_name == 'workflow_dispatch' && inputs.release_chart || steps.filter.outputs.chart }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Detect Chart Release Changes
+        if: github.event_name == 'push'
         id: filter
         uses: dorny/paths-filter@v3
         with:
@@ -110,6 +118,7 @@ jobs:
             chart:
               - 'Chart.yaml'
               - 'Chart.lock'
+              - 'values.yaml'
               - 'values.schema.json'
               - 'templates/**'
               - 'charts/**'
@@ -122,7 +131,7 @@ jobs:
     needs:
       - validate
       - changes
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.chart == 'true'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.chart == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: helm-chart-release
