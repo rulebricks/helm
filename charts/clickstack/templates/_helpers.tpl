@@ -23,6 +23,11 @@ app.kubernetes.io/name: {{ include "clickstack.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{- define "clickstack.collector.selectorLabels" -}}
+app.kubernetes.io/name: otel-collector
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
 {{- define "clickstack.secretName" -}}
 {{- printf "%s-secrets" (include "clickstack.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}

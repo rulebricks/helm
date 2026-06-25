@@ -19,8 +19,6 @@ data:
             endpoint: 0.0.0.0:4317
           http:
             endpoint: 0.0.0.0:4318
-      prometheusremotewrite:
-        endpoint: 0.0.0.0:9090
     processors:
       memory_limiter:
         check_interval: 1s
@@ -88,7 +86,7 @@ data:
           processors: [memory_limiter, resource, batch]
           exporters: [clickhouse]
         metrics:
-          receivers: [otlp, prometheusremotewrite]
+          receivers: [otlp]
           processors: [memory_limiter, resource, batch]
           exporters: [clickhouse]
 ---
@@ -104,7 +102,7 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    {{- include "clickstack.selectorLabels" . | nindent 4 }}
+    {{- include "clickstack.collector.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: collector-gateway
   ports:
     - name: otlp-grpc
@@ -114,10 +112,6 @@ spec:
     - name: otlp-http
       port: 4318
       targetPort: otlp-http
-      protocol: TCP
-    - name: prometheus-rw
-      port: 9090
-      targetPort: prometheus-rw
       protocol: TCP
 ---
 apiVersion: apps/v1
@@ -133,17 +127,16 @@ spec:
   replicas: {{ .Values.collector.gateway.replicas }}
   selector:
     matchLabels:
-      {{- include "clickstack.selectorLabels" . | nindent 6 }}
+      {{- include "clickstack.collector.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: collector-gateway
   template:
     metadata:
       labels:
-        {{- include "clickstack.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/name: otel-collector
-        app.kubernetes.io/component: collector-gateway
         {{- with .Values.collector.gateway.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- include "clickstack.collector.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: collector-gateway
       annotations:
         {{- with .Values.collector.gateway.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -177,9 +170,9 @@ spec:
               containerPort: 4317
             - name: otlp-http
               containerPort: 4318
-            - name: prometheus-rw
-              containerPort: 9090
           env:
+            - name: CUSTOM_OTELCOL_CONFIG_FILE
+              value: /etc/otelcol/config.yaml
             - name: CLICKHOUSE_ENDPOINT
               value: {{ include "clickstack.clickhouse.httpEndpoint" . | quote }}
             - name: CLICKHOUSE_NATIVE_ENDPOINT

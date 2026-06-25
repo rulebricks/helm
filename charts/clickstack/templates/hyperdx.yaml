@@ -206,11 +206,11 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "clickstack.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: hyperdx
         {{- with .Values.hyperdx.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- include "clickstack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: hyperdx
       annotations:
         {{- with .Values.hyperdx.podAnnotations }}
         {{- toYaml . | nindent 8 }}

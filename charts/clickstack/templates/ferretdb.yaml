@@ -36,11 +36,11 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "clickstack.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: ferretdb
         {{- with .Values.ferretdb.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- include "clickstack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ferretdb
       annotations:
         {{- with .Values.ferretdb.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -75,6 +75,8 @@ spec:
               value: {{ .Values.ferretdb.auth.username | default "hyperdx" | quote }}
             - name: POSTGRES_DB
               value: "postgres"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:

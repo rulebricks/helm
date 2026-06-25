@@ -113,7 +113,7 @@ clickstack:
     enabled: true
     image:
       repository: docker.io/rulebricks/hyperdx
-      tag: "2.8.0"
+      tag: "2.19.0"
     resources:
       requests:
         cpu: 250m
@@ -129,7 +129,7 @@ clickstack:
   collector:
     image:
       repository: docker.io/rulebricks/clickstack-otel-collector
-      tag: "2.8.0"
+      tag: "2.19.0"
     memoryLimitMiB: 800
     gateway:
       replicas: 1
@@ -153,10 +153,10 @@ clickstack:
     enabled: true
     image:
       repository: docker.io/rulebricks/ferretdb
-      tag: "2.8.0"
+      tag: "2.7.0"
     postgresImage:
       repository: docker.io/rulebricks/postgres-documentdb
-      tag: "17-0.108.0-ferretdb-2.8.0"
+      tag: "17-0.107.0-ferretdb-2.7.0"
     auth:
       username: hyperdx
       password: ""

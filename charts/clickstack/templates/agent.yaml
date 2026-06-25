@@ -102,16 +102,16 @@ metadata:
 spec:
   selector:
     matchLabels:
-      {{- include "clickstack.selectorLabels" . | nindent 6 }}
+      {{- include "clickstack.collector.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: collector-agent
   template:
     metadata:
       labels:
-        {{- include "clickstack.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: collector-agent
         {{- with .Values.collector.agent.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- include "clickstack.collector.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: collector-agent
       annotations:
         {{- with .Values.collector.agent.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -141,6 +141,23 @@ spec:
           args:
             - --config=/etc/otelcol/config.yaml
           env:
+            - name: CUSTOM_OTELCOL_CONFIG_FILE
+              value: /etc/otelcol/config.yaml
+            - name: OPAMP_SERVER_URL
+              value: {{ printf "http://%s:%d" (include "clickstack.hyperdx.fullname" .) (int .Values.hyperdx.ports.opamp) | quote }}
+            - name: CLICKHOUSE_ENDPOINT
+              value: {{ include "clickstack.clickhouse.httpEndpoint" . | quote }}
+            - name: CLICKHOUSE_NATIVE_ENDPOINT
+              value: {{ include "clickstack.clickhouse.nativeEndpoint" . | quote }}
+            - name: CLICKHOUSE_USER
+              value: {{ .Values.clickhouse.username | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clickstack.clickhouse.passwordSecretName" . }}
+                  key: {{ .Values.clickhouse.existingSecretKey | default "admin-password" }}
+            - name: HYPERDX_OTEL_EXPORTER_CLICKHOUSE_DATABASE
+              value: {{ .Values.clickhouse.database | default "otel" | quote }}
             - name: K8S_NODE_NAME
               valueFrom:
                 fieldRef:

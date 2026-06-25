@@ -33,6 +33,18 @@ env:
   OS_SHELL_TAG: 12-debian-12-r51
   OS_SHELL_SOURCE_IMAGE: docker.io/bitnamilegacy/os-shell
   OS_SHELL_TARGET_IMAGE: docker.io/rulebricks/os-shell
+  HYPERDX_TAG: 2.19.0
+  HYPERDX_SOURCE_IMAGE: docker.hyperdx.io/hyperdx/hyperdx
+  HYPERDX_TARGET_IMAGE: docker.io/rulebricks/hyperdx
+  CLICKSTACK_OTEL_COLLECTOR_TAG: 2.19.0
+  CLICKSTACK_OTEL_COLLECTOR_SOURCE_IMAGE: docker.clickhouse.com/clickhouse/clickstack-otel-collector
+  CLICKSTACK_OTEL_COLLECTOR_TARGET_IMAGE: docker.io/rulebricks/clickstack-otel-collector
+  FERRETDB_TAG: 2.7.0
+  FERRETDB_SOURCE_IMAGE: ghcr.io/ferretdb/ferretdb
+  FERRETDB_TARGET_IMAGE: docker.io/rulebricks/ferretdb
+  POSTGRES_DOCUMENTDB_TAG: 17-0.107.0-ferretdb-2.7.0
+  POSTGRES_DOCUMENTDB_SOURCE_IMAGE: ghcr.io/ferretdb/postgres-documentdb
+  POSTGRES_DOCUMENTDB_TARGET_IMAGE: docker.io/rulebricks/postgres-documentdb
 
 jobs:
   validate:
@@ -93,9 +105,60 @@ jobs:
             --namespace rulebricks \
             --set global.domain=rulebricks.example.com \
             --set global.email=ops@example.com \
+            --set global.supabase.jwtSecret=test-jwt-secret-with-at-least-32-characters-long \
             --set global.externalAuth.enabled=true \
             --set rulebricks.redis.enabled=false \
             --set rulebricks.redis.external.host=valkey.example.com
+
+      - name: Validate Rendered Workloads And ClickHouse Bootstrap
+        run: |
+          helm template rulebricks . \
+            --namespace rulebricks \
+            --set global.domain=rulebricks.example.com \
+            --set global.email=ops@example.com \
+            > /tmp/rulebricks-rendered.yaml
+
+          ruby -ryaml <<'RUBY'
+          rendered = File.read("/tmp/rulebricks-rendered.yaml")
+          docs = rendered.split(/^---\s*$/).map do |chunk|
+            YAML.load(chunk)
+          rescue Psych::SyntaxError
+            nil
+          end.compact.select { |doc| doc.is_a?(Hash) }
+
+          workload_kinds = ["Deployment", "DaemonSet", "StatefulSet"]
+          mismatches = docs.map do |doc|
+            next unless workload_kinds.include?(doc["kind"])
+            selector = doc.dig("spec", "selector", "matchLabels") || {}
+            labels = doc.dig("spec", "template", "metadata", "labels") || {}
+            missing = selector.reject { |key, value| labels[key] == value }
+            next if missing.empty?
+
+            name = doc.dig("metadata", "name")
+            "#{doc["kind"]}/#{name}: selector labels not present on pod template: #{missing.inspect}"
+          end.compact
+
+          unless mismatches.empty?
+            warn mismatches.join("\n")
+            exit 1
+          end
+
+          bootstrap = docs.find do |doc|
+            doc["kind"] == "Secret" &&
+              doc.dig("metadata", "name").to_s.end_with?("-clickhouse-init-scripts")
+          end
+          script = bootstrap&.dig("stringData", "01-decision-logs-view.sh").to_s
+
+          required = [
+            "CREATE DATABASE IF NOT EXISTS otel",
+            "CREATE OR REPLACE VIEW rulebricks.decision_logs"
+          ]
+          missing = required.reject { |needle| script.include?(needle) }
+          unless missing.empty?
+            warn "ClickHouse bootstrap is missing: #{missing.join(", ")}"
+            exit 1
+          end
+          RUBY
 
   changes:
     name: Detect Release Changes
@@ -170,6 +233,9 @@ jobs:
             clickhouse:
               - 'charts/clickhouse/**'
               - 'scripts/publish-clickhouse-image.sh'
+            clickstack:
+              - 'charts/clickstack/**'
+              - 'scripts/publish-clickstack-images.sh'
             sidecars:
               - 'scripts/publish-bitnami-sidecars.sh'
               - 'charts/kafka/Chart.yaml'
@@ -200,6 +266,27 @@ jobs:
       - name: Skip ClickHouse Publish
         if: steps.image_changes.outputs.clickhouse != 'true'
         run: echo "::notice title=Skipping ClickHouse publish::No relevant files changed in this push."
+
+      - name: Publish ClickStack Images
+        if: steps.image_changes.outputs.clickstack == 'true'
+        env:
+          HYPERDX_TAG: ${{ env.HYPERDX_TAG }}
+          HYPERDX_SOURCE_IMAGE: ${{ env.HYPERDX_SOURCE_IMAGE }}
+          HYPERDX_TARGET_IMAGE: ${{ env.HYPERDX_TARGET_IMAGE }}
+          CLICKSTACK_OTEL_COLLECTOR_TAG: ${{ env.CLICKSTACK_OTEL_COLLECTOR_TAG }}
+          CLICKSTACK_OTEL_COLLECTOR_SOURCE_IMAGE: ${{ env.CLICKSTACK_OTEL_COLLECTOR_SOURCE_IMAGE }}
+          CLICKSTACK_OTEL_COLLECTOR_TARGET_IMAGE: ${{ env.CLICKSTACK_OTEL_COLLECTOR_TARGET_IMAGE }}
+          FERRETDB_TAG: ${{ env.FERRETDB_TAG }}
+          FERRETDB_SOURCE_IMAGE: ${{ env.FERRETDB_SOURCE_IMAGE }}
+          FERRETDB_TARGET_IMAGE: ${{ env.FERRETDB_TARGET_IMAGE }}
+          POSTGRES_DOCUMENTDB_TAG: ${{ env.POSTGRES_DOCUMENTDB_TAG }}
+          POSTGRES_DOCUMENTDB_SOURCE_IMAGE: ${{ env.POSTGRES_DOCUMENTDB_SOURCE_IMAGE }}
+          POSTGRES_DOCUMENTDB_TARGET_IMAGE: ${{ env.POSTGRES_DOCUMENTDB_TARGET_IMAGE }}
+        run: bash scripts/publish-clickstack-images.sh
+
+      - name: Skip ClickStack Image Publish
+        if: steps.image_changes.outputs.clickstack != 'true'
+        run: echo "::notice title=Skipping ClickStack image publish::No relevant files changed in this push."
 
       - name: Publish Bitnami Sidecars
         if: steps.image_changes.outputs.sidecars == 'true'

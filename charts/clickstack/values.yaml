@@ -42,7 +42,7 @@ hyperdx:
   replicaCount: 1
   image:
     repository: docker.io/rulebricks/hyperdx
-    tag: "2.8.0"
+    tag: "2.19.0"
     pullPolicy: IfNotPresent
   ports:
     app: 8080
@@ -77,7 +77,7 @@ hyperdx:
 collector:
   image:
     repository: docker.io/rulebricks/clickstack-otel-collector
-    tag: "2.8.0"
+    tag: "2.19.0"
     pullPolicy: IfNotPresent
   memoryLimitMiB: 800
   gateway:
@@ -127,11 +127,11 @@ ferretdb:
   enabled: true
   image:
     repository: docker.io/rulebricks/ferretdb
-    tag: "2.8.0"
+    tag: "2.7.0"
     pullPolicy: IfNotPresent
   postgresImage:
     repository: docker.io/rulebricks/postgres-documentdb
-    tag: "17-0.108.0-ferretdb-2.8.0"
+    tag: "17-0.107.0-ferretdb-2.7.0"
     pullPolicy: IfNotPresent
   auth:
     username: hyperdx
