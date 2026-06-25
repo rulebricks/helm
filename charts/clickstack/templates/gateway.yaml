@@ -1,0 +1,215 @@
+{{- if .Values.enabled -}}
+{{- $retentionDays := .Values.clickhouse.retentionDays | default 7 | int -}}
+{{- $derivedTtl := printf "%dh" (mul $retentionDays 24) -}}
+{{- $ttl := .Values.clickhouse.ttl | default $derivedTtl -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clickstack.collector.gateway.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clickstack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector-gateway
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      prometheusremotewrite:
+        endpoint: 0.0.0.0:9090
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: {{ .Values.collector.memoryLimitMiB | default 800 }}
+        spike_limit_mib: {{ div (.Values.collector.memoryLimitMiB | default 800 | int) 4 }}
+      resource:
+        attributes:
+          - key: deployment.environment
+            value: {{ .Release.Namespace | quote }}
+            action: upsert
+          - key: k8s.cluster.namespace
+            value: {{ .Release.Namespace | quote }}
+            action: upsert
+          - key: rulebricks.observability.backend
+            value: clickstack
+            action: upsert
+      batch:
+        timeout: 5s
+        send_batch_size: 1024
+    exporters:
+      clickhouse:
+        endpoint: ${env:CLICKHOUSE_NATIVE_ENDPOINT}
+        database: ${env:HYPERDX_OTEL_EXPORTER_CLICKHOUSE_DATABASE}
+        username: ${env:CLICKHOUSE_USER}
+        password: ${env:CLICKHOUSE_PASSWORD}
+        create_schema: {{ .Values.clickhouse.createSchema | default true }}
+        ttl: {{ $ttl | quote }}
+        logs_table_name: {{ .Values.clickhouse.logsTableName | default "otel_logs" | quote }}
+        traces_table_name: {{ .Values.clickhouse.tracesTableName | default "otel_traces" | quote }}
+        metrics_tables:
+          gauge:
+            name: {{ .Values.clickhouse.metricsTables.gauge | default "otel_metrics_gauge" | quote }}
+          sum:
+            name: {{ .Values.clickhouse.metricsTables.sum | default "otel_metrics_sum" | quote }}
+          summary:
+            name: {{ .Values.clickhouse.metricsTables.summary | default "otel_metrics_summary" | quote }}
+          histogram:
+            name: {{ .Values.clickhouse.metricsTables.histogram | default "otel_metrics_histogram" | quote }}
+          exponential_histogram:
+            name: {{ .Values.clickhouse.metricsTables.exponentialHistogram | default "otel_metrics_exp_histogram" | quote }}
+        async_insert: true
+        timeout: 10s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+        sending_queue:
+          enabled: true
+          num_consumers: 4
+          queue_size: 5000
+      debug:
+        verbosity: basic
+    service:
+      telemetry:
+        logs:
+          level: info
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [clickhouse]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [clickhouse]
+        metrics:
+          receivers: [otlp, prometheusremotewrite]
+          processors: [memory_limiter, resource, batch]
+          exporters: [clickhouse]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "clickstack.collector.gateway.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clickstack.labels" . | nindent 4 }}
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/component: collector-gateway
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "clickstack.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: collector-gateway
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+      protocol: TCP
+    - name: prometheus-rw
+      port: 9090
+      targetPort: prometheus-rw
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "clickstack.collector.gateway.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clickstack.labels" . | nindent 4 }}
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/component: collector-gateway
+spec:
+  replicas: {{ .Values.collector.gateway.replicas }}
+  selector:
+    matchLabels:
+      {{- include "clickstack.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: collector-gateway
+  template:
+    metadata:
+      labels:
+        {{- include "clickstack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/name: otel-collector
+        app.kubernetes.io/component: collector-gateway
+        {{- with .Values.collector.gateway.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- with .Values.collector.gateway.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "clickstack.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.collector.gateway.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.collector.gateway.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.collector.gateway.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: otel-collector
+          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}"
+          imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
+          args:
+            - --config=/etc/otelcol/config.yaml
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+            - name: prometheus-rw
+              containerPort: 9090
+          env:
+            - name: CLICKHOUSE_ENDPOINT
+              value: {{ include "clickstack.clickhouse.httpEndpoint" . | quote }}
+            - name: CLICKHOUSE_NATIVE_ENDPOINT
+              value: {{ include "clickstack.clickhouse.nativeEndpoint" . | quote }}
+            - name: CLICKHOUSE_USER
+              value: {{ .Values.clickhouse.username | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clickstack.clickhouse.passwordSecretName" . }}
+                  key: {{ .Values.clickhouse.existingSecretKey | default "admin-password" }}
+            - name: HYPERDX_OTEL_EXPORTER_CLICKHOUSE_DATABASE
+              value: {{ .Values.clickhouse.database | default "otel" | quote }}
+            - name: HYPERDX_LOG_LEVEL
+              value: {{ .Values.hyperdx.logLevel | default "info" | quote }}
+            - name: OPAMP_SERVER_URL
+              value: {{ printf "http://%s:%d" (include "clickstack.hyperdx.fullname" .) (int .Values.hyperdx.ports.opamp) | quote }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+              readOnly: true
+          resources:
+            {{- toYaml .Values.collector.gateway.resources | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: otlp-http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "clickstack.collector.gateway.fullname" . }}-config
+{{- end }}

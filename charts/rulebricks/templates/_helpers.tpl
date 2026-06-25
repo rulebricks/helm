@@ -386,7 +386,8 @@ Usage: {{ include "rulebricks-chart.tracing.env" (dict "root" . "serviceName" "r
 {{- $root := .root -}}
 {{- $svc := .serviceName -}}
 {{- $tracing := ($root.Values.global | default dict).tracing | default dict -}}
-{{- if $tracing.enabled -}}
+{{- $clickstack := ($root.Values.global | default dict).clickstack | default dict -}}
+{{- if or $tracing.enabled ($clickstack.enabled | default false) -}}
 - name: OTEL_TRACING_ENABLED
   value: "1"
 - name: OTEL_EXPORTER_OTLP_ENDPOINT

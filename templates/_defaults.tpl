@@ -7,6 +7,14 @@ dominate the user-facing values.yaml.
 timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), trace_id Nullable(String), span_id Nullable(String), request String, response String, decision String, params Nullable(String)
 {{- end -}}
 
+{{- define "rulebricks.clickhouse.decisionLogLocalStructure" -}}
+timestamp DateTime64(3), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), trace_id Nullable(String), span_id Nullable(String), request String, response String, decision String, params Nullable(String)
+{{- end -}}
+
+{{- define "rulebricks.clickhouse.decisionLogSelectColumns" -}}
+timestamp, api_key, user_id, environment, ip, method, url, status, rule_name, rule_id, rule_slug, rule_version, operation, level, error, trace_id, span_id, request, response, decision, params
+{{- end -}}
+
 {{- define "rulebricks.clickhouse.decisionLogStorageXml" -}}
 <clickhouse>
   <named_collections>
@@ -45,6 +53,7 @@ timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), enviro
 
 {{- define "rulebricks.clickhouse.queryLimitsXml" -}}
 {{- $limits := .Values.queryLimits | default dict -}}
+{{- $otelLimits := .Values.otelQueryLimits | default dict -}}
 <clickhouse>
   <profiles>
     <default>
@@ -70,6 +79,13 @@ timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), enviro
              silently lost. */}}
       <use_hive_partitioning>1</use_hive_partitioning>
     </default>
+    <otel>
+      <max_memory_usage>{{ $otelLimits.maxMemoryUsage | default 4294967296 | int64 }}</max_memory_usage>
+      <max_threads>{{ $otelLimits.maxThreads | default 8 | int64 }}</max_threads>
+      <max_execution_time>{{ $otelLimits.maxExecutionTime | default 120 | int64 }}</max_execution_time>
+      <date_time_input_format>best_effort</date_time_input_format>
+      <input_format_skip_unknown_fields>1</input_format_skip_unknown_fields>
+    </otel>
   </profiles>
 </clickhouse>
 {{- end -}}
@@ -88,6 +104,7 @@ This MUST be mounted under users.d (not config.d) to take effect.
 <clickhouse>
   <users>
     <{{ $user }}>
+      <access_management>1</access_management>
       <named_collection_control>1</named_collection_control>
       <show_named_collections>1</show_named_collections>
       <show_named_collections_secrets>1</show_named_collections_secrets>
@@ -97,17 +114,17 @@ This MUST be mounted under users.d (not config.d) to take effect.
 {{- end -}}
 
 {{- /*
-Decision-logs view bootstrap, mounted into the ClickHouse subchart's
+Decision-logs bootstrap, mounted into the ClickHouse subchart's
 initdbScripts. The Bitnami ClickHouse image ONLY runs *.sh init scripts: it
 skips other files with "supported formats are: .sh" and will not even start the
 init flow unless a .sh file is present, so this MUST be a shell script, not raw
 SQL (a prior .sql version was silently never executed -> "Database rulebricks
-does not exist"). It runs clickhouse-client against the locally-started server
-during init; with ClickHouse persistence disabled the data dir is ephemeral, so
-this idempotent script re-creates the database + view on every fresh pod. The
-admin user (CLICKHOUSE_ADMIN_USER) carries the NAMED COLLECTION grants the view
-needs. Keep the rendered output on a SINGLE line: the subchart serializes initdb
-values as a single-quoted YAML scalar, which folds newlines to spaces and would
+does not exist"). It creates:
+  - decision_logs_archive: object-storage external view (durable archive)
+  - decision_logs_recent: local MergeTree cache (query acceleration)
+  - decision_logs: compatibility view used by app/HyperDX
+Keep the rendered output on a SINGLE line: the subchart serializes initdb values
+as a single-quoted YAML scalar, which folds newlines to spaces and would
 otherwise corrupt a multi-line script.
 */ -}}
 {{- define "rulebricks.clickhouse.decisionLogsViewScript" -}}
@@ -118,6 +135,12 @@ otherwise corrupt a multi-line script.
 {{- else if eq $provider "gcs" -}}
 {{- $source = "gcs(decision_logs_gcs)" -}}
 {{- end -}}
+{{- $clickstack := dig "clickstack" dict (.Values.global | default dict) -}}
+{{- $accelerated := $clickstack.enabled | default false -}}
+{{- $decisionLogs := dig "clickstack" "clickhouse" "decisionLogs" dict (.Values.global | default dict) -}}
+{{- $retentionDays := $decisionLogs.retentionDays | default 30 | int -}}
+{{- $fallback := dig "objectStorageFallback" "enabled" true $decisionLogs -}}
+{{- $columns := include "rulebricks.clickhouse.decisionLogSelectColumns" . -}}
 {{- /* The view exposes the Hive path partitions (year/month/day/hour) as stable
        UInt columns so callers can prune by partition. The CAST is deliberate: the
        raw Hive virtual columns come back as LowCardinality with an inference-
@@ -128,7 +151,20 @@ otherwise corrupt a multi-line script.
        use_hive_partitioning + allow_suspicious_low_cardinality_types are passed on
        the create so the columns resolve at bootstrap regardless of profile load
        order. Keep on a SINGLE line (the initdb scalar folds newlines to spaces). */ -}}
-clickhouse-client --host 127.0.0.1 --user "${CLICKHOUSE_ADMIN_USER:-default}" --password "${CLICKHOUSE_ADMIN_PASSWORD:-}" --use_hive_partitioning=1 --allow_suspicious_low_cardinality_types=1 --multiquery "CREATE DATABASE IF NOT EXISTS rulebricks; CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT *, CAST(year AS UInt16) AS year, CAST(month AS UInt8) AS month, CAST(day AS UInt8) AS day, CAST(hour AS UInt8) AS hour FROM {{ $source }};"
+clickhouse-client --host 127.0.0.1 --user "${CLICKHOUSE_ADMIN_USER:-default}" --password "${CLICKHOUSE_ADMIN_PASSWORD:-}" --use_hive_partitioning=1 --allow_suspicious_low_cardinality_types=1 --multiquery "CREATE DATABASE IF NOT EXISTS rulebricks; CREATE OR REPLACE VIEW rulebricks.decision_logs_archive AS SELECT {{ $columns }}, CAST(year AS UInt16) AS year, CAST(month AS UInt8) AS month, CAST(day AS UInt8) AS day, CAST(hour AS UInt8) AS hour FROM {{ $source }}; {{- if $accelerated }} CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent ({{ include "rulebricks.clickhouse.decisionLogLocalStructure" . }}, year UInt16 MATERIALIZED toYear(timestamp), month UInt8 MATERIALIZED toMonth(timestamp), day UInt8 MATERIALIZED toDayOfMonth(timestamp), hour UInt8 MATERIALIZED toHour(timestamp)) ENGINE = MergeTree PARTITION BY toYYYYMM(timestamp) ORDER BY (api_key, timestamp, status) TTL toDateTime(timestamp) + INTERVAL {{ $retentionDays }} DAY DELETE; ALTER TABLE rulebricks.decision_logs_recent MODIFY TTL toDateTime(timestamp) + INTERVAL {{ $retentionDays }} DAY DELETE; {{- if $fallback }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent WHERE timestamp >= now() - INTERVAL {{ $retentionDays }} DAY UNION ALL SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive WHERE timestamp < now() - INTERVAL {{ $retentionDays }} DAY;{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent;{{- end }}{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive;{{- end }}"
+{{- end -}}
+
+{{- /*
+Bootstrap the ClickStack/OpenTelemetry database. The collector owns table
+creation (create_schema=true) so this only ensures the database exists and the
+Rulebricks ClickHouse user can create/insert/select telemetry tables.
+Keep on a SINGLE line for the same initdb scalar reason as the decision-log
+script above.
+*/ -}}
+{{- define "rulebricks.clickhouse.otelDatabaseScript" -}}
+{{- $user := .Values.auth.username | default "rulebricks" -}}
+{{- $db := .Values.otelDatabase | default "otel" -}}
+clickhouse-client --host 127.0.0.1 --user "${CLICKHOUSE_ADMIN_USER:-default}" --password "${CLICKHOUSE_ADMIN_PASSWORD:-}" --multiquery "CREATE DATABASE IF NOT EXISTS {{ $db }}; GRANT ALL ON {{ $db }}.* TO {{ $user }};"
 {{- end -}}
 
 {{- /*

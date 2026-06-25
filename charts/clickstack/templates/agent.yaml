@@ -1,0 +1,170 @@
+{{- if and .Values.enabled .Values.collector.agent.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clickstack.collector.agent.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clickstack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector-agent
+data:
+  config.yaml: |
+    receivers:
+      filelog:
+        include:
+          {{- range .Values.collector.agent.filelog.include }}
+          - {{ . | quote }}
+          {{- end }}
+        exclude:
+          {{- range .Values.collector.agent.filelog.exclude }}
+          - {{ . | quote }}
+          {{- end }}
+        start_at: end
+        include_file_path: true
+        include_file_name: false
+        operators:
+          - type: container
+      hostmetrics:
+        collection_interval: 30s
+        scrapers:
+          cpu: {}
+          memory: {}
+          disk: {}
+          filesystem: {}
+          load: {}
+          network: {}
+      kubeletstats:
+        collection_interval: {{ .Values.collector.agent.kubeletstats.collectionInterval | default "30s" }}
+        auth_type: serviceAccount
+        endpoint: https://${env:K8S_NODE_NAME}:10250
+        insecure_skip_verify: true
+    processors:
+      k8sattributes:
+        auth_type: serviceAccount
+        passthrough: false
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.container.name
+            - k8s.node.name
+      resource:
+        attributes:
+          - key: deployment.environment
+            value: {{ .Release.Namespace | quote }}
+            action: upsert
+          - key: k8s.cluster.namespace
+            value: {{ .Release.Namespace | quote }}
+            action: upsert
+          - key: rulebricks.observability.backend
+            value: clickstack
+            action: upsert
+      batch:
+        timeout: 5s
+        send_batch_size: 1024
+    exporters:
+      otlp:
+        endpoint: {{ printf "%s.%s.svc.cluster.local:4317" (include "clickstack.collector.gateway.fullname" .) .Release.Namespace | quote }}
+        tls:
+          insecure: true
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+        sending_queue:
+          enabled: true
+          num_consumers: 2
+          queue_size: 1000
+    service:
+      telemetry:
+        logs:
+          level: info
+      pipelines:
+        logs:
+          receivers: [filelog]
+          processors: [k8sattributes, resource, batch]
+          exporters: [otlp]
+        metrics:
+          receivers: [hostmetrics, kubeletstats]
+          processors: [k8sattributes, resource, batch]
+          exporters: [otlp]
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "clickstack.collector.agent.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clickstack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector-agent
+spec:
+  selector:
+    matchLabels:
+      {{- include "clickstack.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: collector-agent
+  template:
+    metadata:
+      labels:
+        {{- include "clickstack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: collector-agent
+        {{- with .Values.collector.agent.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- with .Values.collector.agent.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "clickstack.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.collector.agent.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.collector.agent.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.collector.agent.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: otel-collector
+          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}"
+          imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
+          args:
+            - --config=/etc/otelcol/config.yaml
+          env:
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+              readOnly: true
+            - name: varlogpods
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+          resources:
+            {{- toYaml .Values.collector.agent.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "clickstack.collector.agent.fullname" . }}-config
+        - name: varlogpods
+          hostPath:
+            path: /var/log/pods
+        - name: varlibdockercontainers
+          hostPath:
+            path: /var/lib/docker/containers
+{{- end }}

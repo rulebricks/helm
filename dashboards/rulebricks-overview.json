@@ -35,31 +35,10 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "query": "label_values(kube_namespace_status_phase, namespace)",
+        "query": "label_values(rulebricks_hps_http_requests_total, namespace)",
         "refresh": 1,
         "sort": 1,
-        "current": {
-          "text": "rulebricks",
-          "value": "rulebricks"
-        }
-      },
-      {
-        "name": "workload_group",
-        "label": "Workload group",
-        "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${datasource}"
-        },
-        "query": "label_values(kube_pod_labels{namespace=\"$namespace\", label_rulebricks_com_workload_group!=\"\"}, label_rulebricks_com_workload_group)",
-        "includeAll": true,
-        "allValue": ".*",
-        "refresh": 1,
-        "sort": 1,
-        "current": {
-          "text": "All",
-          "value": ".*"
-        }
+        "current": {}
       },
       {
         "name": "pod",
@@ -69,7 +48,7 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "query": "label_values(kube_pod_info{namespace=\"$namespace\"}, pod)",
+        "query": "label_values(container_cpu_usage_seconds_total{namespace=\"$namespace\", container!=\"\", image!=\"\"}, pod)",
         "includeAll": true,
         "allValue": ".*",
         "refresh": 1,
@@ -81,13 +60,13 @@
       },
       {
         "name": "node",
-        "label": "Node",
+        "label": "Node instance",
         "type": "query",
         "datasource": {
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "query": "label_values(kube_node_info, node)",
+        "query": "label_values(node_cpu_seconds_total, instance)",
         "includeAll": true,
         "allValue": ".*",
         "refresh": 1,
@@ -115,7 +94,7 @@
   "timezone": "browser",
   "title": "Rulebricks Overview",
   "uid": "rulebricks-overview",
-  "version": 4,
+  "version": 5,
   "weekStart": "",
   "panels": [
     {
@@ -130,26 +109,7 @@
       },
       "collapsed": false,
       "panels": [],
-      "description": "At-a-glance service health: throughput, errors, latency, queue pressure, and cache health."
-    },
-    {
-      "id": 71,
-      "type": "text",
-      "title": "Executive Health Guide",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 24,
-        "x": 0,
-        "y": 1
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "At-a-glance service health: throughput, errors, latency, queue pressure, and cache health."
-      }
+      "description": "High-level throughput, latency, errors, and queue pressure. Panels backed by optional exporters degrade to zero when those exporters are disabled."
     },
     {
       "id": 2,
@@ -163,7 +123,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 4
+        "y": 1
       },
       "fieldConfig": {
         "defaults": {
@@ -192,17 +152,16 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(rulebricks_hps_http_requests_total{namespace=\"$namespace\"}[$__rate_interval])) + sum(rate(rulebricks_app_http_requests_total{namespace=\"$namespace\"}[$__rate_interval]))",
-          "legendFormat": "api rps",
+          "expr": "(sum(rate(rulebricks_hps_http_requests_total{namespace=\"$namespace\"}[$__rate_interval])) or vector(0)) + (sum(rate(rulebricks_app_http_requests_total{namespace=\"$namespace\"}[$__rate_interval])) or vector(0))",
+          "legendFormat": "Total API RPS",
           "refId": "A"
         }
-      ],
-      "description": "Combined app + HPS request rate."
+      ]
     },
     {
       "id": 3,
       "type": "stat",
-      "title": "Error / Rejection RPS",
+      "title": "Error RPS",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -211,12 +170,11 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 4
+        "y": 1
       },
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
-          "decimals": 2,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -236,7 +194,8 @@
           },
           "color": {
             "mode": "thresholds"
-          }
+          },
+          "decimals": 2
         },
         "overrides": []
       },
@@ -261,7 +220,7 @@
             "uid": "${datasource}"
           },
           "expr": "(sum(rate(rulebricks_hps_rejections_total{namespace=\"$namespace\"}[$__rate_interval])) or vector(0)) + (sum(rate(rulebricks_hps_kafka_errors_total{namespace=\"$namespace\"}[$__rate_interval])) or vector(0)) + (sum(rate(rulebricks_app_http_rejections_total{namespace=\"$namespace\"}[$__rate_interval])) or vector(0))",
-          "legendFormat": "errors",
+          "legendFormat": "Error RPS",
           "refId": "A"
         }
       ]
@@ -278,7 +237,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 4
+        "y": 1
       },
       "fieldConfig": {
         "defaults": {
@@ -327,7 +286,7 @@
             "uid": "${datasource}"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(rulebricks_hps_http_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p95",
+          "legendFormat": "HPS p95",
           "refId": "A"
         }
       ]
@@ -344,7 +303,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 4
+        "y": 1
       },
       "fieldConfig": {
         "defaults": {
@@ -393,7 +352,7 @@
             "uid": "${datasource}"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(rulebricks_hps_kafka_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p95",
+          "legendFormat": "Kafka RPC p95",
           "refId": "A"
         }
       ]
@@ -410,7 +369,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 4
+        "y": 1
       },
       "fieldConfig": {
         "defaults": {
@@ -459,7 +418,7 @@
             "uid": "${datasource}"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(rulebricks_worker_processing_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p95",
+          "legendFormat": "Worker p95",
           "refId": "A"
         }
       ]
@@ -476,7 +435,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 4
+        "y": 1
       },
       "fieldConfig": {
         "defaults": {
@@ -524,17 +483,16 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(kafka_consumergroup_lag{namespace=\"$namespace\"})",
-          "legendFormat": "lag",
+          "expr": "clamp_min(sum(kafka_consumergroup_lag{namespace=\"$namespace\"}) or vector(0), 0)",
+          "legendFormat": "Kafka Lag",
           "refId": "A"
         }
-      ],
-      "description": "Requires kafka_exporter."
+      ]
     },
     {
       "id": 8,
       "type": "timeseries",
-      "title": "Request mix by status",
+      "title": "Request rate by status",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -543,7 +501,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 12
+        "y": 5
       },
       "fieldConfig": {
         "defaults": {
@@ -586,14 +544,14 @@
           },
           "expr": "sum by (status_class) (rate(rulebricks_app_http_requests_total{namespace=\"$namespace\"}[$__rate_interval]))",
           "legendFormat": "app {{status_class}}",
-          "refId": "A"
+          "refId": "B"
         }
       ]
     },
     {
       "id": 9,
       "type": "timeseries",
-      "title": "Latency overview p50 / p95 / p99",
+      "title": "Latency p50 / p95 / p99",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -602,7 +560,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 12
+        "y": 5
       },
       "fieldConfig": {
         "defaults": {
@@ -645,7 +603,7 @@
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(rulebricks_hps_http_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
           "legendFormat": "hps p95",
-          "refId": "A"
+          "refId": "B"
         },
         {
           "datasource": {
@@ -654,7 +612,7 @@
           },
           "expr": "histogram_quantile(0.99, sum by (le) (rate(rulebricks_hps_http_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
           "legendFormat": "hps p99",
-          "refId": "A"
+          "refId": "C"
         },
         {
           "datasource": {
@@ -663,56 +621,37 @@
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(rulebricks_worker_processing_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
           "legendFormat": "worker p95",
-          "refId": "A"
+          "refId": "D"
         }
       ]
     },
     {
-      "id": 65,
+      "id": 10,
       "type": "row",
       "title": "Ingress / Traefik",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 12
       },
       "collapsed": false,
       "panels": [],
-      "description": "Traffic at the edge before requests reach the app or HPS."
+      "description": "Edge traffic when Traefik metrics are scraped."
     },
     {
-      "id": 72,
-      "type": "text",
-      "title": "Ingress / Traefik Guide",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 24,
-        "x": 0,
-        "y": 9
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "Traffic at the edge before requests reach the app or HPS."
-      }
-    },
-    {
-      "id": 66,
+      "id": 11,
       "type": "timeseries",
-      "title": "Traefik requests by service/code",
+      "title": "Traefik requests",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 12,
         "x": 0,
-        "y": 27
+        "y": 13
       },
       "fieldConfig": {
         "defaults": {
@@ -744,26 +683,25 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (service, code) (rate(traefik_service_requests_total{namespace=\"$namespace\"}[$__rate_interval]))",
+          "expr": "(sum by (service, code) (rate(traefik_service_requests_total{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "{{service}} {{code}}",
           "refId": "A"
         }
-      ],
-      "description": "Populates when Traefik ServiceMonitor is active."
+      ]
     },
     {
-      "id": 67,
+      "id": 12,
       "type": "timeseries",
-      "title": "Traefik request duration p95",
+      "title": "Traefik latency p95",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 12,
         "x": 12,
-        "y": 27
+        "y": 13
       },
       "fieldConfig": {
         "defaults": {
@@ -795,197 +733,28 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, service) (rate(traefik_service_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
+          "expr": "(histogram_quantile(0.95, sum by (le, service) (rate(traefik_service_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))) or vector(0)",
           "legendFormat": "{{service}}",
           "refId": "A"
         }
       ]
     },
     {
-      "id": 68,
-      "type": "timeseries",
-      "title": "Traefik open connections",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 0,
-        "y": 43
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (entrypoint, protocol) (traefik_entrypoint_open_connections{namespace=\"$namespace\"})",
-          "legendFormat": "{{entrypoint}} {{protocol}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 69,
-      "type": "timeseries",
-      "title": "Traefik entrypoint requests",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 43
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (entrypoint) (rate(traefik_entrypoint_requests_total{namespace=\"$namespace\"}[$__rate_interval]))",
-          "legendFormat": "{{entrypoint}} req/s",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 70,
-      "type": "timeseries",
-      "title": "Traefik config reloads",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 43
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(traefik_config_reloads_total{namespace=\"$namespace\"}[$__rate_interval]))",
-          "legendFormat": "reloads/sec",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 10,
+      "id": 13,
       "type": "row",
       "title": "HPS Request Plane",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 19
+        "y": 20
       },
       "collapsed": false,
       "panels": [],
-      "description": "Synchronous rule and flow API traffic, including Kafka round trips and chunking behavior."
+      "description": "Synchronous API path, Kafka RPC latency, chunking, and rejections."
     },
     {
-      "id": 73,
-      "type": "text",
-      "title": "HPS Request Plane Guide",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 24,
-        "x": 0,
-        "y": 20
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "Synchronous rule and flow API traffic, including Kafka round trips and chunking behavior."
-      }
-    },
-    {
-      "id": 11,
+      "id": 14,
       "type": "timeseries",
       "title": "HPS request rate by route/status",
       "datasource": {
@@ -996,7 +765,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 58
+        "y": 21
       },
       "fieldConfig": {
         "defaults": {
@@ -1035,208 +804,22 @@
       ]
     },
     {
-      "id": 12,
-      "type": "timeseries",
-      "title": "HPS latency by route",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 58
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(rulebricks_hps_http_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p95 {{route}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, route) (rate(rulebricks_hps_http_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p99 {{route}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 13,
-      "type": "timeseries",
-      "title": "Kafka RPC latency by operation",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 74
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.50, sum by (le, operation) (rate(rulebricks_hps_kafka_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p50 {{operation}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(rulebricks_hps_kafka_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p95 {{operation}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, operation) (rate(rulebricks_hps_kafka_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p99 {{operation}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 14,
-      "type": "timeseries",
-      "title": "HPS errors / rejections",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 74
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (route, reason) (rate(rulebricks_hps_rejections_total{namespace=\"$namespace\"}[$__rate_interval]))",
-          "legendFormat": "reject {{route}} {{reason}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (operation, reason) (rate(rulebricks_hps_kafka_errors_total{namespace=\"$namespace\"}[$__rate_interval]))",
-          "legendFormat": "kafka {{operation}} {{reason}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
       "id": 15,
       "type": "timeseries",
-      "title": "Bulk and parallel payload volume",
+      "title": "HPS global latency quantiles",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 0,
-        "y": 90
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ops",
+          "unit": "s",
           "custom": {
             "drawStyle": "line",
             "lineInterpolation": "linear",
@@ -1264,25 +847,220 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (operation) (rate(rulebricks_hps_bulk_items_total{namespace=\"$namespace\"}[$__rate_interval]))",
-          "legendFormat": "{{operation}}",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(rulebricks_hps_http_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
+          "legendFormat": "p50",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(rulebricks_hps_http_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(rulebricks_hps_http_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "C"
         }
       ]
     },
     {
       "id": 16,
       "type": "timeseries",
-      "title": "Chunks per request",
+      "title": "Kafka RPC latency",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(rulebricks_hps_kafka_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(rulebricks_hps_kafka_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(rulebricks_hps_kafka_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "HPS errors and rejections",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum by (reason) (rate(rulebricks_hps_rejections_total{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
+          "legendFormat": "reject {{reason}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum by (operation, reason) (rate(rulebricks_hps_kafka_errors_total{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
+          "legendFormat": "kafka {{operation}} {{reason}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Bulk payload volume",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 36
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum by (operation) (rate(rulebricks_hps_bulk_items_total{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
+          "legendFormat": "{{operation}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Average chunks per request",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
         "w": 8,
         "x": 8,
-        "y": 90
+        "y": 36
       },
       "fieldConfig": {
         "defaults": {
@@ -1321,7 +1099,7 @@
       ]
     },
     {
-      "id": 17,
+      "id": 20,
       "type": "timeseries",
       "title": "Chunk failures",
       "datasource": {
@@ -1329,10 +1107,10 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 7,
+        "h": 6,
         "w": 8,
         "x": 16,
-        "y": 90
+        "y": 36
       },
       "fieldConfig": {
         "defaults": {
@@ -1364,58 +1142,39 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (operation, reason) (rate(rulebricks_hps_chunk_failures_total{namespace=\"$namespace\"}[$__rate_interval]))",
+          "expr": "(sum by (operation, reason) (rate(rulebricks_hps_chunk_failures_total{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "{{operation}} {{reason}}",
           "refId": "A"
         }
       ]
     },
     {
-      "id": 18,
+      "id": 21,
       "type": "row",
       "title": "Worker Fleet",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 42
       },
       "collapsed": false,
       "panels": [],
-      "description": "Rule and flow execution throughput, latency, resources, and pod health."
+      "description": "Worker throughput, processing latency, resources, and health."
     },
     {
-      "id": 74,
-      "type": "text",
-      "title": "Worker Fleet Guide",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 24,
-        "x": 0,
-        "y": 24
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "Rule and flow execution throughput, latency, resources, and pod health."
-      }
-    },
-    {
-      "id": 19,
+      "id": 22,
       "type": "timeseries",
-      "title": "Worker throughput by operation/status",
+      "title": "Worker throughput",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 12,
         "x": 0,
-        "y": 98
+        "y": 43
       },
       "fieldConfig": {
         "defaults": {
@@ -1454,18 +1213,18 @@
       ]
     },
     {
-      "id": 20,
+      "id": 23,
       "type": "timeseries",
-      "title": "Worker processing quantiles",
+      "title": "Worker processing latency",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 12,
         "x": 12,
-        "y": 98
+        "y": 43
       },
       "fieldConfig": {
         "defaults": {
@@ -1497,8 +1256,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.50, sum by (le, operation) (rate(rulebricks_worker_processing_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p50 {{operation}}",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(rulebricks_worker_processing_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
+          "legendFormat": "p50",
           "refId": "A"
         },
         {
@@ -1506,23 +1265,23 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(rulebricks_worker_processing_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p95 {{operation}}",
-          "refId": "A"
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(rulebricks_worker_processing_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, operation) (rate(rulebricks_worker_processing_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p99 {{operation}}",
-          "refId": "A"
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(rulebricks_worker_processing_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "C"
         }
       ]
     },
     {
-      "id": 21,
+      "id": 24,
       "type": "timeseries",
       "title": "Worker CPU by pod",
       "datasource": {
@@ -1533,7 +1292,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 106
+        "y": 50
       },
       "fieldConfig": {
         "defaults": {
@@ -1572,7 +1331,7 @@
       ]
     },
     {
-      "id": 22,
+      "id": 25,
       "type": "timeseries",
       "title": "Worker memory by pod",
       "datasource": {
@@ -1583,7 +1342,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 106
+        "y": 50
       },
       "fieldConfig": {
         "defaults": {
@@ -1622,9 +1381,9 @@
       ]
     },
     {
-      "id": 23,
+      "id": 26,
       "type": "timeseries",
-      "title": "Worker restarts and OOMs",
+      "title": "Worker restarts / OOMs",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1633,7 +1392,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 106
+        "y": 50
       },
       "fieldConfig": {
         "defaults": {
@@ -1665,7 +1424,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\", pod=~\".*hps-worker.*\"}[$__rate_interval]))",
+          "expr": "(sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\", pod=~\".*hps-worker.*\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "restart {{pod}}",
           "refId": "A"
         },
@@ -1674,47 +1433,28 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (pod) (increase(container_oom_events_total{namespace=\"$namespace\", pod=~\".*hps-worker.*\"}[$__rate_interval]))",
+          "expr": "(sum by (pod) (increase(container_oom_events_total{namespace=\"$namespace\", pod=~\".*hps-worker.*\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "oom {{pod}}",
-          "refId": "A"
+          "refId": "B"
         }
       ]
     },
     {
-      "id": 24,
+      "id": 27,
       "type": "row",
       "title": "App + API Surface",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 57
       },
       "collapsed": false,
       "panels": [],
-      "description": "Dashboard/admin API traffic, app Redis activity, frontend errors, and Node.js runtime health."
+      "description": "App/API traffic, app Redis activity, and Node.js runtime health."
     },
     {
-      "id": 75,
-      "type": "text",
-      "title": "App + API Surface Guide",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 24,
-        "x": 0,
-        "y": 36
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "Dashboard/admin API traffic, app Redis activity, frontend errors, and Node.js runtime health."
-      }
-    },
-    {
-      "id": 25,
+      "id": 28,
       "type": "timeseries",
       "title": "App request rate",
       "datasource": {
@@ -1725,7 +1465,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 114
+        "y": 58
       },
       "fieldConfig": {
         "defaults": {
@@ -1764,125 +1504,7 @@
       ]
     },
     {
-      "id": 26,
-      "type": "timeseries",
-      "title": "App request latency",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 114
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.50, sum by (le, route) (rate(rulebricks_app_http_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p50 {{route}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(rulebricks_app_http_request_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
-          "legendFormat": "p95 {{route}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 27,
-      "type": "timeseries",
-      "title": "Frontend and app rejections",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 114
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (reason) (rate(rulebricks_app_http_rejections_total{namespace=\"$namespace\"}[$__rate_interval]))",
-          "legendFormat": "reject {{reason}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (source) (rate(rulebricks_app_frontend_errors_total{namespace=\"$namespace\"}[$__rate_interval]))",
-          "legendFormat": "frontend {{source}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 28,
+      "id": 29,
       "type": "timeseries",
       "title": "App Redis operations",
       "datasource": {
@@ -1892,8 +1514,8 @@
       "gridPos": {
         "h": 7,
         "w": 8,
-        "x": 0,
-        "y": 121
+        "x": 8,
+        "y": 58
       },
       "fieldConfig": {
         "defaults": {
@@ -1932,9 +1554,9 @@
       ]
     },
     {
-      "id": 29,
+      "id": 30,
       "type": "timeseries",
-      "title": "App Redis p95 latency",
+      "title": "App Redis latency p95",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1942,8 +1564,8 @@
       "gridPos": {
         "h": 7,
         "w": 8,
-        "x": 8,
-        "y": 121
+        "x": 16,
+        "y": 58
       },
       "fieldConfig": {
         "defaults": {
@@ -1982,18 +1604,77 @@
       ]
     },
     {
-      "id": 30,
+      "id": 31,
       "type": "timeseries",
-      "title": "App Node.js event loop + GC",
+      "title": "Frontend/app rejections",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 121
+        "w": 12,
+        "x": 0,
+        "y": 65
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum by (reason) (rate(rulebricks_app_http_rejections_total{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
+          "legendFormat": "reject {{reason}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum by (source) (rate(rulebricks_app_frontend_errors_total{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
+          "legendFormat": "frontend {{source}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "App runtime",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 65
       },
       "fieldConfig": {
         "defaults": {
@@ -2025,7 +1706,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "avg(rulebricks_app_nodejs_eventloop_lag_p99_seconds{namespace=\"$namespace\"})",
+          "expr": "(avg(rulebricks_app_nodejs_eventloop_lag_p99_seconds{namespace=\"$namespace\"})) or vector(0)",
           "legendFormat": "event loop p99",
           "refId": "A"
         },
@@ -2034,47 +1715,28 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(rulebricks_app_nodejs_gc_duration_seconds_sum{namespace=\"$namespace\"}[$__rate_interval])) / sum(rate(rulebricks_app_nodejs_gc_duration_seconds_count{namespace=\"$namespace\"}[$__rate_interval]))",
+          "expr": "(sum(rate(rulebricks_app_nodejs_gc_duration_seconds_sum{namespace=\"$namespace\"}[$__rate_interval])) / sum(rate(rulebricks_app_nodejs_gc_duration_seconds_count{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "gc avg",
-          "refId": "A"
+          "refId": "B"
         }
       ]
     },
     {
-      "id": 31,
+      "id": 33,
       "type": "row",
       "title": "Cache / Valkey",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 72
       },
       "collapsed": false,
       "panels": [],
-      "description": "Service-level Redis usage plus Valkey backend health."
+      "description": "Service-level Redis usage from Rulebricks app/HPS/worker metrics, plus Valkey backend health when the Redis exporter is enabled."
     },
     {
-      "id": 76,
-      "type": "text",
-      "title": "Cache / Valkey Guide",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 24,
-        "x": 0,
-        "y": 40
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "Service-level Redis usage plus Valkey backend health."
-      }
-    },
-    {
-      "id": 32,
+      "id": 34,
       "type": "timeseries",
       "title": "Service-level Redis operations",
       "datasource": {
@@ -2082,10 +1744,10 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 12,
         "x": 0,
-        "y": 129
+        "y": 73
       },
       "fieldConfig": {
         "defaults": {
@@ -2128,7 +1790,7 @@
           },
           "expr": "sum by (operation, result) (rate(rulebricks_hps_redis_cache_operations_total{namespace=\"$namespace\"}[$__rate_interval]))",
           "legendFormat": "hps {{operation}} {{result}}",
-          "refId": "A"
+          "refId": "B"
         },
         {
           "datasource": {
@@ -2137,12 +1799,12 @@
           },
           "expr": "sum by (operation, result) (rate(rulebricks_worker_redis_cache_operations_total{namespace=\"$namespace\"}[$__rate_interval]))",
           "legendFormat": "worker {{operation}} {{result}}",
-          "refId": "A"
+          "refId": "C"
         }
       ]
     },
     {
-      "id": 33,
+      "id": 35,
       "type": "timeseries",
       "title": "Service-level Redis latency p95",
       "datasource": {
@@ -2150,10 +1812,10 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 12,
         "x": 12,
-        "y": 129
+        "y": 73
       },
       "fieldConfig": {
         "defaults": {
@@ -2196,7 +1858,7 @@
           },
           "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(rulebricks_hps_redis_cache_operation_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
           "legendFormat": "hps {{operation}}",
-          "refId": "A"
+          "refId": "B"
         },
         {
           "datasource": {
@@ -2205,14 +1867,14 @@
           },
           "expr": "histogram_quantile(0.95, sum by (le, operation) (rate(rulebricks_worker_redis_cache_operation_duration_seconds_bucket{namespace=\"$namespace\"}[$__rate_interval])))",
           "legendFormat": "worker {{operation}}",
-          "refId": "A"
+          "refId": "C"
         }
       ]
     },
     {
-      "id": 34,
+      "id": 36,
       "type": "timeseries",
-      "title": "Valkey backend ops + clients",
+      "title": "Valkey backend ops / clients",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -2221,7 +1883,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 137
+        "y": 80
       },
       "fieldConfig": {
         "defaults": {
@@ -2253,7 +1915,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(redis_commands_processed_total{namespace=\"$namespace\"}[$__rate_interval]))",
+          "expr": "(sum(rate(redis_commands_processed_total{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "commands/sec",
           "refId": "A"
         },
@@ -2262,15 +1924,14 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(redis_connected_clients{namespace=\"$namespace\"})",
+          "expr": "(sum(redis_connected_clients{namespace=\"$namespace\"})) or vector(0)",
           "legendFormat": "clients",
-          "refId": "A"
+          "refId": "B"
         }
-      ],
-      "description": "Requires redis_exporter for backend series."
+      ]
     },
     {
-      "id": 35,
+      "id": 37,
       "type": "timeseries",
       "title": "Valkey memory",
       "datasource": {
@@ -2281,7 +1942,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 137
+        "y": 80
       },
       "fieldConfig": {
         "defaults": {
@@ -2313,7 +1974,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(redis_memory_used_bytes{namespace=\"$namespace\"})",
+          "expr": "(sum(redis_memory_used_bytes{namespace=\"$namespace\"})) or vector(0)",
           "legendFormat": "used",
           "refId": "A"
         },
@@ -2322,17 +1983,16 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(redis_memory_max_bytes{namespace=\"$namespace\"})",
+          "expr": "(sum(redis_memory_max_bytes{namespace=\"$namespace\"})) or vector(0)",
           "legendFormat": "max",
-          "refId": "A"
+          "refId": "B"
         }
-      ],
-      "description": "Requires redis_exporter."
+      ]
     },
     {
-      "id": 36,
+      "id": 38,
       "type": "timeseries",
-      "title": "Valkey hit ratio and evictions",
+      "title": "Valkey hit ratio / evictions",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -2341,11 +2001,11 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 137
+        "y": 80
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
+          "unit": "short",
           "custom": {
             "drawStyle": "line",
             "lineInterpolation": "linear",
@@ -2373,7 +2033,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(redis_keyspace_hits_total{namespace=\"$namespace\"}[$__rate_interval])) / (sum(rate(redis_keyspace_hits_total{namespace=\"$namespace\"}[$__rate_interval])) + sum(rate(redis_keyspace_misses_total{namespace=\"$namespace\"}[$__rate_interval])))",
+          "expr": "(sum(rate(redis_keyspace_hits_total{namespace=\"$namespace\"}[$__rate_interval])) / (sum(rate(redis_keyspace_hits_total{namespace=\"$namespace\"}[$__rate_interval])) + sum(rate(redis_keyspace_misses_total{namespace=\"$namespace\"}[$__rate_interval])))) or vector(0)",
           "legendFormat": "hit ratio",
           "refId": "A"
         },
@@ -2382,48 +2042,28 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(redis_evicted_keys_total{namespace=\"$namespace\"}[$__rate_interval]))",
+          "expr": "(sum(rate(redis_evicted_keys_total{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "evictions/sec",
-          "refId": "A"
+          "refId": "B"
         }
-      ],
-      "description": "Requires redis_exporter."
+      ]
     },
     {
-      "id": 37,
+      "id": 39,
       "type": "row",
       "title": "Kafka / Queue Health",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 87
       },
       "collapsed": false,
       "panels": [],
-      "description": "Broker throughput, consumer lag, request queues, and topic storage."
+      "description": "Consumer lag, topic storage, and broker pressure. Lag requires the Kafka exporter; broker panels require Kafka JMX metrics."
     },
     {
-      "id": 77,
-      "type": "text",
-      "title": "Kafka / Queue Health Guide",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 24,
-        "x": 0,
-        "y": 51
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "Broker throughput, consumer lag, request queues, and topic storage."
-      }
-    },
-    {
-      "id": 38,
+      "id": 40,
       "type": "timeseries",
       "title": "Consumer-group lag",
       "datasource": {
@@ -2431,129 +2071,10 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 145
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag{namespace=\"$namespace\"})",
-          "legendFormat": "{{consumergroup}} {{topic}}",
-          "refId": "A"
-        }
-      ],
-      "description": "Requires kafka_exporter."
-    },
-    {
-      "id": 39,
-      "type": "timeseries",
-      "title": "Kafka broker traffic",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 145
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "Bps",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(kafka_server_brokertopicmetrics_total_messagesinpersec_count{namespace=\"$namespace\"}[$__rate_interval]))",
-          "legendFormat": "messages in",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(kafka_server_brokertopicmetrics_total_bytesinpersec_count{namespace=\"$namespace\"}[$__rate_interval]))",
-          "legendFormat": "bytes in",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(kafka_server_brokertopicmetrics_total_bytesoutpersec_count{namespace=\"$namespace\"}[$__rate_interval]))",
-          "legendFormat": "bytes out",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 40,
-      "type": "timeseries",
-      "title": "Kafka request queues",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
         "h": 7,
-        "w": 8,
+        "w": 12,
         "x": 0,
-        "y": 153
+        "y": 88
       },
       "fieldConfig": {
         "defaults": {
@@ -2585,17 +2106,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(kafka_network_requestchannel_requestqueuesize_value{namespace=\"$namespace\"})",
-          "legendFormat": "request queue",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "max(kafka_network_requestchannel_responsequeuesize_value{namespace=\"$namespace\"})",
-          "legendFormat": "response queue",
+          "expr": "clamp_min(sum by (consumergroup, topic) (kafka_consumergroup_lag{namespace=\"$namespace\"}), 0)",
+          "legendFormat": "{{consumergroup}} {{topic}}",
           "refId": "A"
         }
       ]
@@ -2603,16 +2115,16 @@
     {
       "id": 41,
       "type": "timeseries",
-      "title": "Kafka topic disk/log size",
+      "title": "Kafka topic log size",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 153
+        "w": 12,
+        "x": 12,
+        "y": 88
       },
       "fieldConfig": {
         "defaults": {
@@ -2653,16 +2165,75 @@
     {
       "id": 42,
       "type": "timeseries",
-      "title": "Kafka produce/fetch errors",
+      "title": "Kafka request queues",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 153
+        "w": 12,
+        "x": 0,
+        "y": 95
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(max(kafka_network_requestchannel_requestqueuesize_value{namespace=\"$namespace\"})) or vector(0)",
+          "legendFormat": "request queue",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(max(kafka_network_requestchannel_responsequeuesize_value{namespace=\"$namespace\"})) or vector(0)",
+          "legendFormat": "response queue",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "type": "timeseries",
+      "title": "Kafka errors",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 95
       },
       "fieldConfig": {
         "defaults": {
@@ -2694,7 +2265,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(kafka_server_brokertopicmetrics_total_failedproducerequestspersec_count{namespace=\"$namespace\"}[$__rate_interval]))",
+          "expr": "(sum(rate(kafka_server_brokertopicmetrics_total_failedproducerequestspersec_count{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "failed produce",
           "refId": "A"
         },
@@ -2703,47 +2274,28 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(kafka_server_brokertopicmetrics_total_failedfetchrequestspersec_count{namespace=\"$namespace\"}[$__rate_interval]))",
+          "expr": "(sum(rate(kafka_server_brokertopicmetrics_total_failedfetchrequestspersec_count{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "failed fetch",
-          "refId": "A"
+          "refId": "B"
         }
       ]
     },
     {
-      "id": 43,
+      "id": 44,
       "type": "row",
       "title": "Decision Logs / Logging Pipeline",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 54
+        "y": 102
       },
       "collapsed": false,
       "panels": [],
-      "description": "Decision-log production, Vector resources, and ClickHouse query health."
+      "description": "Decision-log production is emitted by HPS. Vector resource panels use Kubernetes container metrics; ClickHouse health panels require ClickHouse metrics scraping."
     },
     {
-      "id": 78,
-      "type": "text",
-      "title": "Decision Logs / Logging Pipeline Guide",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 24,
-        "x": 0,
-        "y": 55
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "Decision-log production, Vector resources, and ClickHouse query health."
-      }
-    },
-    {
-      "id": 44,
+      "id": 45,
       "type": "timeseries",
       "title": "Decision log produce rate",
       "datasource": {
@@ -2754,7 +2306,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 161
+        "y": 103
       },
       "fieldConfig": {
         "defaults": {
@@ -2793,7 +2345,7 @@
       ]
     },
     {
-      "id": 45,
+      "id": 46,
       "type": "timeseries",
       "title": "Decision log bytes",
       "datasource": {
@@ -2804,7 +2356,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 161
+        "y": 103
       },
       "fieldConfig": {
         "defaults": {
@@ -2843,7 +2395,7 @@
       ]
     },
     {
-      "id": 46,
+      "id": 47,
       "type": "timeseries",
       "title": "Decision log failures",
       "datasource": {
@@ -2854,7 +2406,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 161
+        "y": 103
       },
       "fieldConfig": {
         "defaults": {
@@ -2886,67 +2438,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (reason) (rate(rulebricks_hps_decision_log_failures_total{namespace=\"$namespace\"}[$__rate_interval]))",
+          "expr": "(sum by (reason) (rate(rulebricks_hps_decision_log_failures_total{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "{{reason}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 47,
-      "type": "timeseries",
-      "title": "Vector pods CPU / memory",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 168
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod=~\".*vector.*\", container!=\"\", image!=\"\"}[$__rate_interval]))",
-          "legendFormat": "cpu {{pod}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\", pod=~\".*vector.*\", container!=\"\", image!=\"\"}) / 1000000000",
-          "legendFormat": "mem GB {{pod}}",
           "refId": "A"
         }
       ]
@@ -2954,242 +2447,7 @@
     {
       "id": 48,
       "type": "timeseries",
-      "title": "ClickHouse high-level health",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 12,
-        "y": 168
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "max(ClickHouseMetrics_Query{namespace=\"$namespace\"})",
-          "legendFormat": "active queries",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "max(ClickHouseMetrics_MemoryTracking{namespace=\"$namespace\"})",
-          "legendFormat": "memory tracking",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(ClickHouseProfileEvents_Query{namespace=\"$namespace\"}[$__rate_interval]))",
-          "legendFormat": "queries/sec",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 49,
-      "type": "row",
-      "title": "Infrastructure / Nodes / Node Pools",
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 66
-      },
-      "collapsed": false,
-      "panels": [],
-      "description": "Portable Kubernetes infrastructure views from kube-state-metrics, node-exporter, and kubelet."
-    },
-    {
-      "id": 79,
-      "type": "text",
-      "title": "Infrastructure / Nodes / Node Pools Guide",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 24,
-        "x": 0,
-        "y": 67
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "Portable Kubernetes infrastructure views from kube-state-metrics, node-exporter, and kubelet."
-      }
-    },
-    {
-      "id": 50,
-      "type": "timeseries",
-      "title": "Node CPU utilization",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 176
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 75
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "100 * (1 - avg by (node) (rate(node_cpu_seconds_total{node=~\"$node\", mode=\"idle\"}[$__rate_interval])))",
-          "legendFormat": "{{node}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 51,
-      "type": "timeseries",
-      "title": "Node memory utilization",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 176
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 75
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "100 * (1 - (node_memory_MemAvailable_bytes{node=~\"$node\"} / node_memory_MemTotal_bytes{node=~\"$node\"}))",
-          "legendFormat": "{{node}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 52,
-      "type": "timeseries",
-      "title": "Node filesystem utilization",
+      "title": "Vector CPU by pod",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -3198,74 +2456,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 184
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 75
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "100 * (1 - (node_filesystem_avail_bytes{node=~\"$node\", fstype!~\"tmpfs|overlay\", mountpoint!~\"/run.*|/var/lib/kubelet/pods.*\"} / node_filesystem_size_bytes{node=~\"$node\", fstype!~\"tmpfs|overlay\", mountpoint!~\"/run.*|/var/lib/kubelet/pods.*\"}))",
-          "legendFormat": "{{node}} {{mountpoint}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 53,
-      "type": "timeseries",
-      "title": "Pod CPU by workload group",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 184
+        "y": 110
       },
       "fieldConfig": {
         "defaults": {
@@ -3297,16 +2488,16 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (label_rulebricks_com_workload_group) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", container!=\"\", image!=\"\"}[$__rate_interval]) * on(namespace,pod) group_left(label_rulebricks_com_workload_group) kube_pod_labels{namespace=\"$namespace\", label_rulebricks_com_workload_group=~\"$workload_group\"})",
-          "legendFormat": "{{label_rulebricks_com_workload_group}}",
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod=~\".*vector.*\", container!=\"\", image!=\"\"}[$__rate_interval]))",
+          "legendFormat": "{{pod}}",
           "refId": "A"
         }
       ]
     },
     {
-      "id": 54,
+      "id": 49,
       "type": "timeseries",
-      "title": "Pod memory by workload group",
+      "title": "Vector memory by pod",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -3314,8 +2505,8 @@
       "gridPos": {
         "h": 7,
         "w": 8,
-        "x": 16,
-        "y": 184
+        "x": 8,
+        "y": 110
       },
       "fieldConfig": {
         "defaults": {
@@ -3347,8 +2538,240 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (label_rulebricks_com_workload_group) (container_memory_working_set_bytes{namespace=\"$namespace\", container!=\"\", image!=\"\"} * on(namespace,pod) group_left(label_rulebricks_com_workload_group) kube_pod_labels{namespace=\"$namespace\", label_rulebricks_com_workload_group=~\"$workload_group\"})",
-          "legendFormat": "{{label_rulebricks_com_workload_group}}",
+          "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\", pod=~\".*vector.*\", container!=\"\", image!=\"\"})",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 50,
+      "type": "timeseries",
+      "title": "ClickHouse health",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 110
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(max(ClickHouseMetrics_Query{namespace=\"$namespace\"})) or vector(0)",
+          "legendFormat": "active queries",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(max(ClickHouseMetrics_MemoryTracking{namespace=\"$namespace\"})) or vector(0)",
+          "legendFormat": "memory tracking",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum(rate(ClickHouseProfileEvents_Query{namespace=\"$namespace\"}[$__rate_interval]))) or vector(0)",
+          "legendFormat": "queries/sec",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 51,
+      "type": "row",
+      "title": "Infrastructure",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 117
+      },
+      "collapsed": false,
+      "panels": [],
+      "description": "Cloud-portable node, pod, PVC, and container metrics."
+    },
+    {
+      "id": 52,
+      "type": "timeseries",
+      "title": "Node CPU utilization",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 118
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\", instance=~\"$node\"}[$__rate_interval])))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 53,
+      "type": "timeseries",
+      "title": "Node memory utilization",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 118
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * (1 - (node_memory_MemAvailable_bytes{instance=~\"$node\"} / node_memory_MemTotal_bytes{instance=~\"$node\"}))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 54,
+      "type": "timeseries",
+      "title": "Node filesystem utilization",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 125
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * (1 - (node_filesystem_avail_bytes{instance=~\"$node\", fstype!~\"tmpfs|overlay\", mountpoint!~\"/run.*|/var/lib/kubelet/pods.*\"} / node_filesystem_size_bytes{instance=~\"$node\", fstype!~\"tmpfs|overlay\", mountpoint!~\"/run.*|/var/lib/kubelet/pods.*\"}))",
+          "legendFormat": "{{instance}} {{mountpoint}}",
           "refId": "A"
         }
       ]
@@ -3356,37 +2779,120 @@
     {
       "id": 55,
       "type": "timeseries",
+      "title": "Top pod CPU",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 125
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "topk(20, sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", pod=~\"$pod\", container!=\"\", image!=\"\"}[$__rate_interval])))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 56,
+      "type": "timeseries",
+      "title": "Top pod memory",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 125
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "topk(20, sum by (pod) (container_memory_working_set_bytes{namespace=\"$namespace\", pod=~\"$pod\", container!=\"\", image!=\"\"}))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 57,
+      "type": "timeseries",
       "title": "PVC usage",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 12,
         "x": 0,
-        "y": 191
+        "y": 132
       },
       "fieldConfig": {
         "defaults": {
           "unit": "percent",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 75
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
           "custom": {
             "drawStyle": "line",
             "lineInterpolation": "linear",
@@ -3421,7 +2927,7 @@
       ]
     },
     {
-      "id": 56,
+      "id": 58,
       "type": "timeseries",
       "title": "Container CPU throttling",
       "datasource": {
@@ -3429,31 +2935,14 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 12,
         "x": 12,
-        "y": 191
+        "y": 132
       },
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 75
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
           "custom": {
             "drawStyle": "line",
             "lineInterpolation": "linear",
@@ -3481,185 +2970,30 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~\"$pod\", container!=\"\"}[$__rate_interval])) / sum by (pod) (rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~\"$pod\", container!=\"\"}[$__rate_interval]))",
+          "expr": "(sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{namespace=\"$namespace\", pod=~\"$pod\", container!=\"\"}[$__rate_interval])) / sum by (pod) (rate(container_cpu_cfs_periods_total{namespace=\"$namespace\", pod=~\"$pod\", container!=\"\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
       ]
     },
     {
-      "id": 57,
+      "id": 59,
       "type": "row",
-      "title": "Scaling / Scheduling",
+      "title": "Scheduling / Pod Health",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 139
       },
       "collapsed": false,
       "panels": [],
-      "description": "Replica state, HPA behavior, pending pods, restarts, and cluster capacity."
-    },
-    {
-      "id": 80,
-      "type": "text",
-      "title": "Scaling / Scheduling Guide",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 24,
-        "x": 0,
-        "y": 71
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "Replica state, HPA behavior, pending pods, restarts, and cluster capacity."
-      }
-    },
-    {
-      "id": 58,
-      "type": "timeseries",
-      "title": "HPA replicas",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 200
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"$namespace\"}",
-          "legendFormat": "current {{horizontalpodautoscaler}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"$namespace\"}",
-          "legendFormat": "desired {{horizontalpodautoscaler}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "kube_horizontalpodautoscaler_spec_max_replicas{namespace=\"$namespace\"}",
-          "legendFormat": "max {{horizontalpodautoscaler}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 59,
-      "type": "timeseries",
-      "title": "Deployment availability",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 200
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "fillOpacity": 8,
-            "showPoints": "never",
-            "spanNulls": true
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "kube_deployment_status_replicas_available{namespace=\"$namespace\"}",
-          "legendFormat": "available {{deployment}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "kube_deployment_spec_replicas{namespace=\"$namespace\"}",
-          "legendFormat": "desired {{deployment}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "kube_deployment_status_replicas_unavailable{namespace=\"$namespace\"}",
-          "legendFormat": "unavailable {{deployment}}",
-          "refId": "A"
-        }
-      ]
+      "description": "Pod phase, restarts, and availability signals that work without event exporters."
     },
     {
       "id": 60,
       "type": "timeseries",
-      "title": "Pending / unschedulable pods",
+      "title": "Pod phases",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -3668,7 +3002,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 208
+        "y": 140
       },
       "fieldConfig": {
         "defaults": {
@@ -3700,17 +3034,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(kube_pod_status_phase{namespace=\"$namespace\", phase=\"Pending\"})",
-          "legendFormat": "pending",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(kube_pod_status_unschedulable{namespace=\"$namespace\"})",
-          "legendFormat": "unschedulable",
+          "expr": "sum by (phase) (kube_pod_status_phase{namespace=\"$namespace\"})",
+          "legendFormat": "{{phase}}",
           "refId": "A"
         }
       ]
@@ -3727,7 +3052,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 208
+        "y": 140
       },
       "fieldConfig": {
         "defaults": {
@@ -3759,7 +3084,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\", pod=~\"$pod\"}[$__rate_interval]))",
+          "expr": "(sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\", pod=~\"$pod\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
@@ -3768,7 +3093,7 @@
     {
       "id": 62,
       "type": "timeseries",
-      "title": "Node allocatable capacity",
+      "title": "Pending / unschedulable pods",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -3777,7 +3102,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 208
+        "y": 140
       },
       "fieldConfig": {
         "defaults": {
@@ -3809,8 +3134,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(kube_node_status_allocatable{resource=\"cpu\", unit=\"core\"})",
-          "legendFormat": "allocatable cpu cores",
+          "expr": "(sum(kube_pod_status_phase{namespace=\"$namespace\", phase=\"Pending\"})) or vector(0)",
+          "legendFormat": "pending",
           "refId": "A"
         },
         {
@@ -3818,43 +3143,11 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(kube_node_status_allocatable{resource=\"memory\", unit=\"byte\"}) / 1000000000",
-          "legendFormat": "allocatable memory GB",
-          "refId": "A"
+          "expr": "(sum(kube_pod_status_unschedulable{namespace=\"$namespace\"})) or vector(0)",
+          "legendFormat": "unschedulable",
+          "refId": "B"
         }
       ]
-    },
-    {
-      "id": 63,
-      "type": "row",
-      "title": "Dashboard Notes",
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 82
-      },
-      "collapsed": false,
-      "panels": []
-    },
-    {
-      "id": 64,
-      "type": "text",
-      "title": "How to read this dashboard",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 24,
-        "x": 0,
-        "y": 216
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "**Optional exporter panels**: Valkey backend panels require `rulebricks.cache.redisExporter.enabled`; Kafka lag panels require `rulebricks.kafkaExporter.enabled`.\n\n**Infrastructure panels** use kube-prometheus-stack defaults (kube-state-metrics, node-exporter, kubelet/cAdvisor) and should work across AKS, EKS, GKE, and self-managed clusters. Node-pool grouping is best effort because cloud providers expose different node labels.\n\n**Logs and traces** are not stored in Grafana by this chart. Use the `X-Rulebricks-Trace-Id` response header to find traces in your tracing backend and match service logs by `trace_id`."
-      }
     }
   ]
 }

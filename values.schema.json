@@ -176,6 +176,30 @@
             }
           }
         },
+        "clickstack": {
+          "type": "object",
+          "description": "Cross-chart switch for the built-in ClickStack observability backend.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "clickhouse": {
+              "type": "object",
+              "properties": {
+                "decisionLogs": {
+                  "type": "object",
+                  "properties": {
+                    "retentionDays": { "type": "integer", "minimum": 1, "default": 30 },
+                    "objectStorageFallback": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": { "type": "boolean", "default": true }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
         "tracing": {
           "type": "object",
           "description": "Distributed tracing: in-cluster OpenTelemetry Collector that forwards OTLP spans from the app/HPS/workers/Traefik to a pluggable backend (Elastic APM, a generic OTLP/HTTP endpoint, or Azure Monitor).",
@@ -985,6 +1009,103 @@
             "maxExecutionTime": { "type": "integer", "minimum": 1, "default": 120 },
             "maxRowsToRead": { "type": "integer", "minimum": 1, "default": 50000000 },
             "readOverflowMode": { "type": "string", "enum": ["throw", "break"], "default": "break" }
+          }
+        },
+        "otelQueryLimits": {
+          "type": "object",
+          "properties": {
+            "maxMemoryUsage": { "type": "integer", "minimum": 1, "default": 4294967296 },
+            "maxThreads": { "type": "integer", "minimum": 1, "default": 8 },
+            "maxExecutionTime": { "type": "integer", "minimum": 1, "default": 120 }
+          }
+        },
+        "otelDatabase": { "type": "string", "default": "otel" }
+      }
+    },
+    "clickstack": {
+      "type": "object",
+      "description": "Built-in ClickStack observability backend (HyperDX UI, OTel collectors, FerretDB). The dependency condition uses global.clickstack.enabled so sibling subcharts can share the same switch.",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "clickhouse": {
+          "type": "object",
+          "properties": {
+            "database": { "type": "string" },
+            "username": { "type": "string" },
+            "existingSecret": { "type": "string" },
+            "existingSecretKey": { "type": "string" },
+            "retentionDays": { "type": "integer", "minimum": 1, "default": 7 },
+            "ttl": { "type": "string", "description": "Advanced ClickHouse exporter TTL override. Leave empty to derive from retentionDays." },
+            "decisionLogs": {
+              "type": "object",
+              "description": "Decision-log acceleration settings used automatically when ClickStack is enabled. Object storage remains the durable archive.",
+              "properties": {
+                "retentionDays": { "type": "integer", "minimum": 1, "default": 30 },
+                "sink": {
+                  "type": "object",
+                  "properties": {
+                    "batchMaxBytes": { "type": "integer", "minimum": 1, "default": 10485760 },
+                    "batchTimeoutSecs": { "type": "integer", "minimum": 1, "default": 5 },
+                    "bufferMaxSize": { "type": "integer", "minimum": 1, "default": 1073741824 }
+                  }
+                },
+                "objectStorageFallback": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": { "type": "boolean", "default": true }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "hyperdx": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "resources": { "$ref": "#/definitions/resources" },
+            "ingress": { "type": "object" }
+          }
+        },
+        "collector": {
+          "type": "object",
+          "properties": {
+            "memoryLimitMiB": { "type": "integer", "minimum": 64 },
+            "gateway": {
+              "type": "object",
+              "properties": {
+                "replicas": { "type": "integer", "minimum": 1 },
+                "resources": { "$ref": "#/definitions/resources" }
+              }
+            },
+            "agent": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "resources": { "$ref": "#/definitions/resources" }
+              }
+            }
+          }
+        },
+        "ferretdb": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "persistence": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "size": { "type": "string" },
+                "storageClassName": { "type": "string" }
+              }
+            },
+            "resources": {
+              "type": "object",
+              "properties": {
+                "ferretdb": { "$ref": "#/definitions/resources" },
+                "postgres": { "$ref": "#/definitions/resources" }
+              }
+            }
           }
         }
       }

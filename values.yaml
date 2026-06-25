@@ -64,6 +64,122 @@ global:
     paths:
       decisionLogs: "decision-logs"
       dbBackups: "db-backups"
+  # Cross-chart switch for the built-in ClickStack observability backend. This
+  # lives under global because sibling subcharts (rulebricks, clickhouse, etc.)
+  # cannot see top-level clickstack.enabled.
+  clickstack:
+    enabled: true
+    # Cross-chart mirror of the ClickStack decision-log acceleration settings
+    # below. The ClickHouse subchart needs these under global to render bootstrap
+    # SQL, but client-facing values should use clickstack.clickhouse.decisionLogs.
+    clickhouse:
+      decisionLogs:
+        retentionDays: 30
+        objectStorageFallback:
+          enabled: true
+
+# =============================================================================
+# CLICKSTACK OBSERVABILITY BACKEND
+# Built-in logs, traces, and mirrored metrics via ClickHouse + HyperDX. When
+# enabled, the ClickStack OTel gateway owns the <release>-otel-collector service
+# that app/HPS/worker/Traefik already send OTLP to. Decision logs still use the
+# object-storage-backed ClickHouse archive; recent rows are also cached in local
+# ClickHouse storage for fast UI/API queries.
+# =============================================================================
+clickstack:
+  # Mirrors global.clickstack.enabled for readability; the dependency condition
+  # and cross-subchart wiring use global.clickstack.enabled.
+  enabled: true
+  clickhouse:
+    database: otel
+    username: rulebricks
+    existingSecret: ""
+    existingSecretKey: admin-password
+    retentionDays: 7
+    # Advanced override. Leave empty to derive from retentionDays.
+    ttl: ""
+    # Decision-log acceleration is automatic when ClickStack is enabled. Recent
+    # decision logs are written into local ClickHouse MergeTree storage, while
+    # object storage remains the long-retention archive and fallback.
+    decisionLogs:
+      retentionDays: 30
+      sink:
+        batchMaxBytes: 10485760
+        batchTimeoutSecs: 5
+        bufferMaxSize: 1073741824
+      objectStorageFallback:
+        enabled: true
+  hyperdx:
+    enabled: true
+    image:
+      repository: docker.io/rulebricks/hyperdx
+      tag: "2.8.0"
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+    ingress:
+      enabled: true
+      className: traefik
+      hostname: "" # Defaults to observability.<global.domain>
+      allowedIPs: []
+  collector:
+    image:
+      repository: docker.io/rulebricks/clickstack-otel-collector
+      tag: "2.8.0"
+    memoryLimitMiB: 800
+    gateway:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 2000m
+          memory: 1Gi
+    agent:
+      enabled: true
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+  ferretdb:
+    enabled: true
+    image:
+      repository: docker.io/rulebricks/ferretdb
+      tag: "2.8.0"
+    postgresImage:
+      repository: docker.io/rulebricks/postgres-documentdb
+      tag: "17-0.108.0-ferretdb-2.8.0"
+    auth:
+      username: hyperdx
+      password: ""
+      existingSecret: ""
+      existingSecretKey: password
+    persistence:
+      enabled: true
+      size: 10Gi
+    resources:
+      ferretdb:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      postgres:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 1000m
+          memory: 1Gi
   # =============================================================================
   # Distributed Tracing (OpenTelemetry)
   # Deploys an in-cluster OpenTelemetry Collector (parent-chart templates) that
@@ -756,8 +872,9 @@ kafka:
       enabled: true
 
 # Rulebricks always deploys ClickHouse for native decision-log query support.
-# This is stateless: all decision-log data lives in object storage; you can
-# still query it directly via your own solutions.
+# Decision logs remain object-storage-backed via a view. When clickstack.enabled
+# is true (the default), this same ClickHouse also stores operational telemetry
+# in local MergeTree tables, so persistence is enabled below.
 clickhouse:
   enabled: true
   # Critical-tier scheduling: set to "<release>-critical" so the single
@@ -776,19 +893,20 @@ clickhouse:
   keeper:
     enabled: false
   persistence:
-    enabled: false
+    enabled: true
+    size: 100Gi
   resources:
     requests:
-      cpu: "500m"
-      memory: "2Gi"
+      cpu: "1000m"
+      memory: "4Gi"
     limits:
       # Decision-log queries read gzipped NDJSON straight from object storage and
       # aggregate in memory, so they are CPU- and memory-hungry. The previous
       # 1 CPU / 2Gi ceiling caused MEMORY_LIMIT_EXCEEDED (server cap ~1.8Gi) and
       # TIMEOUT_EXCEEDED from CPU throttling. Give the single replica real
       # headroom (server memory cap becomes ~5.4Gi at 0.9 x 6Gi).
-      cpu: "2"
-      memory: "6Gi"
+      cpu: "4"
+      memory: "12Gi"
   serviceAccount:
     create: true
     annotations: {}
@@ -814,6 +932,11 @@ clickhouse:
     # to "throw" if you would rather fail loudly than return partial data.
     maxRowsToRead: 50000000
     readOverflowMode: break
+  otelQueryLimits:
+    maxMemoryUsage: 4294967296
+    maxThreads: 8
+    maxExecutionTime: 120
+  otelDatabase: otel
   configdFiles:
     # Server-level named collections belong in config.d (the <clickhouse> root).
     09-decision-log-storage.xml: '{{ include "rulebricks.clickhouse.decisionLogStorageXml" . }}'
@@ -826,6 +949,7 @@ clickhouse:
     11-named-collection-access.xml: '{{ include "rulebricks.clickhouse.userAccessXml" . }}'
   initdbScripts:
     01-decision-logs-view.sh: '{{ include "rulebricks.clickhouse.decisionLogsViewScript" . }}'
+    02-otel-database.sh: '{{ include "rulebricks.clickhouse.otelDatabaseScript" . }}'
 
 # Ingress Controller (Traefik)
 traefik:

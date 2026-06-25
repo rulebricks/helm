@@ -1,4 +1,8 @@
 {{- if .Values.auth.enabled -}}
+{{- $global := .Values.global | default dict -}}
+{{- $supabaseEmails := dig "supabase" "emails" dict $global -}}
+{{- $emailSubjects := ($supabaseEmails.subjects | default dict) -}}
+{{- $emailTemplates := ($supabaseEmails.templates | default dict) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -111,26 +115,26 @@ spec:
               value: {{ .Values.global.smtp.fromName | quote }}
             {{- end }}
             {{- /* Email customization from global.supabase.emails */ -}}
-            {{- if .Values.global.supabase.emails }}
-            {{- if .Values.global.supabase.emails.subjects }}
+            {{- if $supabaseEmails }}
+            {{- if $emailSubjects }}
             - name: GOTRUE_MAILER_SUBJECTS_INVITE
-              value: {{ .Values.global.supabase.emails.subjects.invite | quote }}
+              value: {{ $emailSubjects.invite | quote }}
             - name: GOTRUE_MAILER_SUBJECTS_CONFIRMATION
-              value: {{ .Values.global.supabase.emails.subjects.confirmation | quote }}
+              value: {{ $emailSubjects.confirmation | quote }}
             - name: GOTRUE_MAILER_SUBJECTS_RECOVERY
-              value: {{ .Values.global.supabase.emails.subjects.recovery | quote }}
+              value: {{ $emailSubjects.recovery | quote }}
             - name: GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE
-              value: {{ .Values.global.supabase.emails.subjects.emailChange | quote }}
+              value: {{ $emailSubjects.emailChange | quote }}
             {{- end }}
-            {{- if .Values.global.supabase.emails.templates }}
+            {{- if $emailTemplates }}
             - name: GOTRUE_MAILER_TEMPLATES_INVITE
-              value: {{ .Values.global.supabase.emails.templates.invite | quote }}
+              value: {{ $emailTemplates.invite | quote }}
             - name: GOTRUE_MAILER_TEMPLATES_CONFIRMATION
-              value: {{ .Values.global.supabase.emails.templates.confirmation | quote }}
+              value: {{ $emailTemplates.confirmation | quote }}
             - name: GOTRUE_MAILER_TEMPLATES_RECOVERY
-              value: {{ .Values.global.supabase.emails.templates.recovery | quote }}
+              value: {{ $emailTemplates.recovery | quote }}
             - name: GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE
-              value: {{ .Values.global.supabase.emails.templates.emailChange | quote }}
+              value: {{ $emailTemplates.emailChange | quote }}
             {{- end }}
             {{- end }}
             {{- /* SSO / External OIDC provider configuration from global.sso */ -}}

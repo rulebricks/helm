@@ -11,6 +11,9 @@ dependencies:
 - name: clickhouse
   repository: file://charts/clickhouse
   version: 9.4.4
+- name: clickstack
+  repository: file://charts/clickstack
+  version: 0.1.0
 - name: supabase
   repository: file://charts/supabase
   version: 0.1.4
@@ -35,5 +38,5 @@ dependencies:
 - name: external-dns
   repository: https://kubernetes-sigs.github.io/external-dns/
   version: 1.14.5
-digest: sha256:4d63bd87036511ce5cf6a9d743bf61c6802d1d5840f110be810bb9c1ff5b2b6e
-generated: "2026-06-15T12:44:44.161454-07:00"
+digest: sha256:34d8090356a71de9b20251a4daa16c48303c27ab2793a8a27be19875de4b0783
+generated: "2026-06-24T17:24:56.503166-07:00"

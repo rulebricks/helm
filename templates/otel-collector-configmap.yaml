@@ -1,5 +1,6 @@
 {{- $tracing := .Values.global.tracing | default dict }}
-{{- if $tracing.enabled }}
+{{- $clickstack := (.Values.global.clickstack | default dict) }}
+{{- if and $tracing.enabled (not ($clickstack.enabled | default false)) }}
 {{- $destination := $tracing.destination | default "elastic" }}
 {{- $elastic := $tracing.elastic | default dict }}
 {{- $otlp := $tracing.otlp | default dict }}

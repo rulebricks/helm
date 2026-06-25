@@ -1,0 +1,15 @@
+apiVersion: v2
+name: clickstack
+description: Rulebricks ClickStack observability backend (HyperDX, OpenTelemetry collectors, FerretDB)
+type: application
+version: 0.1.0
+appVersion: "2.8.0"
+keywords:
+  - clickstack
+  - hyperdx
+  - observability
+  - opentelemetry
+  - clickhouse
+maintainers:
+  - name: Rulebricks
+    email: support@rulebricks.com

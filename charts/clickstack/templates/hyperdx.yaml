@@ -1,0 +1,376 @@
+{{- if and .Values.enabled .Values.hyperdx.enabled -}}
+{{- $name := include "clickstack.hyperdx.fullname" . -}}
+{{- $hostname := .Values.hyperdx.ingress.hostname | default (printf "observability.%s" .Values.global.domain) -}}
+{{- $tlsEnabled := eq (.Values.global.tlsEnabled | toString) "true" -}}
+{{- if and .Values.hyperdx.ingress.tls (hasKey .Values.hyperdx.ingress.tls "enabled") (ne (.Values.hyperdx.ingress.tls.enabled | toString) "") -}}
+  {{- $tlsEnabled = eq (.Values.hyperdx.ingress.tls.enabled | toString) "true" -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-defaults
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clickstack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hyperdx
+data:
+  connections.json: |
+    [
+      {
+        "name": "Rulebricks ClickHouse",
+        "host": "{{ include "clickstack.clickhouse.httpEndpoint" . }}",
+        "username": "{{ .Values.clickhouse.username }}",
+        "password": "",
+        "useSsl": false
+      }
+    ]
+  sources.json: |
+    [
+      {
+        "from": {
+          "databaseName": "{{ .Values.clickhouse.database | default "otel" }}",
+          "tableName": "{{ .Values.clickhouse.logsTableName | default "otel_logs" }}"
+        },
+        "kind": "log",
+        "name": "Operational Logs",
+        "connection": "Rulebricks ClickHouse",
+        "timestampValueExpression": "TimestampTime",
+        "displayedTimestampValueExpression": "Timestamp",
+        "implicitColumnExpression": "Body",
+        "serviceNameExpression": "ServiceName",
+        "bodyExpression": "Body",
+        "eventAttributesExpression": "LogAttributes",
+        "resourceAttributesExpression": "ResourceAttributes",
+        "severityTextExpression": "SeverityText",
+        "traceIdExpression": "TraceId",
+        "spanIdExpression": "SpanId"
+      },
+      {
+        "from": {
+          "databaseName": "{{ .Values.clickhouse.database | default "otel" }}",
+          "tableName": "{{ .Values.clickhouse.tracesTableName | default "otel_traces" }}"
+        },
+        "kind": "trace",
+        "name": "Distributed Traces",
+        "connection": "Rulebricks ClickHouse",
+        "timestampValueExpression": "Timestamp",
+        "displayedTimestampValueExpression": "Timestamp",
+        "implicitColumnExpression": "SpanName",
+        "serviceNameExpression": "ServiceName",
+        "traceIdExpression": "TraceId",
+        "spanIdExpression": "SpanId",
+        "durationExpression": "Duration"
+      },
+      {
+        "from": {
+          "databaseName": "{{ .Values.clickhouse.database | default "otel" }}",
+          "tableName": ""
+        },
+        "kind": "metric",
+        "name": "Metrics",
+        "connection": "Rulebricks ClickHouse",
+        "timestampValueExpression": "TimeUnix",
+        "serviceNameExpression": "ServiceName",
+        "resourceAttributesExpression": "ResourceAttributes",
+        "metricTables": {
+          "gauge": "{{ .Values.clickhouse.metricsTables.gauge | default "otel_metrics_gauge" }}",
+          "sum": "{{ .Values.clickhouse.metricsTables.sum | default "otel_metrics_sum" }}",
+          "histogram": "{{ .Values.clickhouse.metricsTables.histogram | default "otel_metrics_histogram" }}",
+          "summary": "{{ .Values.clickhouse.metricsTables.summary | default "otel_metrics_summary" }}",
+          "exponential histogram": "{{ .Values.clickhouse.metricsTables.exponentialHistogram | default "otel_metrics_exp_histogram" }}"
+        },
+        "querySettings": []
+      },
+      {
+        "from": {
+          "databaseName": "rulebricks",
+          "tableName": "decision_logs"
+        },
+        "kind": "log",
+        "name": "Decision Logs",
+        "connection": "Rulebricks ClickHouse",
+        "timestampValueExpression": "timestamp",
+        "displayedTimestampValueExpression": "timestamp",
+        "implicitColumnExpression": "decision",
+        "serviceNameExpression": "operation",
+        "bodyExpression": "decision",
+        "eventAttributesExpression": "params",
+        "severityTextExpression": "level",
+        "traceIdExpression": "trace_id",
+        "spanIdExpression": "span_id"
+      }
+    ]
+  saved-searches.json: |
+    [
+      {
+        "name": "Rulebricks Errors",
+        "source": "Operational Logs",
+        "query": "SeverityText:ERROR OR SeverityText:error OR level:error"
+      },
+      {
+        "name": "Find Request By Trace ID",
+        "source": "Distributed Traces",
+        "query": "TraceId:<paste-trace-id>"
+      },
+      {
+        "name": "HPS Errors And Timeouts",
+        "source": "Operational Logs",
+        "query": "ServiceName:rulebricks-hps AND (SeverityText:ERROR OR Body:timeout OR Body:kafka_unavailable)"
+      },
+      {
+        "name": "Worker Errors",
+        "source": "Operational Logs",
+        "query": "ServiceName:rulebricks-hps-worker AND (SeverityText:ERROR OR Body:error)"
+      },
+      {
+        "name": "Slow HPS / Worker Spans",
+        "source": "Distributed Traces",
+        "query": "ServiceName:(rulebricks-hps OR rulebricks-hps-worker)"
+      },
+      {
+        "name": "Redis Latency Or Errors",
+        "source": "Operational Logs",
+        "query": "(Body:redis OR Body:valkey OR Body:cache) AND (SeverityText:ERROR OR Body:slow OR Body:timeout)"
+      },
+      {
+        "name": "Decision Logs With Trace IDs",
+        "source": "Decision Logs",
+        "query": "trace_id:*"
+      },
+      {
+        "name": "Decision Logs Missing Trace IDs",
+        "source": "Decision Logs",
+        "query": "-trace_id:*"
+      },
+      {
+        "name": "ClickStack Collector Errors",
+        "source": "Operational Logs",
+        "query": "ServiceName:rulebricks-otel-collector AND (SeverityText:ERROR OR Body:error)"
+      }
+    ]
+  dashboards.json: |
+    [
+      {
+        "name": "Rulebricks Operations",
+        "description": "Starter ClickStack dashboard metadata for API/HPS logs, distributed traces, mirrored Prometheus metrics, and decision-log trace correlation.",
+        "panels": [
+          { "title": "Operational logs by service", "source": "Operational Logs" },
+          { "title": "Trace volume by service", "source": "Distributed Traces" },
+          { "title": "Mirrored Prometheus metrics", "source": "Metrics" },
+          { "title": "Decision logs by trace id", "source": "Decision Logs" }
+        ]
+      }
+    ]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clickstack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hyperdx
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "clickstack.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: hyperdx
+  ports:
+    - name: http
+      port: {{ .Values.hyperdx.ports.app }}
+      targetPort: http
+      protocol: TCP
+    - name: api
+      port: {{ .Values.hyperdx.ports.api }}
+      targetPort: api
+      protocol: TCP
+    - name: opamp
+      port: {{ .Values.hyperdx.ports.opamp }}
+      targetPort: opamp
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clickstack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hyperdx
+spec:
+  replicas: {{ .Values.hyperdx.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "clickstack.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: hyperdx
+  template:
+    metadata:
+      labels:
+        {{- include "clickstack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: hyperdx
+        {{- with .Values.hyperdx.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- with .Values.hyperdx.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "clickstack.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hyperdx.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hyperdx.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hyperdx.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: hyperdx
+          image: "{{ .Values.hyperdx.image.repository }}:{{ .Values.hyperdx.image.tag }}"
+          imagePullPolicy: {{ .Values.hyperdx.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.hyperdx.ports.app }}
+            - name: api
+              containerPort: {{ .Values.hyperdx.ports.api }}
+            - name: opamp
+              containerPort: {{ .Values.hyperdx.ports.opamp }}
+          env:
+            - name: FERRETDB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clickstack.ferretdb.passwordSecretName" . }}
+                  key: {{ include "clickstack.ferretdb.passwordSecretKey" . }}
+            - name: MONGO_URI
+              value: {{ include "clickstack.ferretdb.mongoUri" . | quote }}
+            - name: CLICKHOUSE_ENDPOINT
+              value: {{ include "clickstack.clickhouse.httpEndpoint" . | quote }}
+            - name: CLICKHOUSE_USER
+              value: {{ .Values.clickhouse.username | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clickstack.clickhouse.passwordSecretName" . }}
+                  key: {{ .Values.clickhouse.existingSecretKey | default "admin-password" }}
+            - name: HYPERDX_OTEL_EXPORTER_CLICKHOUSE_DATABASE
+              value: {{ .Values.clickhouse.database | default "otel" | quote }}
+            - name: HYPERDX_LOG_LEVEL
+              value: {{ .Values.hyperdx.logLevel | default "info" | quote }}
+            - name: HYPERDX_APP_PORT
+              value: {{ .Values.hyperdx.ports.app | quote }}
+            - name: HYPERDX_API_PORT
+              value: {{ .Values.hyperdx.ports.api | quote }}
+            - name: HYPERDX_OPAMP_PORT
+              value: {{ .Values.hyperdx.ports.opamp | quote }}
+            - name: HYPERDX_APP_URL
+              value: {{ include "clickstack.hyperdx.appUrl" . | quote }}
+            - name: FRONTEND_URL
+              value: {{ include "clickstack.hyperdx.appUrl" . | quote }}
+            - name: NEXT_PUBLIC_HDX_LOCAL_DEFAULT_CONNECTIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $name }}-defaults
+                  key: connections.json
+            - name: NEXT_PUBLIC_HDX_LOCAL_DEFAULT_SOURCES
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $name }}-defaults
+                  key: sources.json
+            {{- with .Values.hyperdx.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.hyperdx.resources | nindent 12 }}
+          volumeMounts:
+            - name: defaults
+              mountPath: /etc/hyperdx/rulebricks-defaults
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: defaults
+          configMap:
+            name: {{ $name }}-defaults
+---
+{{- if .Values.hyperdx.ingress.enabled }}
+{{- if .Values.hyperdx.ingress.allowedIPs }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $name }}-ip-whitelist
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clickstack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hyperdx
+spec:
+  ipWhiteList:
+    sourceRange:
+      {{- range .Values.hyperdx.ingress.allowedIPs }}
+      - {{ . | quote }}
+      {{- end }}
+---
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clickstack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hyperdx
+  annotations:
+    {{- if $tlsEnabled }}
+    cert-manager.io/cluster-issuer: {{ .Release.Name }}-letsencrypt
+    {{- end }}
+    {{- if and .Values.global .Values.global.externalDnsEnabled }}
+    external-dns.alpha.kubernetes.io/hostname: {{ $hostname }}
+    external-dns.alpha.kubernetes.io/ttl: "300"
+    {{- end }}
+    {{- if eq (.Values.hyperdx.ingress.className | default "traefik") "traefik" }}
+    {{- if .Values.hyperdx.ingress.allowedIPs }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ $name }}-ip-whitelist@kubernetescrd
+    {{- end }}
+    {{- if $tlsEnabled }}
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    {{- else }}
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.tls: "false"
+    {{- end }}
+    {{- end }}
+    {{- with .Values.hyperdx.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.hyperdx.ingress.className | default "traefik" }}
+  {{- if $tlsEnabled }}
+  tls:
+    - hosts:
+        - {{ $hostname | quote }}
+      secretName: {{ $name }}-tls
+  {{- end }}
+  rules:
+    - host: {{ $hostname | quote }}
+      http:
+        paths:
+          - path: {{ .Values.hyperdx.ingress.path | default "/" }}
+            pathType: {{ .Values.hyperdx.ingress.pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  number: {{ .Values.hyperdx.ports.app }}
+{{- end }}
+{{- end }}

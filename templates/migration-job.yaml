@@ -15,6 +15,10 @@ Migration Strategy Options (migrations.strategy):
     Pros: Full control over when/how migrations run
     Cons: Requires separate kubectl apply step
 */}}
+{{- $global := .Values.global | default dict -}}
+{{- $supabaseEmails := dig "supabase" "emails" dict $global -}}
+{{- $emailSubjects := ($supabaseEmails.subjects | default dict) -}}
+{{- $emailTemplates := ($supabaseEmails.templates | default dict) -}}
 {{- if .Values.supabase.enabled -}}
 {{- $strategy := .Values.migrations.strategy | default "hook" }}
 apiVersion: batch/v1
@@ -420,22 +424,22 @@ spec:
               value: {{ .Values.global.domain | quote }}
             # Email subject configuration
             - name: EMAIL_SUBJECTS_INVITE
-              value: {{ .Values.global.supabase.emails.subjects.invite | quote }}
+              value: {{ $emailSubjects.invite | default "You have been invited" | quote }}
             - name: EMAIL_SUBJECTS_CONFIRMATION
-              value: {{ .Values.global.supabase.emails.subjects.confirmation | quote }}
+              value: {{ $emailSubjects.confirmation | default "Confirm Your Email" | quote }}
             - name: EMAIL_SUBJECTS_RECOVERY
-              value: {{ .Values.global.supabase.emails.subjects.recovery | quote }}
+              value: {{ $emailSubjects.recovery | default "Reset Your Password" | quote }}
             - name: EMAIL_SUBJECTS_EMAIL_CHANGE
-              value: {{ .Values.global.supabase.emails.subjects.emailChange | quote }}
+              value: {{ $emailSubjects.emailChange | default "Confirm Email Change" | quote }}
             # Email template URL configuration
             - name: EMAIL_TEMPLATES_INVITE
-              value: {{ .Values.global.supabase.emails.templates.invite | quote }}
+              value: {{ $emailTemplates.invite | default "" | quote }}
             - name: EMAIL_TEMPLATES_CONFIRMATION
-              value: {{ .Values.global.supabase.emails.templates.confirmation | quote }}
+              value: {{ $emailTemplates.confirmation | default "" | quote }}
             - name: EMAIL_TEMPLATES_RECOVERY
-              value: {{ .Values.global.supabase.emails.templates.recovery | quote }}
+              value: {{ $emailTemplates.recovery | default "" | quote }}
             - name: EMAIL_TEMPLATES_EMAIL_CHANGE
-              value: {{ .Values.global.supabase.emails.templates.emailChange | quote }}
+              value: {{ $emailTemplates.emailChange | default "" | quote }}
             # Email confirmations - disabled when SSO is enabled (IdP handles auth)
             - name: ENABLE_CONFIRMATIONS
               {{- if and .Values.global .Values.global.sso .Values.global.sso.enabled }}

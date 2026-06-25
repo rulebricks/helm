@@ -1,0 +1,145 @@
+{{- if and .Values.enabled .Values.ferretdb.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "clickstack.ferretdb.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clickstack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ferretdb
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "clickstack.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: ferretdb
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: mongo
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "clickstack.ferretdb.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "clickstack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ferretdb
+spec:
+  serviceName: {{ include "clickstack.ferretdb.fullname" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "clickstack.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ferretdb
+  template:
+    metadata:
+      labels:
+        {{- include "clickstack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ferretdb
+        {{- with .Values.ferretdb.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- with .Values.ferretdb.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "clickstack.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ferretdb.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ferretdb.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ferretdb.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: postgres-documentdb
+          image: "{{ .Values.ferretdb.postgresImage.repository }}:{{ .Values.ferretdb.postgresImage.tag }}"
+          imagePullPolicy: {{ .Values.ferretdb.postgresImage.pullPolicy }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.ferretdb.auth.username | default "hyperdx" | quote }}
+            - name: POSTGRES_DB
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clickstack.ferretdb.passwordSecretName" . }}
+                  key: {{ include "clickstack.ferretdb.passwordSecretKey" . }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            {{- toYaml .Values.ferretdb.resources.postgres | nindent 12 }}
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - pg_isready -U "$POSTGRES_USER" -d postgres
+            initialDelaySeconds: 10
+            periodSeconds: 10
+        - name: ferretdb
+          image: "{{ .Values.ferretdb.image.repository }}:{{ .Values.ferretdb.image.tag }}"
+          imagePullPolicy: {{ .Values.ferretdb.image.pullPolicy }}
+          ports:
+            - name: mongo
+              containerPort: 27017
+          env:
+            - name: FERRETDB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clickstack.ferretdb.passwordSecretName" . }}
+                  key: {{ include "clickstack.ferretdb.passwordSecretKey" . }}
+            - name: FERRETDB_POSTGRESQL_URL
+              value: {{ printf "postgres://%s:$(FERRETDB_PASSWORD)@127.0.0.1:5432/postgres" (.Values.ferretdb.auth.username | default "hyperdx") | quote }}
+            - name: FERRETDB_LOG_LEVEL
+              value: info
+          volumeMounts:
+            - name: ferretdb-state
+              mountPath: /state
+          resources:
+            {{- toYaml .Values.ferretdb.resources.ferretdb | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: mongo
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: ferretdb-state
+          emptyDir: {}
+        {{- if not .Values.ferretdb.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if .Values.ferretdb.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "clickstack.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- with .Values.ferretdb.persistence.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.ferretdb.persistence.size | quote }}
+  {{- end }}
+{{- end }}

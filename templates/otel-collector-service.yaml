@@ -1,4 +1,5 @@
-{{- if (.Values.global.tracing | default dict).enabled }}
+{{- $clickstack := (.Values.global.clickstack | default dict) }}
+{{- if and ((.Values.global.tracing | default dict).enabled) (not ($clickstack.enabled | default false)) }}
 apiVersion: v1
 kind: Service
 metadata:
