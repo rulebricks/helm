@@ -1471,14 +1471,6 @@
                   "user": { "type": "string", "minLength": 1 },
                   "pass": { "type": "string", "minLength": 1 }
                 }
-              },
-              "supabase": {
-                "type": "object",
-                "required": ["anonKey", "serviceKey"],
-                "properties": {
-                  "anonKey": { "type": "string", "minLength": 1 },
-                  "serviceKey": { "type": "string", "minLength": 1 }
-                }
               }
             }
           }
