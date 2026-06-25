@@ -949,7 +949,6 @@ clickhouse:
     11-named-collection-access.xml: '{{ include "rulebricks.clickhouse.userAccessXml" . }}'
   initdbScripts:
     01-decision-logs-view.sh: '{{ include "rulebricks.clickhouse.decisionLogsViewScript" . }}'
-    02-otel-database.sh: '{{ include "rulebricks.clickhouse.otelDatabaseScript" . }}'
 
 # Ingress Controller (Traefik)
 traefik:

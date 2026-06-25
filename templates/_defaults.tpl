@@ -141,6 +141,8 @@ otherwise corrupt a multi-line script.
 {{- $retentionDays := $decisionLogs.retentionDays | default 30 | int -}}
 {{- $fallback := dig "objectStorageFallback" "enabled" true $decisionLogs -}}
 {{- $columns := include "rulebricks.clickhouse.decisionLogSelectColumns" . -}}
+{{- $user := .Values.auth.username | default "rulebricks" -}}
+{{- $otelDb := .Values.otelDatabase | default "otel" -}}
 {{- /* The view exposes the Hive path partitions (year/month/day/hour) as stable
        UInt columns so callers can prune by partition. The CAST is deliberate: the
        raw Hive virtual columns come back as LowCardinality with an inference-
@@ -151,20 +153,7 @@ otherwise corrupt a multi-line script.
        use_hive_partitioning + allow_suspicious_low_cardinality_types are passed on
        the create so the columns resolve at bootstrap regardless of profile load
        order. Keep on a SINGLE line (the initdb scalar folds newlines to spaces). */ -}}
-clickhouse-client --host 127.0.0.1 --user "${CLICKHOUSE_ADMIN_USER:-default}" --password "${CLICKHOUSE_ADMIN_PASSWORD:-}" --use_hive_partitioning=1 --allow_suspicious_low_cardinality_types=1 --multiquery "CREATE DATABASE IF NOT EXISTS rulebricks; CREATE OR REPLACE VIEW rulebricks.decision_logs_archive AS SELECT {{ $columns }}, CAST(year AS UInt16) AS year, CAST(month AS UInt8) AS month, CAST(day AS UInt8) AS day, CAST(hour AS UInt8) AS hour FROM {{ $source }}; {{- if $accelerated }} CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent ({{ include "rulebricks.clickhouse.decisionLogLocalStructure" . }}, year UInt16 MATERIALIZED toYear(timestamp), month UInt8 MATERIALIZED toMonth(timestamp), day UInt8 MATERIALIZED toDayOfMonth(timestamp), hour UInt8 MATERIALIZED toHour(timestamp)) ENGINE = MergeTree PARTITION BY toYYYYMM(timestamp) ORDER BY (api_key, timestamp, status) TTL toDateTime(timestamp) + INTERVAL {{ $retentionDays }} DAY DELETE; ALTER TABLE rulebricks.decision_logs_recent MODIFY TTL toDateTime(timestamp) + INTERVAL {{ $retentionDays }} DAY DELETE; {{- if $fallback }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent WHERE timestamp >= now() - INTERVAL {{ $retentionDays }} DAY UNION ALL SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive WHERE timestamp < now() - INTERVAL {{ $retentionDays }} DAY;{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent;{{- end }}{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive;{{- end }}"
-{{- end -}}
-
-{{- /*
-Bootstrap the ClickStack/OpenTelemetry database. The collector owns table
-creation (create_schema=true) so this only ensures the database exists and the
-Rulebricks ClickHouse user can create/insert/select telemetry tables.
-Keep on a SINGLE line for the same initdb scalar reason as the decision-log
-script above.
-*/ -}}
-{{- define "rulebricks.clickhouse.otelDatabaseScript" -}}
-{{- $user := .Values.auth.username | default "rulebricks" -}}
-{{- $db := .Values.otelDatabase | default "otel" -}}
-clickhouse-client --host 127.0.0.1 --user "${CLICKHOUSE_ADMIN_USER:-default}" --password "${CLICKHOUSE_ADMIN_PASSWORD:-}" --multiquery "CREATE DATABASE IF NOT EXISTS {{ $db }}; GRANT ALL ON {{ $db }}.* TO {{ $user }};"
+clickhouse-client --host 127.0.0.1 --user "${CLICKHOUSE_ADMIN_USER:-default}" --password "${CLICKHOUSE_ADMIN_PASSWORD:-}" --use_hive_partitioning=1 --allow_suspicious_low_cardinality_types=1 --multiquery "CREATE DATABASE IF NOT EXISTS rulebricks; CREATE DATABASE IF NOT EXISTS {{ $otelDb }}; GRANT ALL ON {{ $otelDb }}.* TO {{ $user }}; CREATE OR REPLACE VIEW rulebricks.decision_logs_archive AS SELECT {{ $columns }}, CAST(year AS UInt16) AS year, CAST(month AS UInt8) AS month, CAST(day AS UInt8) AS day, CAST(hour AS UInt8) AS hour FROM {{ $source }}; {{- if $accelerated }} CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent ({{ include "rulebricks.clickhouse.decisionLogLocalStructure" . }}, year UInt16 MATERIALIZED toYear(timestamp), month UInt8 MATERIALIZED toMonth(timestamp), day UInt8 MATERIALIZED toDayOfMonth(timestamp), hour UInt8 MATERIALIZED toHour(timestamp)) ENGINE = MergeTree PARTITION BY toYYYYMM(timestamp) ORDER BY (api_key, timestamp, status) TTL toDateTime(timestamp) + INTERVAL {{ $retentionDays }} DAY DELETE; ALTER TABLE rulebricks.decision_logs_recent MODIFY TTL toDateTime(timestamp) + INTERVAL {{ $retentionDays }} DAY DELETE; {{- if $fallback }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent WHERE timestamp >= now() - INTERVAL {{ $retentionDays }} DAY UNION ALL SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive WHERE timestamp < now() - INTERVAL {{ $retentionDays }} DAY;{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent;{{- end }}{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive;{{- end }}"
 {{- end -}}
 
 {{- /*
