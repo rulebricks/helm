@@ -4,7 +4,7 @@
 {{- $image := $exporter.image | default dict -}}
 {{- $service := $exporter.service | default dict -}}
 {{- $resources := $exporter.resources | default dict -}}
-{{- $brokers := $exporter.brokers | default .Values.app.logging.kafkaBrokers | default (printf "%s-kafka:9092" .Release.Name) -}}
+{{- $brokers := $exporter.brokers | default .Values.app.logging.kafkaBrokers | default (printf "%s-kafka-kafka-bootstrap:9092" .Release.Name) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -36,6 +36,11 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
+      imagePullSecrets:
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
       {{- with $exporter.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -50,8 +55,14 @@ spec:
       {{- end }}
       containers:
         - name: kafka-exporter
-          image: {{ printf "%s:%s" ($image.repository | default "danielqsj/kafka-exporter") ($image.tag | default "v1.9.0") | quote }}
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" $image "name" "kafka-exporter") | quote }}
           imagePullPolicy: {{ $image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
           args:
             {{- range $broker := splitList "," $brokers }}
             - --kafka.server={{ trim $broker }}

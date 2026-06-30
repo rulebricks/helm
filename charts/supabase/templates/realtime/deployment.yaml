@@ -33,7 +33,7 @@ spec:
         {{- toYaml .Values.realtime.podSecurityContext | nindent 8 }}
       initContainers:
         - name: init-db
-          image: postgres:15-alpine
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.global.images.postgres15 "name" "postgres15") | quote }}
           imagePullPolicy: IfNotPresent
           env:
             - name: DB_HOST
@@ -57,18 +57,32 @@ spec:
         - name: {{ include "supabase.realtime.name" $ }}
           securityContext:
             {{- toYaml .Values.realtime.securityContext | nindent 12 }}
-          image: "{{ .Values.realtime.image.repository }}:{{ .Values.realtime.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.realtime.image "name" "supabase-realtime") | quote }}
           imagePullPolicy: {{ .Values.realtime.image.pullPolicy }}
           command: ["/bin/sh"]
           args: ["-c", "/app/bin/migrate && /app/bin/realtime eval 'Realtime.Release.seeds(Realtime.Repo)' && /app/bin/server"]
           env:
-            {{- $dbSkipKeys := list "DB_HOST" "DB_PORT" }}
+            {{- $dbSkipKeys := list "DB_HOST" "DB_PORT" "DB_USER" "SECRET_KEY_BASE" "DB_ENC_KEY" }}
             {{- range $key, $value := .Values.realtime.environment }}
             {{- if not (has $key $dbSkipKeys) }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
             {{- end }}
+            - name: DB_USER
+              value: {{ include "supabase.realtime.dbUser" . | quote }}
+            # SECRET_KEY_BASE / DB_ENC_KEY are sensitive — sourced from a Secret,
+            # never rendered as plaintext pod env.
+            - name: SECRET_KEY_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase.realtime.secretName" . }}
+                  key: {{ include "supabase.realtime.secretKey" (dict "root" . "field" "secretKeyBase" "default" "SECRET_KEY_BASE") }}
+            - name: DB_ENC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase.realtime.secretName" . }}
+                  key: {{ include "supabase.realtime.secretKey" (dict "root" . "field" "dbEncKey" "default" "DB_ENC_KEY") }}
             - name: DB_HOST
               value: {{ include "supabase.db.host" . | quote }}
             - name: DB_PORT

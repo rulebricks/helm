@@ -65,7 +65,7 @@ spec:
       {{- end }}
       containers:
         - name: postgres-documentdb
-          image: "{{ .Values.ferretdb.postgresImage.repository }}:{{ .Values.ferretdb.postgresImage.tag }}"
+          image: {{ include "clickstack.image" (dict "root" $ "image" .Values.ferretdb.postgresImage "name" "postgres-documentdb") | quote }}
           imagePullPolicy: {{ .Values.ferretdb.postgresImage.pullPolicy }}
           ports:
             - name: postgres
@@ -96,7 +96,7 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
         - name: ferretdb
-          image: "{{ .Values.ferretdb.image.repository }}:{{ .Values.ferretdb.image.tag }}"
+          image: {{ include "clickstack.image" (dict "root" $ "image" .Values.ferretdb.image "name" "ferretdb") | quote }}
           imagePullPolicy: {{ .Values.ferretdb.image.pullPolicy }}
           ports:
             - name: mongo

@@ -35,7 +35,7 @@ spec:
         - name: {{ include "supabase.kong.name" $ }}
           securityContext:
             {{- toYaml .Values.kong.securityContext | nindent 12 }}
-          image: "{{ .Values.kong.image.repository }}:{{ .Values.kong.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.kong.image "name" "supabase-kong") | quote }}
           imagePullPolicy: {{ .Values.kong.image.pullPolicy }}
           command: ["/bin/bash"]
           args: ["/scripts/wrapper.sh"]

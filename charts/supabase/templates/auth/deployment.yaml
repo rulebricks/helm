@@ -37,7 +37,7 @@ spec:
         {{- toYaml .Values.auth.podSecurityContext | nindent 8 }}
       initContainers:
         - name: init-db
-          image: postgres:15-alpine
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.global.images.postgres15 "name" "postgres15") | quote }}
           imagePullPolicy: IfNotPresent
           env:
             - name: DB_HOST
@@ -61,7 +61,7 @@ spec:
         - name: {{ include "supabase.auth.name" $ }}
           securityContext:
             {{- toYaml .Values.auth.securityContext | nindent 12 }}
-          image: "{{ .Values.auth.image.repository }}:{{ .Values.auth.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.auth.image "name" "supabase-gotrue") | quote }}
           imagePullPolicy: {{ .Values.auth.image.pullPolicy }}
           env:
             {{- /* 

@@ -9,7 +9,7 @@ metadata:
 spec:
   containers:
     - name: wget
-      image: busybox
+      image: {{ include "rulebricks-chart.image" (dict "root" $ "image" .Values.global.images.busybox "name" "busybox") | quote }}
       command: ['wget']
       args: ['{{ include "rulebricks-chart.fullname" . }}:{{ .Values.service.port }}']
   restartPolicy: Never

@@ -111,32 +111,21 @@ spec:
              leaves its consumer unable to join and /ready stuck at 503. JMX is
              disabled so the Kafka CLI does not try to bind the broker JMX port. */}}
         - name: wait-for-kafka
-          image: {{ .Values.hps.waitForKafka.image }}
-          command:
-            - /bin/bash
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" .Values.global.images.busybox "name" "busybox") | quote }}
+          command: ["sh", "-ec"]
           args:
-            - -ec
             - |
-              BOOT="{{ .Release.Name }}-kafka:9092"
-              echo "Waiting for Kafka broker..."
-              until JMX_PORT='' KAFKA_JMX_OPTS='' \
-                /opt/bitnami/kafka/bin/kafka-broker-api-versions.sh \
-                --bootstrap-server "$BOOT" >/dev/null 2>&1; do
-                echo "Broker not ready, waiting..."
+              BOOT="{{ .Release.Name }}-kafka-kafka-bootstrap"
+              echo "Waiting for Kafka bootstrap $BOOT:9092 ..."
+              until echo | nc -w 2 "$BOOT" 9092 2>/dev/null; do
+                echo "Kafka not ready, waiting..."
                 sleep 2
               done
-              echo "Waiting for Kafka group coordinator..."
-              until JMX_PORT='' KAFKA_JMX_OPTS='' \
-                /opt/bitnami/kafka/bin/kafka-consumer-groups.sh \
-                --bootstrap-server "$BOOT" --list >/dev/null 2>&1; do
-                echo "Coordinator not ready, waiting..."
-                sleep 2
-              done
-              echo "Kafka coordinator ready!"
+              echo "Kafka bootstrap reachable!"
       {{- end }}
       containers:
         - name: hps
-          image: {{ .Values.hps.image.repository }}:{{ include "rulebricks-chart.hps.imageTag" . }}
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" (merge (dict "tag" (include "rulebricks-chart.hps.imageTag" .)) .Values.hps.image)) | quote }}
           imagePullPolicy: {{ .Values.hps.image.pullPolicy }}
           ports:
             - name: http

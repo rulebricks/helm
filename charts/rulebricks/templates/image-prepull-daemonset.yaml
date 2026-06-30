@@ -56,20 +56,20 @@ spec:
       {{- $pauseResources := $prepullResources.pause | default (dict "requests" (dict "cpu" "5m" "memory" "16Mi") "limits" (dict "cpu" "10m" "memory" "32Mi")) }}
       initContainers:
         - name: prepull-hps
-          image: {{ .Values.hps.image.repository }}:{{ include "rulebricks-chart.hps.imageTag" . }}
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" (merge (dict "tag" (include "rulebricks-chart.hps.imageTag" .)) .Values.hps.image)) | quote }}
           imagePullPolicy: IfNotPresent
           command: ["node", "-e", "process.exit(0)"]
           resources:
             {{- toYaml $initResources | nindent 12 }}
         - name: prepull-hps-worker
-          image: {{ .Values.hps.image.repository }}:worker-{{ include "rulebricks-chart.hps.imageTag" . }}
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" (merge (dict "tag" (printf "worker-%s" (include "rulebricks-chart.hps.imageTag" .))) .Values.hps.image)) | quote }}
           imagePullPolicy: IfNotPresent
           command: ["node", "-e", "process.exit(0)"]
           resources:
             {{- toYaml $initResources | nindent 12 }}
       containers:
         - name: pause
-          image: {{ $prepull.pauseImage | default "registry.k8s.io/pause:3.9" }}
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" .Values.global.images.pause "name" "pause") | quote }}
           resources:
             {{- toYaml $pauseResources | nindent 12 }}
 {{- end }}

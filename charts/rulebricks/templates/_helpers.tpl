@@ -5,8 +5,34 @@ Expand the name of the chart.
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{/*
+rulebricks-chart.image — render a fully-qualified image ref from an RB image dict.
+Byte-identical to the parent's "rulebricks.image"; defined here so this subchart
+stays independently packageable. Reads the parent global (Helm auto-merges
+.Values.global into the subchart), so global.imageRegistry / imageDigests apply.
+Usage: {{ include "rulebricks-chart.image" (dict "root" . "image" $img "name" "valkey") }}
+*/}}
+{{- define "rulebricks-chart.image" -}}
+{{- $img := .image | default dict -}}
+{{- $g := .root.Values.global | default dict -}}
+{{- $registry := $img.registry | default "docker.io" -}}
+{{- with $g.imageRegistry }}{{- $registry = . -}}{{- end -}}
+{{- $repo := required "image.repository is required" $img.repository -}}
+{{- $ref := printf "%s/%s" $registry $repo -}}
+{{- $digest := $img.digest -}}
+{{- if and (not $digest) .name $g.imageDigests -}}
+{{- $digest = index $g.imageDigests .name -}}
+{{- end -}}
+{{- if $digest -}}
+{{- printf "%s@%s" $ref $digest -}}
+{{- else if $img.tag -}}
+{{- printf "%s:%s" $ref $img.tag -}}
+{{- else -}}
+{{- printf "%s:%s" $ref .root.Chart.AppVersion -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "rulebricks-chart.imagePullSecret" -}}
-{{- $registry := "index.docker.io" -}}
 {{- $username := "rulebricks" -}}
 {{- $licenseKey := "" -}}
 {{- if .Values.global.licenseKey -}}
@@ -15,7 +41,11 @@ Expand the name of the chart.
   {{- $licenseKey = .Values.app.licenseKey -}}
 {{- end -}}
 {{- $password := printf "dckr_pat_%s" $licenseKey -}}
-{{- printf "{\"auths\": {\"%s\": {\"auth\": \"%s\"}}}" $registry (printf "%s:%s" $username $password | b64enc) | b64enc }}
+{{- $auth := printf "%s:%s" $username $password | b64enc -}}
+{{- /* The license key is a Docker Hub read PAT for the rulebricks org; it
+       authenticates docker.io/rulebricks/* (all images are private on Docker
+       Hub), so this single secret covers every image the chart pulls. */ -}}
+{{- printf "{\"auths\": {\"index.docker.io\": {\"auth\": \"%s\"}}}" $auth | b64enc }}
 {{- end }}
 
 {{/*
@@ -322,11 +352,11 @@ These reference services from sibling charts in the umbrella
 */}}
 
 {{/*
-Kafka bootstrap servers - references the kafka subchart service
-The Bitnami Kafka chart creates a service named: <release>-kafka
+Kafka bootstrap servers - the Strimzi cluster's bootstrap service.
+Strimzi creates a service named: <release>-kafka-kafka-bootstrap
 */}}
 {{- define "rulebricks-chart.kafka.bootstrapServers" -}}
-{{- printf "%s-kafka.%s.svc.cluster.local:9092" .Release.Name .Release.Namespace }}
+{{- printf "%s-kafka-kafka-bootstrap.%s.svc.cluster.local:9092" .Release.Name .Release.Namespace }}
 {{- end }}
 
 {{/*

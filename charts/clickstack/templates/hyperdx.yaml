@@ -20,7 +20,7 @@ data:
         "name": "Rulebricks ClickHouse",
         "host": "{{ include "clickstack.clickhouse.httpEndpoint" . }}",
         "username": "{{ .Values.clickhouse.username }}",
-        "password": "",
+        "password": "$(CLICKHOUSE_PASSWORD)",
         "useSsl": false
       }
     ]
@@ -41,9 +41,13 @@ data:
         "bodyExpression": "Body",
         "eventAttributesExpression": "LogAttributes",
         "resourceAttributesExpression": "ResourceAttributes",
+        "defaultTableSelectExpression": "Timestamp,ServiceName,SeverityText,Body",
         "severityTextExpression": "SeverityText",
         "traceIdExpression": "TraceId",
-        "spanIdExpression": "SpanId"
+        "spanIdExpression": "SpanId",
+        "traceSourceId": "Distributed Traces",
+        "sessionSourceId": "Sessions",
+        "metricSourceId": "Metrics"
       },
       {
         "from": {
@@ -59,7 +63,16 @@ data:
         "serviceNameExpression": "ServiceName",
         "traceIdExpression": "TraceId",
         "spanIdExpression": "SpanId",
-        "durationExpression": "Duration"
+        "durationExpression": "Duration",
+        "durationPrecision": 9,
+        "parentSpanIdExpression": "ParentSpanId",
+        "spanNameExpression": "SpanName",
+        "spanKindExpression": "SpanKind",
+        "statusCodeExpression": "StatusCode",
+        "statusMessageExpression": "StatusMessage",
+        "logSourceId": "Operational Logs",
+        "sessionSourceId": "Sessions",
+        "metricSourceId": "Metrics"
       },
       {
         "from": {
@@ -79,7 +92,33 @@ data:
           "summary": "{{ .Values.clickhouse.metricsTables.summary | default "otel_metrics_summary" }}",
           "exponential histogram": "{{ .Values.clickhouse.metricsTables.exponentialHistogram | default "otel_metrics_exp_histogram" }}"
         },
+        "logSourceId": "Operational Logs",
+        "traceSourceId": "Distributed Traces",
+        "sessionSourceId": "Sessions",
         "querySettings": []
+      },
+      {
+        "from": {
+          "databaseName": "{{ .Values.clickhouse.database | default "otel" }}",
+          "tableName": "hyperdx_sessions"
+        },
+        "kind": "session",
+        "name": "Sessions",
+        "connection": "Rulebricks ClickHouse",
+        "timestampValueExpression": "TimestampTime",
+        "displayedTimestampValueExpression": "Timestamp",
+        "implicitColumnExpression": "Body",
+        "serviceNameExpression": "ServiceName",
+        "bodyExpression": "Body",
+        "eventAttributesExpression": "LogAttributes",
+        "resourceAttributesExpression": "ResourceAttributes",
+        "defaultTableSelectExpression": "Timestamp,ServiceName,SeverityText,Body",
+        "severityTextExpression": "SeverityText",
+        "traceIdExpression": "TraceId",
+        "spanIdExpression": "SpanId",
+        "logSourceId": "Operational Logs",
+        "traceSourceId": "Distributed Traces",
+        "metricSourceId": "Metrics"
       },
       {
         "from": {
@@ -95,9 +134,11 @@ data:
         "serviceNameExpression": "operation",
         "bodyExpression": "decision",
         "eventAttributesExpression": "params",
+        "defaultTableSelectExpression": "timestamp,operation,rule_name,flow_name,flow_execution_id,flow_node_id,parallel_execution_id,parallel_path,status,decision",
         "severityTextExpression": "level",
         "traceIdExpression": "trace_id",
-        "spanIdExpression": "span_id"
+        "spanIdExpression": "span_id",
+        "traceSourceId": "Distributed Traces"
       }
     ]
   saved-searches.json: |
@@ -141,6 +182,26 @@ data:
         "name": "Decision Logs Missing Trace IDs",
         "source": "Decision Logs",
         "query": "-trace_id:*"
+      },
+      {
+        "name": "Flow-Driven Rule Executions",
+        "source": "Decision Logs",
+        "query": "flow_execution_id:*"
+      },
+      {
+        "name": "Rules For A Flow Execution",
+        "source": "Decision Logs",
+        "query": "flow_execution_id:<paste-flow-execution-id>"
+      },
+      {
+        "name": "Parallel-Solve Subsidiary Executions",
+        "source": "Decision Logs",
+        "query": "parallel_execution_id:*"
+      },
+      {
+        "name": "Rules For A Parallel-Solve Execution",
+        "source": "Decision Logs",
+        "query": "parallel_execution_id:<paste-parallel-execution-id>"
       },
       {
         "name": "ClickStack Collector Errors",
@@ -235,7 +296,7 @@ spec:
       {{- end }}
       containers:
         - name: hyperdx
-          image: "{{ .Values.hyperdx.image.repository }}:{{ .Values.hyperdx.image.tag }}"
+          image: {{ include "clickstack.image" (dict "root" $ "image" .Values.hyperdx.image "name" "hyperdx") | quote }}
           imagePullPolicy: {{ .Values.hyperdx.image.pullPolicy }}
           ports:
             - name: http
@@ -275,12 +336,9 @@ spec:
               value: {{ include "clickstack.hyperdx.appUrl" . | quote }}
             - name: FRONTEND_URL
               value: {{ include "clickstack.hyperdx.appUrl" . | quote }}
-            - name: NEXT_PUBLIC_HDX_LOCAL_DEFAULT_CONNECTIONS
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ $name }}-defaults
-                  key: connections.json
-            - name: NEXT_PUBLIC_HDX_LOCAL_DEFAULT_SOURCES
+            - name: DEFAULT_CONNECTIONS
+              value: {{ printf `[{"name":"Rulebricks ClickHouse","host":%q,"username":%q,"password":"$(CLICKHOUSE_PASSWORD)","useSsl":false}]` (include "clickstack.clickhouse.httpEndpoint" .) (.Values.clickhouse.username | toString) | quote }}
+            - name: DEFAULT_SOURCES
               valueFrom:
                 configMapKeyRef:
                   name: {{ $name }}-defaults
@@ -294,11 +352,18 @@ spec:
             - name: defaults
               mountPath: /etc/hyperdx/rulebricks-defaults
               readOnly: true
+          {{- with .Values.hyperdx.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.hyperdx.readinessProbe }}
           readinessProbe:
-            tcpSocket:
-              port: http
-            initialDelaySeconds: 15
-            periodSeconds: 10
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.hyperdx.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       volumes:
         - name: defaults
           configMap:

@@ -219,3 +219,44 @@ azure.workload.identity/use: "true"
 {{- printf "%s-db" (include "rulebricks.supabase.fullname" .) -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+===========================================
+Image reference helper
+===========================================
+rulebricks.image — render a fully-qualified, optionally digest-pinned image ref
+from a structured image dict. Every container image in the chart (incl. init,
+hook/Job, and test containers) renders through this helper so a single
+global.imageRegistry repoints them all.
+
+Usage: {{ include "rulebricks.image" (dict "root" . "image" $img "name" "clickhouse-server") }}
+  root:  top-level context (.) — used to read .Values.global
+  image: per-image dict { registry, repository, tag, digest }
+  name:  logical image name; key into global.imageDigests (optional but recommended)
+
+Semantics: global.imageRegistry (when set) replaces the registry HOST and keeps
+the repository path (Bitnami-style). Version selector precedence:
+explicit image.digest -> global.imageDigests[name] -> image.tag -> chart appVersion.
+Subcharts define byte-identical copies under their own names (rulebricks-chart.image,
+clickstack.image, supabase.image) so they stay independently packageable; all read
+the same parent global (Helm auto-merges .Values.global into every subchart).
+*/}}
+{{- define "rulebricks.image" -}}
+{{- $img := .image | default dict -}}
+{{- $g := .root.Values.global | default dict -}}
+{{- $registry := $img.registry | default "docker.io" -}}
+{{- with $g.imageRegistry }}{{- $registry = . -}}{{- end -}}
+{{- $repo := required "rulebricks.image: image.repository is required" $img.repository -}}
+{{- $ref := printf "%s/%s" $registry $repo -}}
+{{- $digest := $img.digest -}}
+{{- if and (not $digest) .name $g.imageDigests -}}
+{{- $digest = index $g.imageDigests .name -}}
+{{- end -}}
+{{- if $digest -}}
+{{- printf "%s@%s" $ref $digest -}}
+{{- else if $img.tag -}}
+{{- printf "%s:%s" $ref $img.tag -}}
+{{- else -}}
+{{- printf "%s:%s" $ref .root.Chart.AppVersion -}}
+{{- end -}}
+{{- end -}}

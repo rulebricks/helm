@@ -13,7 +13,7 @@ spec:
     spec:
       containers:
         - name: test-studio
-          image: kdevup/curljq
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.test.image "name" "curljq") | quote }}
           imagePullPolicy: IfNotPresent
           command:
             - /bin/bash

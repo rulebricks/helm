@@ -54,7 +54,7 @@ spec:
       {{- end }}
       containers:
         - name: valkey-admin
-          image: {{ printf "%s:%s" ($image.repository | default "valkey/valkey-admin") ($image.tag | default "1.0.1") | quote }}
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" $image "name" "valkey-admin") | quote }}
           imagePullPolicy: {{ $image.pullPolicy | default "IfNotPresent" }}
           ports:
             - name: http

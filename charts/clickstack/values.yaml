@@ -41,7 +41,8 @@ hyperdx:
   enabled: true
   replicaCount: 1
   image:
-    repository: docker.io/rulebricks/hyperdx
+    registry: docker.io
+    repository: rulebricks/hyperdx
     tag: "2.19.0"
     pullPolicy: IfNotPresent
   ports:
@@ -62,6 +63,21 @@ hyperdx:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  # Health probes (override or set to {} to disable). HyperDX serves its UI/API on
+  # the "http" port; a TCP check is a safe default that satisfies cluster policies
+  # requiring liveness + readiness.
+  livenessProbe:
+    tcpSocket:
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    failureThreshold: 6
+  readinessProbe:
+    tcpSocket:
+      port: http
+    initialDelaySeconds: 15
+    periodSeconds: 10
+  startupProbe: {}
   env: []
   ingress:
     enabled: true
@@ -76,7 +92,8 @@ hyperdx:
 
 collector:
   image:
-    repository: docker.io/rulebricks/clickstack-otel-collector
+    registry: docker.io
+    repository: rulebricks/clickstack-otel-collector
     tag: "2.19.0"
     pullPolicy: IfNotPresent
   memoryLimitMiB: 800
@@ -92,9 +109,28 @@ collector:
     podLabels:
       rulebricks.com/workload-group: infrastructure
     podAnnotations: {}
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
     nodeSelector: {}
     tolerations: []
     affinity: {}
+    # Health probes (override or set to {} to disable). Backed by the collector's
+    # health_check extension on the "healthcheck" port (13133).
+    livenessProbe:
+      httpGet:
+        path: /
+        port: healthcheck
+      initialDelaySeconds: 15
+      periodSeconds: 15
+      failureThreshold: 6
+    readinessProbe:
+      httpGet:
+        path: /
+        port: healthcheck
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    startupProbe: {}
   agent:
     enabled: true
     resources:
@@ -114,6 +150,22 @@ collector:
         value: burst
         effect: NoSchedule
     affinity: {}
+    # Health probes (override or set to {} to disable). Backed by the collector's
+    # health_check extension on the "healthcheck" port (13133).
+    livenessProbe:
+      httpGet:
+        path: /
+        port: healthcheck
+      initialDelaySeconds: 15
+      periodSeconds: 15
+      failureThreshold: 6
+    readinessProbe:
+      httpGet:
+        path: /
+        port: healthcheck
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    startupProbe: {}
     filelog:
       include:
         - /var/log/pods/*/*/*.log
@@ -126,11 +178,13 @@ collector:
 ferretdb:
   enabled: true
   image:
-    repository: docker.io/rulebricks/ferretdb
+    registry: docker.io
+    repository: rulebricks/ferretdb
     tag: "2.7.0"
     pullPolicy: IfNotPresent
   postgresImage:
-    repository: docker.io/rulebricks/postgres-documentdb
+    registry: docker.io
+    repository: rulebricks/postgres-documentdb
     tag: "17-0.107.0-ferretdb-2.7.0"
     pullPolicy: IfNotPresent
   auth:

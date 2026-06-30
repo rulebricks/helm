@@ -17,10 +17,10 @@ metadata:
     app.kubernetes.io/component: hps-worker
 spec:
   {{- with .minAvailable }}
-  minAvailable: {{ . | quote }}
+  minAvailable: {{ if contains "%" (toString .) }}{{ . | quote }}{{ else }}{{ int . }}{{ end }}
   {{- end }}
   {{- with .maxUnavailable }}
-  maxUnavailable: {{ . | quote }}
+  maxUnavailable: {{ if contains "%" (toString .) }}{{ . | quote }}{{ else }}{{ int . }}{{ end }}
   {{- end }}
   selector:
     matchLabels:

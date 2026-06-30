@@ -36,6 +36,11 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
+      imagePullSecrets:
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
       {{- with $exporter.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -50,8 +55,14 @@ spec:
       {{- end }}
       containers:
         - name: redis-exporter
-          image: {{ printf "%s:%s" ($image.repository | default "oliver006/redis_exporter") ($image.tag | default "v1.66.0") | quote }}
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" $image "name" "redis-exporter") | quote }}
           imagePullPolicy: {{ $image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: metrics
               containerPort: 9121

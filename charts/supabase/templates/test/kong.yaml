@@ -24,7 +24,7 @@ spec:
                   key: password
                   name: {{ include "supabase.fullname" . }}-dashboard
           name: test-kong
-          image: kdevup/curljq
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.test.image "name" "curljq") | quote }}
           imagePullPolicy: IfNotPresent
           command:
             - /bin/bash

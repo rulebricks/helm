@@ -1,0 +1,80 @@
+{{- if .Values.clickhouse.enabled }}
+{{- /* Rebuild the subchart-style context the decision-log helpers expect:
+       .Values = clickhouse values (with the shared global merged in). */ -}}
+{{- $cv := merge (dict "global" .Values.global) (deepCopy .Values.clickhouse) -}}
+{{- $cctx := dict "Values" $cv "Release" .Release "Chart" .Chart "Template" .Template "Capabilities" .Capabilities "Files" .Files -}}
+{{- $user := .Values.clickhouse.auth.username | default "rulebricks" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rulebricks.clickhouse.fullname" . }}-config-d
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
+data:
+  # The DHI/official image's docker_related_config.xml (which sets listen_host)
+  # lives in config.d; our mount overlays the dir, so re-assert it here.
+  01-listen.xml: |
+    <clickhouse>
+      <listen_host>0.0.0.0</listen_host>
+    </clickhouse>
+  03-prometheus.xml: |
+    <clickhouse>
+      <prometheus>
+        <endpoint>/metrics</endpoint>
+        <port>9363</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+      </prometheus>
+    </clickhouse>
+  09-decision-log-storage.xml: |
+{{ include "rulebricks.clickhouse.decisionLogStorageXml" $cctx | indent 4 }}
+  {{- if not .Values.clickhouse.sampling.enabled }}
+  12-system-logs.xml: |
+    <clickhouse>
+      <query_log remove="1"/>
+      <query_thread_log remove="1"/>
+      <trace_log remove="1"/>
+      <metric_log remove="1"/>
+      <asynchronous_metric_log remove="1"/>
+    </clickhouse>
+  {{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rulebricks.clickhouse.fullname" . }}-users-d
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
+data:
+  00-users.xml: |
+    <clickhouse>
+      <users>
+        <{{ $user }}>
+          <password from_env="CLICKHOUSE_PASSWORD"/>
+          <profile>default</profile>
+          <quota>default</quota>
+          <networks>
+            <ip>::/0</ip>
+          </networks>
+          <access_management>1</access_management>
+        </{{ $user }}>
+        <!-- Lock the built-in default user to loopback so it can't be used remotely. -->
+        <default replace="replace">
+          <profile>default</profile>
+          <quota>default</quota>
+          <password></password>
+          <networks>
+            <ip>127.0.0.1</ip>
+            <ip>::1</ip>
+          </networks>
+        </default>
+      </users>
+    </clickhouse>
+  10-query-limits.xml: |
+{{ include "rulebricks.clickhouse.queryLimitsXml" $cctx | indent 4 }}
+  11-named-collection-access.xml: |
+{{ include "rulebricks.clickhouse.userAccessXml" $cctx | indent 4 }}
+{{- end }}

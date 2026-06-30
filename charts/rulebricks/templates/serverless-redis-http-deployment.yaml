@@ -46,7 +46,8 @@ spec:
       {{- end }}
       containers:
         - name: serverless-redis-http
-          image: hiett/serverless-redis-http:latest
+          # pinned; upstream is unmaintained (last release 2021) - replace if possible
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" .Values.serverlessRedisHttp.image "name" "serverless-redis-http") | quote }}
           ports:
             - containerPort: 80
           env:

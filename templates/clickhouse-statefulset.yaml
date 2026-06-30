@@ -1,0 +1,123 @@
+{{- if .Values.clickhouse.enabled }}
+{{- $ch := .Values.clickhouse }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "rulebricks.clickhouse.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "rulebricks.clickhouse.fullname" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "rulebricks.clickhouse.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "rulebricks.clickhouse.selectorLabels" . | nindent 8 }}
+        {{- with .Values.global.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- with $ch.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include (print $.Template.BasePath "/clickhouse-config.yaml") . | sha256sum }}
+    spec:
+      imagePullSecrets:
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
+      {{- if $ch.serviceAccount.create }}
+      serviceAccountName: {{ include "rulebricks.clickhouse.fullname" . }}
+      {{- end }}
+      {{- with $ch.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      {{- $sched := .Values.global.scheduling | default dict }}
+      {{- with ($ch.nodeSelector | default $sched.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with ($ch.tolerations | default $sched.tolerations) }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with ($ch.affinity | default $sched.affinity) }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: clickhouse
+          image: {{ include "rulebricks.image" (dict "root" $ "image" $ch.image "name" "clickhouse-server") | quote }}
+          imagePullPolicy: {{ $ch.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rulebricks.clickhouse.credentialSecret" . }}
+                  key: {{ $ch.auth.existingSecretKey | default "admin-password" }}
+          ports:
+            - name: http
+              containerPort: 8123
+            - name: native
+              containerPort: 9000
+            - name: metrics
+              containerPort: 9363
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          {{- with $ch.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+            - name: logs
+              mountPath: /var/log/clickhouse-server
+            - name: config-d
+              mountPath: /etc/clickhouse-server/config.d
+            - name: users-d
+              mountPath: /etc/clickhouse-server/users.d
+      volumes:
+        - name: logs
+          emptyDir: {}
+        - name: config-d
+          configMap:
+            name: {{ include "rulebricks.clickhouse.fullname" . }}-config-d
+        - name: users-d
+          configMap:
+            name: {{ include "rulebricks.clickhouse.fullname" . }}-users-d
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if $ch.persistence.storageClass }}
+        storageClassName: {{ $ch.persistence.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $ch.persistence.size | default "100Gi" }}
+{{- end }}

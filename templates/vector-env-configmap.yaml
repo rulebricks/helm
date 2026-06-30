@@ -43,8 +43,8 @@ data:
   KAFKA_SASL_MECHANISM: ""
   {{- end }}
   {{- else }}
-  # In-cluster Kafka (default). Service name is derived from the Helm release name.
-  KAFKA_BOOTSTRAP_SERVERS: "{{ .Release.Name }}-kafka.{{ .Release.Namespace }}.svc.cluster.local:9092"
+  # In-cluster Kafka (default): the Strimzi cluster's bootstrap service.
+  KAFKA_BOOTSTRAP_SERVERS: "{{ .Release.Name }}-kafka-kafka-bootstrap.{{ .Release.Namespace }}.svc.cluster.local:9092"
   KAFKA_TLS_ENABLED: "false"
   KAFKA_SASL_ENABLED: "false"
   KAFKA_SASL_MECHANISM: ""

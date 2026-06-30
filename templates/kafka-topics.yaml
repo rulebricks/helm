@@ -1,0 +1,25 @@
+{{- if .Values.kafka.enabled }}
+{{- $cluster := printf "%s-kafka" .Release.Name }}
+{{- range $t := .Values.kafka.topics }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  # CR name must be DNS-safe; the real topic name (with dots) is spec.topicName.
+  name: {{ $t.name | replace "." "-" | lower | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    strimzi.io/cluster: {{ $cluster }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+spec:
+  topicName: {{ $t.name | quote }}
+  partitions: {{ $t.partitions | default 1 }}
+  replicas: {{ $t.replicas | default 1 }}
+  {{- with $t.config }}
+  config:
+    {{- range $key, $val := . }}
+    {{ $key }}: {{ $val | quote }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}

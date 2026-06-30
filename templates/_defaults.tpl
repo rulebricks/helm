@@ -3,16 +3,21 @@ Internal defaults that are required by the Rulebricks stack but should not
 dominate the user-facing values.yaml.
 */}}
 
+{{- /* flow_* columns promote the flow correlation that already lives inside the
+       `decision` JSON to first-class columns so HyperDX can filter/group rule
+       executions by their parent flow. Nullable so direct (non-flow) solves and
+       pre-existing archived rows (which lack the keys) read back as NULL. Keep
+       all three definitions below column-for-column identical. */ -}}
 {{- define "rulebricks.clickhouse.decisionLogStructure" -}}
-timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), trace_id Nullable(String), span_id Nullable(String), request String, response String, decision String, params Nullable(String)
+timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), trace_id Nullable(String), span_id Nullable(String), flow_execution_id Nullable(String), flow_name Nullable(String), flow_slug Nullable(String), flow_node_id Nullable(String), parallel_execution_id Nullable(String), parallel_path Nullable(String), request String, response String, decision String, params Nullable(String)
 {{- end -}}
 
 {{- define "rulebricks.clickhouse.decisionLogLocalStructure" -}}
-timestamp DateTime64(3), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), trace_id Nullable(String), span_id Nullable(String), request String, response String, decision String, params Nullable(String)
+timestamp DateTime64(3), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), trace_id Nullable(String), span_id Nullable(String), flow_execution_id Nullable(String), flow_name Nullable(String), flow_slug Nullable(String), flow_node_id Nullable(String), parallel_execution_id Nullable(String), parallel_path Nullable(String), request String, response String, decision String, params Nullable(String)
 {{- end -}}
 
 {{- define "rulebricks.clickhouse.decisionLogSelectColumns" -}}
-timestamp, api_key, user_id, environment, ip, method, url, status, rule_name, rule_id, rule_slug, rule_version, operation, level, error, trace_id, span_id, request, response, decision, params
+timestamp, api_key, user_id, environment, ip, method, url, status, rule_name, rule_id, rule_slug, rule_version, operation, level, error, trace_id, span_id, flow_execution_id, flow_name, flow_slug, flow_node_id, parallel_execution_id, parallel_path, request, response, decision, params
 {{- end -}}
 
 {{- define "rulebricks.clickhouse.decisionLogStorageXml" -}}
@@ -23,7 +28,9 @@ timestamp, api_key, user_id, environment, ip, method, url, status, rule_name, ru
     <decision_logs_s3>
       <url>{{ include "rulebricks.storage.s3Url" . }}</url>
       <format>JSONEachRow</format>
-      <use_environment_credentials>true</use_environment_credentials>
+      {{- /* ClickHouse parses this named-collection key as a numeric bool: it wants
+             1/0, not the XML "true"/"false" it would silently mis-read elsewhere. */}}
+      <use_environment_credentials>1</use_environment_credentials>
       <structure>{{ include "rulebricks.clickhouse.decisionLogStructure" . }}</structure>
     </decision_logs_s3>
     {{- else if eq $provider "azure-blob" }}
@@ -127,7 +134,16 @@ Keep the rendered output on a SINGLE line: the subchart serializes initdb values
 as a single-quoted YAML scalar, which folds newlines to spaces and would
 otherwise corrupt a multi-line script.
 */ -}}
-{{- define "rulebricks.clickhouse.decisionLogsViewScript" -}}
+{{- /* The view exposes year/month/day/hour as stable UInt columns derived from the
+       row's own timestamp, NOT from the S3 Hive path partitions. Reading them off
+       the path (CAST(year AS UInt16) ...) requires ClickHouse to infer the partition
+       columns by listing objects, so on a FRESH/empty bucket there are no files,
+       the year/month/day/hour identifiers don't resolve, CREATE VIEW fails and the
+       view step crashloops. Deriving from timestamp always resolves (timestamp is in
+       the named-collection structure), survives an empty bucket, and matches how
+       decision_logs_recent computes the same columns - so the decision_logs UNION ALL
+       stays type-consistent. Keep on a SINGLE line. */ -}}
+{{- define "rulebricks.clickhouse.decisionLogsViewSql" -}}
 {{- $provider := .Values.global.storage.provider | default "s3" -}}
 {{- $source := "s3(decision_logs_s3)" -}}
 {{- if eq $provider "azure-blob" -}}
@@ -141,19 +157,15 @@ otherwise corrupt a multi-line script.
 {{- $retentionDays := $decisionLogs.retentionDays | default 30 | int -}}
 {{- $fallback := dig "objectStorageFallback" "enabled" true $decisionLogs -}}
 {{- $columns := include "rulebricks.clickhouse.decisionLogSelectColumns" . -}}
-{{- $user := .Values.auth.username | default "rulebricks" -}}
 {{- $otelDb := .Values.otelDatabase | default "otel" -}}
-{{- /* The view exposes the Hive path partitions (year/month/day/hour) as stable
-       UInt columns so callers can prune by partition. The CAST is deliberate: the
-       raw Hive virtual columns come back as LowCardinality with an inference-
-       dependent base type (String for zero-padded values like '06', Int otherwise),
-       so a plain `SELECT *, year, ...` would yield a fragile, shifting schema. CAST
-       normalizes them to fixed UInt; pruning still pushes down because the Hive
-       setting is enabled at the profile level (see queryLimitsXml), not inline.
-       use_hive_partitioning + allow_suspicious_low_cardinality_types are passed on
-       the create so the columns resolve at bootstrap regardless of profile load
-       order. Keep on a SINGLE line (the initdb scalar folds newlines to spaces). */ -}}
-clickhouse-client --host 127.0.0.1 --user "${CLICKHOUSE_ADMIN_USER:-default}" --password "${CLICKHOUSE_ADMIN_PASSWORD:-}" --use_hive_partitioning=1 --allow_suspicious_low_cardinality_types=1 --multiquery "CREATE DATABASE IF NOT EXISTS rulebricks; CREATE DATABASE IF NOT EXISTS {{ $otelDb }}; CREATE OR REPLACE VIEW rulebricks.decision_logs_archive AS SELECT {{ $columns }}, CAST(year AS UInt16) AS year, CAST(month AS UInt8) AS month, CAST(day AS UInt8) AS day, CAST(hour AS UInt8) AS hour FROM {{ $source }}; {{- if $accelerated }} CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent ({{ include "rulebricks.clickhouse.decisionLogLocalStructure" . }}, year UInt16 MATERIALIZED toYear(timestamp), month UInt8 MATERIALIZED toMonth(timestamp), day UInt8 MATERIALIZED toDayOfMonth(timestamp), hour UInt8 MATERIALIZED toHour(timestamp)) ENGINE = MergeTree PARTITION BY toYYYYMM(timestamp) ORDER BY (api_key, timestamp, status) TTL toDateTime(timestamp) + INTERVAL {{ $retentionDays }} DAY DELETE; ALTER TABLE rulebricks.decision_logs_recent MODIFY TTL toDateTime(timestamp) + INTERVAL {{ $retentionDays }} DAY DELETE; {{- if $fallback }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent WHERE timestamp >= now() - INTERVAL {{ $retentionDays }} DAY UNION ALL SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive WHERE timestamp < now() - INTERVAL {{ $retentionDays }} DAY;{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent;{{- end }}{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive;{{- end }}"
+CREATE DATABASE IF NOT EXISTS rulebricks; CREATE DATABASE IF NOT EXISTS {{ $otelDb }}; CREATE OR REPLACE VIEW rulebricks.decision_logs_archive AS SELECT {{ $columns }}, toYear(timestamp) AS year, toMonth(timestamp) AS month, toDayOfMonth(timestamp) AS day, toHour(timestamp) AS hour FROM {{ $source }}; {{- if $accelerated }} CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent ({{ include "rulebricks.clickhouse.decisionLogLocalStructure" . }}, year UInt16 MATERIALIZED toYear(timestamp), month UInt8 MATERIALIZED toMonth(timestamp), day UInt8 MATERIALIZED toDayOfMonth(timestamp), hour UInt8 MATERIALIZED toHour(timestamp)) ENGINE = MergeTree PARTITION BY toYYYYMM(timestamp) ORDER BY (api_key, timestamp, status) TTL toDateTime(timestamp) + INTERVAL {{ $retentionDays }} DAY DELETE; ALTER TABLE rulebricks.decision_logs_recent MODIFY TTL toDateTime(timestamp) + INTERVAL {{ $retentionDays }} DAY DELETE; {{- if $fallback }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent WHERE timestamp >= now() - INTERVAL {{ $retentionDays }} DAY UNION ALL SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive WHERE timestamp < now() - INTERVAL {{ $retentionDays }} DAY;{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent;{{- end }}{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive;{{- end }}
+{{- end -}}
+
+{{- /* Legacy shell wrapper, retained for the Bitnami-style initdb path and the CLI's
+       inline equivalent. The DHI/Strimzi path runs the SQL above directly via a
+       post-install clickhouse-client Job (no shell). */ -}}
+{{- define "rulebricks.clickhouse.decisionLogsViewScript" -}}
+clickhouse-client --host 127.0.0.1 --user "${CLICKHOUSE_ADMIN_USER:-default}" --password "${CLICKHOUSE_ADMIN_PASSWORD:-}" --multiquery "{{ include "rulebricks.clickhouse.decisionLogsViewSql" . }}"
 {{- end -}}
 
 {{- /*
@@ -186,5 +198,12 @@ if err == null { . = parsed };
 .request = to_string(.request) ?? "null";
 .response = to_string(.response) ?? "null";
 .decision = to_string(.decision) ?? "{}";
-.params = to_string(.params) ?? "{}"
+.params = to_string(.params) ?? "{}";
+_decision = parse_json(.decision) ?? {};
+.flow_execution_id = to_string(.flow_execution_id) ?? to_string(_decision.flowExecutionId) ?? null;
+.flow_name = to_string(.flow_name) ?? to_string(_decision.flowName) ?? null;
+.flow_slug = to_string(.flow_slug) ?? to_string(_decision.flowSlug) ?? null;
+.flow_node_id = to_string(.flow_node_id) ?? to_string(_decision.flowNodeId) ?? null;
+.parallel_execution_id = to_string(.parallel_execution_id) ?? to_string(_decision.parallelExecutionId) ?? null;
+.parallel_path = to_string(.parallel_path) ?? to_string(_decision.parallelPath) ?? null
 {{- end -}}

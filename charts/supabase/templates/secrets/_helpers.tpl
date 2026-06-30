@@ -27,31 +27,8 @@ Expand the name of the database secret.
 {{- end -}}
 
 {{/*
-Expand the name of the analytics secret.
+Expand the name of the realtime secret (SECRET_KEY_BASE / DB_ENC_KEY).
 */}}
-{{- define "supabase.secret.analytics" -}}
-{{- printf "%s-analytics" (include "supabase.fullname" .) }}
-{{- end -}}
-
-{{/*
-Expand the name of the s3 secret.
-*/}}
-{{- define "supabase.secret.s3" -}}
-{{- printf "%s-s3" (include "supabase.fullname" .) }}
-{{- end -}}
-
-{{/*
-Check if both s3 keys are valid
-*/}}
-{{- define "supabase.secret.s3.isValid" -}}
-{{- $isValid := "false" -}}
-{{- if .Values.secret.s3.keyId -}}
-{{- if .Values.secret.s3.accessKey -}}
-{{- printf "true" -}}
-{{- else -}}
-{{- printf "false" -}}
-{{- end -}}
-{{- else -}}
-{{- printf "false" -}}
-{{- end -}}
+{{- define "supabase.secret.realtime" -}}
+{{- printf "%s-realtime" (include "supabase.fullname" .) }}
 {{- end -}}

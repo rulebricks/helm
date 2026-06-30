@@ -17,7 +17,8 @@
 
 app:
   image:
-    repository: index.docker.io/rulebricks/app
+    registry: docker.io
+    repository: rulebricks/app
     pullPolicy: IfNotPresent
   replicas: 2
   # Node scheduling configuration. Keep overrides preferred-only unless your
@@ -136,15 +137,11 @@ metrics:
 hps:
   enabled: true
   image:
-    repository: index.docker.io/rulebricks/hps
+    registry: docker.io
+    repository: rulebricks/hps
     pullPolicy: Always
-  # Image used by the wait-for-kafka init container. Must include the Kafka CLI
-  # (kafka-broker-api-versions.sh / kafka-consumer-groups.sh) so the init can
-  # block until the broker AND the group coordinator are ready, not just the
-  # TCP port. Keep in sync with the parent chart's kafka.image; the parent
-  # chart sets this under rulebricks.hps.waitForKafka.image.
-  waitForKafka:
-    image: docker.io/rulebricks/kafka:4.0.0-debian-12-r10
+  # The wait-for-kafka init container uses the centralized busybox image
+  # (global.images.busybox); it only needs `nc` to poll the broker TCP port.
   replicas: 1
   # Gather-plane autoscaler (see templates/hps-keda.yaml). Conservative by
   # design: HPS scale events rebalance the response consumer group and can
@@ -162,8 +159,8 @@ hps:
   # burst scale-outs skip the image pull on freshly provisioned nodes.
   imagePrepull:
     enabled: true
-    # Resident container that keeps the pulled images on the node.
-    pauseImage: registry.k8s.io/pause:3.9
+    # Resident container that keeps the pulled images on the node uses the
+    # centralized pause image (global.images.pause).
     # Tolerate the Rulebricks burst pool without tolerating shutdown,
     # out-of-service, or unreachable node taints. Add explicit architecture
     # tolerations here if those pools are tainted.
@@ -237,6 +234,21 @@ hps:
     # Pod labels/annotations
     podLabels: {}
     podAnnotations: {}
+    # Health probes. Empty = no probe rendered. Set these to satisfy a cluster
+    # policy that requires liveness/readiness probes. When metrics.enabled (the
+    # default) the worker serves a Prometheus endpoint on the "metrics" port
+    # (metrics.worker.port, default 3000), which is a convenient probe target, e.g.:
+    #   readinessProbe:
+    #     httpGet: { path: /metrics, port: metrics }
+    #     initialDelaySeconds: 10
+    #     periodSeconds: 10
+    #   livenessProbe:
+    #     tcpSocket: { port: metrics }
+    #     initialDelaySeconds: 30
+    #     periodSeconds: 15
+    livenessProbe: {}
+    readinessProbe: {}
+    startupProbe: {}
     serviceAccount:
       create: false
       annotations: {}
@@ -272,7 +284,13 @@ redis:
   # Deploy bundled Valkey (set to false to use an external Valkey/Redis-compatible endpoint).
   # The redis key is retained for compatibility with existing chart overrides.
   enabled: true
-  tag: "9.1.0"
+  # Valkey (OSI-licensed Redis fork), mirrored to docker.io/rulebricks/valkey.
+  # The pull is authenticated by the license-key registry secret.
+  image:
+    registry: docker.io
+    repository: rulebricks/valkey
+    tag: "9.1.0-debian13"
+    pullPolicy: IfNotPresent
   persistence:
     enabled: true
     size: "4Gi"
@@ -321,12 +339,22 @@ redis:
       existingSecretUrlKey: "redis-url"
       existingSecretTokenKey: "redis-token"
 
+# Serverless Redis-compatible HTTP bridge (hiett/serverless-redis-http),
+# mirrored to docker.io/rulebricks/serverless-redis-http. Pinned; upstream is
+# unmaintained (last release 2021).
+serverlessRedisHttp:
+  image:
+    registry: docker.io
+    repository: rulebricks/serverless-redis-http
+    tag: "0.0.10"
+
 cache:
   valkeyAdmin:
     # Official Valkey Admin web console (Apache-2.0). Disabled by default.
     enabled: false
     image:
-      repository: valkey/valkey-admin
+      registry: docker.io
+      repository: rulebricks/valkey-admin
       tag: "1.0.1"
       pullPolicy: IfNotPresent
     replicas: 1
@@ -366,8 +394,9 @@ cache:
   redisExporter:
     enabled: true
     image:
-      repository: oliver006/redis_exporter
-      tag: "v1.66.0"
+      registry: docker.io
+      repository: rulebricks/redis-exporter
+      tag: "1.86.0-debian13"
       pullPolicy: IfNotPresent
     service:
       port: 9121
@@ -391,8 +420,9 @@ cache:
 kafkaExporter:
   enabled: true
   image:
-    repository: danielqsj/kafka-exporter
-    tag: "v1.9.0"
+    registry: docker.io
+    repository: rulebricks/kafka-exporter
+    tag: "1.9.0-debian13"
     pullPolicy: IfNotPresent
   service:
     port: 9308

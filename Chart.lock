@@ -2,15 +2,9 @@ dependencies:
 - name: rulebricks
   repository: file://charts/rulebricks
   version: 0.1.1
-- name: common
-  repository: file://charts/common
-  version: 2.31.4
-- name: kafka
-  repository: file://charts/kafka
-  version: 32.4.4
-- name: clickhouse
-  repository: file://charts/clickhouse
-  version: 9.4.4
+- name: strimzi-kafka-operator
+  repository: oci://quay.io/strimzi-helm
+  version: 1.0.1
 - name: clickstack
   repository: file://charts/clickstack
   version: 0.1.0
@@ -19,24 +13,24 @@ dependencies:
   version: 0.1.4
 - name: kube-prometheus-stack
   repository: https://prometheus-community.github.io/helm-charts
-  version: 67.6.0
+  version: 87.3.0
 - name: traefik
-  repository: https://helm.traefik.io/traefik
-  version: 33.1.0
+  repository: https://traefik.github.io/charts
+  version: 41.0.1
 - name: keda
   repository: https://kedacore.github.io/charts
-  version: 2.16.0
+  version: 2.20.1
 - name: cert-manager
   repository: https://charts.jetstack.io
-  version: v1.16.2
+  version: v1.20.3
 - name: vector
   repository: https://helm.vector.dev
-  version: 0.52.0
+  version: 0.56.0
 - name: vector
   repository: https://helm.vector.dev
-  version: 0.52.0
+  version: 0.56.0
 - name: external-dns
   repository: https://kubernetes-sigs.github.io/external-dns/
-  version: 1.14.5
-digest: sha256:34d8090356a71de9b20251a4daa16c48303c27ab2793a8a27be19875de4b0783
-generated: "2026-06-24T17:24:56.503166-07:00"
+  version: 1.21.1
+digest: sha256:8d34bbb6ffcd430e6a2e94acfb7f3028a7f72cc74de8a7f7daff8f699385aaf3
+generated: "2026-06-30T04:06:59.542101-07:00"

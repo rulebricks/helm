@@ -68,7 +68,7 @@ spec:
       {{- end }}
       containers:
         - name: app
-          image: {{ .Values.app.image.repository }}:{{ include "rulebricks-chart.app.imageTag" . }}
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" (merge (dict "tag" (include "rulebricks-chart.app.imageTag" .)) .Values.app.image)) | quote }}
           imagePullPolicy: {{ .Values.app.image.pullPolicy }}
           ports:
             - name: http

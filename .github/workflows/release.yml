@@ -16,35 +16,10 @@ on:
 env:
   REGISTRY: ghcr.io
   CANONICAL_CHART_NAMESPACE: rulebricks/helm
-  KAFKA_TAG: 4.0.0-debian-12-r10
-  KAFKA_SOURCE_IMAGE: docker.io/bitnamilegacy/kafka
-  KAFKA_TARGET_IMAGE: docker.io/rulebricks/kafka
-  CLICKHOUSE_TAG: 25.7.5-debian-12-r0
-  CLICKHOUSE_SOURCE_IMAGE: docker.io/bitnamilegacy/clickhouse
-  CLICKHOUSE_TARGET_IMAGE: docker.io/rulebricks/clickhouse
-  CLICKHOUSE_KEEPER_SOURCE_IMAGE: docker.io/bitnamilegacy/clickhouse-keeper
-  CLICKHOUSE_KEEPER_TARGET_IMAGE: docker.io/rulebricks/clickhouse-keeper
-  JMX_EXPORTER_TAG: 1.4.0-debian-12-r0
-  JMX_EXPORTER_SOURCE_IMAGE: docker.io/bitnamilegacy/jmx-exporter
-  JMX_EXPORTER_TARGET_IMAGE: docker.io/rulebricks/jmx-exporter
-  KUBECTL_TAG: 1.33.4-debian-12-r0
-  KUBECTL_SOURCE_IMAGE: docker.io/bitnamilegacy/kubectl
-  KUBECTL_TARGET_IMAGE: docker.io/rulebricks/kubectl
-  OS_SHELL_TAG: 12-debian-12-r51
-  OS_SHELL_SOURCE_IMAGE: docker.io/bitnamilegacy/os-shell
-  OS_SHELL_TARGET_IMAGE: docker.io/rulebricks/os-shell
-  HYPERDX_TAG: 2.19.0
-  HYPERDX_SOURCE_IMAGE: docker.hyperdx.io/hyperdx/hyperdx
-  HYPERDX_TARGET_IMAGE: docker.io/rulebricks/hyperdx
-  CLICKSTACK_OTEL_COLLECTOR_TAG: 2.19.0
-  CLICKSTACK_OTEL_COLLECTOR_SOURCE_IMAGE: docker.clickhouse.com/clickhouse/clickstack-otel-collector
-  CLICKSTACK_OTEL_COLLECTOR_TARGET_IMAGE: docker.io/rulebricks/clickstack-otel-collector
-  FERRETDB_TAG: 2.7.0
-  FERRETDB_SOURCE_IMAGE: ghcr.io/ferretdb/ferretdb
-  FERRETDB_TARGET_IMAGE: docker.io/rulebricks/ferretdb
-  POSTGRES_DOCUMENTDB_TAG: 17-0.107.0-ferretdb-2.7.0
-  POSTGRES_DOCUMENTDB_SOURCE_IMAGE: ghcr.io/ferretdb/postgres-documentdb
-  POSTGRES_DOCUMENTDB_TARGET_IMAGE: docker.io/rulebricks/postgres-documentdb
+
+# Image mirroring lives in .github/workflows/mirror-images.yml (driven by
+# images/manifest.yaml). This workflow is purely: validate -> detect chart change
+# -> package & push the OCI chart.
 
 jobs:
   validate:
@@ -74,6 +49,29 @@ jobs:
 
       - name: Lint
         run: helm lint .
+
+      - name: Verify Image Versions Match Manifest
+        # SSOT guard: every docker.io/rulebricks/* image the chart renders (across
+        # all feature toggles) must match an images/manifest.yaml entry at the same
+        # tag. Fails if a chart or CLI tag drifted from the manifest.
+        run: |
+          helm template rulebricks . \
+            --namespace rulebricks \
+            --set global.domain=rulebricks.example.com \
+            --set global.email=ops@example.com \
+            --set monitoring.enabled=true \
+            --set kube-prometheus-stack.prometheus.enabled=true \
+            --set kube-prometheus-stack.grafana.enabled=true \
+            --set kube-prometheus-stack.grafana.imageRenderer.enabled=true \
+            --set kube-prometheus-stack.kube-state-metrics.kubeRBACProxy.enabled=true \
+            --set kube-prometheus-stack.prometheusOperator.admissionWebhooks.enabled=true \
+            --set kube-prometheus-stack.thanosRuler.enabled=true \
+            --set global.externalDnsEnabled=true --set external-dns.enabled=true \
+            --set supabase.enabled=true \
+            --set global.supabase.jwtSecret=test-jwt-secret-with-at-least-32-characters-long \
+            --set supabase.secret.realtime.secretKeyBase=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --set supabase.secret.realtime.dbEncKey=aaaaaaaaaaaaaaaa \
+            | scripts/images/verify-versions.sh -
 
       - name: Template Default Install
         run: |
@@ -143,6 +141,23 @@ jobs:
             exit 1
           end
 
+          hyperdx = docs.find do |doc|
+            doc["kind"] == "Deployment" &&
+              doc.dig("metadata", "name").to_s.end_with?("-clickstack-hyperdx")
+          end
+          env = hyperdx&.dig("spec", "template", "spec", "containers", 0, "env") || []
+          env_by_name = env.each_with_object({}) { |item, acc| acc[item["name"]] = item }
+          required_env = ["DEFAULT_CONNECTIONS", "DEFAULT_SOURCES", "CLICKHOUSE_PASSWORD"]
+          missing_env = required_env.reject { |name| env_by_name.key?(name) }
+          unless missing_env.empty?
+            warn "HyperDX deployment is missing env vars: #{missing_env.join(", ")}"
+            exit 1
+          end
+          unless env_by_name.dig("DEFAULT_CONNECTIONS", "value").to_s.include?("$(CLICKHOUSE_PASSWORD)")
+            warn "HyperDX DEFAULT_CONNECTIONS must reference $(CLICKHOUSE_PASSWORD)"
+            exit 1
+          end
+
           bootstrap = docs.find do |doc|
             doc["kind"] == "Secret" &&
               doc.dig("metadata", "name").to_s.end_with?("-clickhouse-init-scripts")
@@ -186,8 +201,6 @@ jobs:
               - 'templates/**'
               - 'charts/**'
               - 'crds/**'
-              - 'scripts/publish-*.sh'
-              - 'images/**'
 
   release:
     name: Release Chart
@@ -210,101 +223,6 @@ jobs:
         uses: azure/setup-helm@v3
         with:
           version: "v3.17.0"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Detect Image Changes
-        id: image_changes
-        uses: dorny/paths-filter@v3
-        with:
-          base: ${{ github.event.before }}
-          ref: ${{ github.sha }}
-          filters: |
-            kafka:
-              - 'charts/kafka/**'
-              - 'scripts/publish-kafka-image.sh'
-            clickhouse:
-              - 'charts/clickhouse/**'
-              - 'scripts/publish-clickhouse-image.sh'
-            clickstack:
-              - 'charts/clickstack/**'
-              - 'scripts/publish-clickstack-images.sh'
-            sidecars:
-              - 'scripts/publish-bitnami-sidecars.sh'
-              - 'charts/kafka/Chart.yaml'
-              - 'charts/clickhouse/Chart.yaml'
-
-      - name: Publish Kafka Image
-        if: steps.image_changes.outputs.kafka == 'true'
-        env:
-          KAFKA_TAG: ${{ env.KAFKA_TAG }}
-          SOURCE_IMAGE: ${{ env.KAFKA_SOURCE_IMAGE }}
-          TARGET_IMAGE: ${{ env.KAFKA_TARGET_IMAGE }}
-        run: bash scripts/publish-kafka-image.sh
-
-      - name: Skip Kafka Publish
-        if: steps.image_changes.outputs.kafka != 'true'
-        run: echo "::notice title=Skipping Kafka publish::No relevant files changed in this push."
-
-      - name: Publish ClickHouse Image
-        if: steps.image_changes.outputs.clickhouse == 'true'
-        env:
-          CLICKHOUSE_TAG: ${{ env.CLICKHOUSE_TAG }}
-          SOURCE_IMAGE: ${{ env.CLICKHOUSE_SOURCE_IMAGE }}
-          TARGET_IMAGE: ${{ env.CLICKHOUSE_TARGET_IMAGE }}
-          KEEPER_SOURCE_IMAGE: ${{ env.CLICKHOUSE_KEEPER_SOURCE_IMAGE }}
-          KEEPER_TARGET_IMAGE: ${{ env.CLICKHOUSE_KEEPER_TARGET_IMAGE }}
-        run: bash scripts/publish-clickhouse-image.sh
-
-      - name: Skip ClickHouse Publish
-        if: steps.image_changes.outputs.clickhouse != 'true'
-        run: echo "::notice title=Skipping ClickHouse publish::No relevant files changed in this push."
-
-      - name: Publish ClickStack Images
-        if: steps.image_changes.outputs.clickstack == 'true'
-        env:
-          HYPERDX_TAG: ${{ env.HYPERDX_TAG }}
-          HYPERDX_SOURCE_IMAGE: ${{ env.HYPERDX_SOURCE_IMAGE }}
-          HYPERDX_TARGET_IMAGE: ${{ env.HYPERDX_TARGET_IMAGE }}
-          CLICKSTACK_OTEL_COLLECTOR_TAG: ${{ env.CLICKSTACK_OTEL_COLLECTOR_TAG }}
-          CLICKSTACK_OTEL_COLLECTOR_SOURCE_IMAGE: ${{ env.CLICKSTACK_OTEL_COLLECTOR_SOURCE_IMAGE }}
-          CLICKSTACK_OTEL_COLLECTOR_TARGET_IMAGE: ${{ env.CLICKSTACK_OTEL_COLLECTOR_TARGET_IMAGE }}
-          FERRETDB_TAG: ${{ env.FERRETDB_TAG }}
-          FERRETDB_SOURCE_IMAGE: ${{ env.FERRETDB_SOURCE_IMAGE }}
-          FERRETDB_TARGET_IMAGE: ${{ env.FERRETDB_TARGET_IMAGE }}
-          POSTGRES_DOCUMENTDB_TAG: ${{ env.POSTGRES_DOCUMENTDB_TAG }}
-          POSTGRES_DOCUMENTDB_SOURCE_IMAGE: ${{ env.POSTGRES_DOCUMENTDB_SOURCE_IMAGE }}
-          POSTGRES_DOCUMENTDB_TARGET_IMAGE: ${{ env.POSTGRES_DOCUMENTDB_TARGET_IMAGE }}
-        run: bash scripts/publish-clickstack-images.sh
-
-      - name: Skip ClickStack Image Publish
-        if: steps.image_changes.outputs.clickstack != 'true'
-        run: echo "::notice title=Skipping ClickStack image publish::No relevant files changed in this push."
-
-      - name: Publish Bitnami Sidecars
-        if: steps.image_changes.outputs.sidecars == 'true'
-        env:
-          JMX_EXPORTER_TAG: ${{ env.JMX_EXPORTER_TAG }}
-          JMX_EXPORTER_SOURCE_IMAGE: ${{ env.JMX_EXPORTER_SOURCE_IMAGE }}
-          JMX_EXPORTER_TARGET_IMAGE: ${{ env.JMX_EXPORTER_TARGET_IMAGE }}
-          KUBECTL_TAG: ${{ env.KUBECTL_TAG }}
-          KUBECTL_SOURCE_IMAGE: ${{ env.KUBECTL_SOURCE_IMAGE }}
-          KUBECTL_TARGET_IMAGE: ${{ env.KUBECTL_TARGET_IMAGE }}
-          OS_SHELL_TAG: ${{ env.OS_SHELL_TAG }}
-          OS_SHELL_SOURCE_IMAGE: ${{ env.OS_SHELL_SOURCE_IMAGE }}
-          OS_SHELL_TARGET_IMAGE: ${{ env.OS_SHELL_TARGET_IMAGE }}
-        run: bash scripts/publish-bitnami-sidecars.sh
-
-      - name: Skip Bitnami Sidecars Publish
-        if: steps.image_changes.outputs.sidecars != 'true'
-        run: echo "::notice title=Skipping Bitnami sidecars publish::No relevant files changed in this push."
 
       - name: Resolve Release Version
         id: version

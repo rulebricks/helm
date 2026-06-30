@@ -1,4 +1,4 @@
-{{- if .Values.db.enabled -}}
+{{- if and .Values.db.enabled (not .Values.externalDatabase.enabled) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,7 +43,7 @@ spec:
         # mounts as root (e.g. Azure Disk / EBS). Fix ownership as root before
         # Postgres' entrypoint runs initdb.
         - name: volume-permissions
-          image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.db.image "name" "supabase-postgres") | quote }}
           imagePullPolicy: {{ .Values.db.image.pullPolicy }}
           command:
             - /bin/sh
@@ -57,7 +57,7 @@ spec:
               subPath: postgres-data
         {{- end }}
         - name: init-db
-          image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.db.image "name" "supabase-postgres") | quote }}
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
@@ -79,11 +79,74 @@ spec:
               name: custom-migrations
             - mountPath: /initdb.d
               name: initdb-scripts-data
+        {{- if .Values.db.roleInit.enabled }}
+        # Native sidecar (restartPolicy: Always, k8s >= 1.28). The supabase/postgres
+        # image ships a pre-seeded PGDATA, so Postgres skips
+        # /docker-entrypoint-initdb.d and never applies the service-role passwords or
+        # the auth.* function ownership GoTrue needs. This sidecar waits for the local
+        # Postgres and runs 99-role-init.sql on every boot over a loopback (127.0.0.1)
+        # connection, which the image's pg_hba.conf trusts — so it works even before
+        # the roles have the right password. The SQL is idempotent.
+        - name: db-role-init
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.db.image "name" "supabase-postgres") | quote }}
+          imagePullPolicy: {{ .Values.db.image.pullPolicy }}
+          restartPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              echo "db-role-init: waiting for local postgres on 127.0.0.1:${PGPORT}..."
+              until psql -h 127.0.0.1 -p "${PGPORT}" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc 'SELECT 1' >/dev/null 2>&1; do
+                sleep 2
+              done
+              echo "db-role-init: applying role-password + auth-ownership init..."
+              psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -p "${PGPORT}" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /custom-init-scripts/99-role-init.sql
+              echo "db-role-init: complete; idling."
+              exec tail -f /dev/null
+          env:
+            - name: PGPORT
+              value: {{ .Values.db.environment.PGPORT | default "5432" | quote }}
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secret.db.secretRef }}
+                  name: {{ .Values.secret.db.secretRef }}
+                  key: {{ .Values.secret.db.secretRefKey.username | default "username" }}
+                  {{- else }}
+                  name: {{ include "supabase.secret.db" . }}
+                  key: username
+                  {{- end }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secret.db.secretRef }}
+                  name: {{ .Values.secret.db.secretRef }}
+                  key: {{ .Values.secret.db.secretRefKey.password | default "password" }}
+                  {{- else }}
+                  name: {{ include "supabase.secret.db" . }}
+                  key: password
+                  {{- end }}
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secret.db.secretRef }}
+                  name: {{ .Values.secret.db.secretRef }}
+                  key: {{ .Values.secret.db.secretRefKey.database | default "database" }}
+                  {{- else }}
+                  name: {{ include "supabase.secret.db" . }}
+                  key: database
+                  {{- end }}
+          volumeMounts:
+            # Reuse the existing -initdb ConfigMap volume; it carries 99-role-init.sql.
+            - mountPath: /custom-init-scripts
+              name: custom-init-scripts
+              readOnly: true
+        {{- end }}
       containers:
         - name: {{ include "supabase.db.name" $ }}
           securityContext:
             {{- toYaml .Values.db.securityContext | nindent 12 }}
-          image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.db.image "name" "supabase-postgres") | quote }}
           imagePullPolicy: {{ .Values.db.image.pullPolicy }}
           env:
             {{- range $key, $value := .Values.db.environment }}
@@ -149,8 +212,8 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           ports:
-            - name: http
-              containerPort: 9999
+            - name: postgres
+              containerPort: 5432
               protocol: TCP
           volumeMounts:
             - mountPath: /docker-entrypoint-initdb.d

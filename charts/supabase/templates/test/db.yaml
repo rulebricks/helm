@@ -1,4 +1,4 @@
-{{- if .Values.db.enabled -}}
+{{- if and .Values.db.enabled (not .Values.externalDatabase.enabled) -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -28,7 +28,7 @@ spec:
                   key: {{ include "supabase.db.secretKey" (dict "root" . "field" "username" "default" "username") }}
             - name: DB_PORT
               value: {{ include "supabase.db.port" . | quote }}
-          image: postgres:15-alpine
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.global.images.postgres15 "name" "postgres15") | quote }}
           imagePullPolicy: IfNotPresent
           name: test-db
       restartPolicy: Never

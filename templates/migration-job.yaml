@@ -80,7 +80,7 @@ spec:
       initContainers:
         - name: extract-assets
           # Use the configured migration image or fallback to app image
-          image: "{{ .Values.rulebricks.app.image.repository }}:{{ include "rulebricks.productVersion" . }}"
+          image: {{ include "rulebricks.image" (dict "root" . "image" (merge (dict "tag" (include "rulebricks.productVersion" .)) .Values.rulebricks.app.image)) | quote }}
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
@@ -100,7 +100,7 @@ spec:
       containers:
         - name: migrate
           # Use a postgres client image to run the migrations
-          image: postgres:15-alpine
+          image: {{ include "rulebricks.image" (dict "root" . "image" .Values.global.images.postgres15 "name" "postgres15") | quote }}
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
@@ -275,7 +275,7 @@ spec:
       initContainers:
         - name: extract-assets
           # Use the configured migration image or fallback to app image
-          image: "{{ .Values.rulebricks.app.image.repository }}:{{ include "rulebricks.productVersion" . }}"
+          image: {{ include "rulebricks.image" (dict "root" . "image" (merge (dict "tag" (include "rulebricks.productVersion" .)) .Values.rulebricks.app.image)) | quote }}
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
@@ -296,7 +296,7 @@ spec:
       containers:
         - name: supabase-setup
           # Use Node.js Alpine and install Supabase CLI at runtime
-          image: node:20-alpine
+          image: {{ include "rulebricks.image" (dict "root" . "image" .Values.global.images.node20 "name" "node20") | quote }}
           imagePullPolicy: IfNotPresent
           workingDir: /assets
           command: ["/bin/sh", "-c"]

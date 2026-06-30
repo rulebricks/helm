@@ -16,9 +16,71 @@ data:
       otlp:
         protocols:
           grpc:
-            endpoint: 0.0.0.0:4317
+            endpoint: 0.0.0.0:14317
           http:
-            endpoint: 0.0.0.0:4318
+            endpoint: 0.0.0.0:14318
+      k8s_cluster:
+        auth_type: serviceAccount
+        collection_interval: 30s
+        node_conditions_to_report:
+          - Ready
+          - MemoryPressure
+          - DiskPressure
+          - PIDPressure
+        allocatable_types_to_report:
+          - cpu
+          - memory
+          - storage
+      prometheus/rulebricks:
+        config:
+          scrape_configs:
+            - job_name: rulebricks-app
+              metrics_path: /api/metrics
+              static_configs:
+                - targets:
+                    - {{ printf "%s.%s.svc.cluster.local:%d" .Release.Name .Release.Namespace 80 | quote }}
+            - job_name: rulebricks-hps
+              metrics_path: /metrics
+              static_configs:
+                - targets:
+                    - {{ printf "%s-hps.%s.svc.cluster.local:%d" .Release.Name .Release.Namespace 80 | quote }}
+            - job_name: rulebricks-hps-worker
+              metrics_path: /metrics
+              dns_sd_configs:
+                - names:
+                    - {{ printf "%s-hps-worker.%s.svc.cluster.local" .Release.Name .Release.Namespace | quote }}
+                  type: A
+                  port: 3000
+            - job_name: kube-state-metrics
+              metrics_path: /metrics
+              static_configs:
+                - targets:
+                    - {{ printf "%s-kube-state-metrics.%s.svc.cluster.local:%d" .Release.Name .Release.Namespace 8080 | quote }}
+            - job_name: kafka-exporter
+              metrics_path: /metrics
+              static_configs:
+                - targets:
+                    - {{ printf "%s-kafka-exporter.%s.svc.cluster.local:%d" .Release.Name .Release.Namespace 9308 | quote }}
+            - job_name: kafka-jmx
+              metrics_path: /metrics
+              static_configs:
+                - targets:
+                    - {{ printf "%s-kafka-jmx-metrics.%s.svc.cluster.local:%d" .Release.Name .Release.Namespace 5556 | quote }}
+            - job_name: redis-exporter
+              metrics_path: /metrics
+              static_configs:
+                - targets:
+                    - {{ printf "%s-redis-exporter.%s.svc.cluster.local:%d" .Release.Name .Release.Namespace 9121 | quote }}
+            - job_name: keda-operator
+              metrics_path: /metrics
+              static_configs:
+                - targets:
+                    - {{ printf "keda-operator.%s.svc.cluster.local:%d" .Release.Namespace 9666 | quote }}
+            - job_name: keda-metrics-apiserver
+              metrics_path: /metrics
+              static_configs:
+                - targets:
+                    - {{ printf "keda-operator-metrics-apiserver.%s.svc.cluster.local:%d" .Release.Namespace 8080 | quote }}
     processors:
       memory_limiter:
         check_interval: 1s
@@ -72,21 +134,34 @@ data:
           queue_size: 5000
       debug:
         verbosity: basic
+    extensions:
+      # Liveness/readiness target for the collector (ClickStack distro ships this).
+      health_check:
+        endpoint: 0.0.0.0:13133
     service:
+      extensions: [health_check]
       telemetry:
         logs:
           level: info
       pipelines:
-        traces:
+        traces/rulebricks:
           receivers: [otlp]
           processors: [memory_limiter, resource, batch]
           exporters: [clickhouse]
-        logs:
+        logs/rulebricks:
           receivers: [otlp]
           processors: [memory_limiter, resource, batch]
           exporters: [clickhouse]
-        metrics:
+        metrics/rulebricks:
           receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: [clickhouse]
+        metrics/rulebricks-prometheus:
+          receivers: [prometheus/rulebricks]
+          processors: [memory_limiter, resource, batch]
+          exporters: [clickhouse]
+        metrics/k8s-cluster:
+          receivers: [k8s_cluster]
           processors: [memory_limiter, resource, batch]
           exporters: [clickhouse]
 ---
@@ -161,15 +236,17 @@ spec:
       {{- end }}
       containers:
         - name: otel-collector
-          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}"
+          image: {{ include "clickstack.image" (dict "root" $ "image" .Values.collector.image "name" "clickstack-otel-collector") | quote }}
           imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
           args:
             - --config=/etc/otelcol/config.yaml
           ports:
             - name: otlp-grpc
-              containerPort: 4317
+              containerPort: 14317
             - name: otlp-http
-              containerPort: 4318
+              containerPort: 14318
+            - name: healthcheck
+              containerPort: 13133
           env:
             - name: CUSTOM_OTELCOL_CONFIG_FILE
               value: /etc/otelcol/config.yaml
@@ -196,11 +273,18 @@ spec:
               readOnly: true
           resources:
             {{- toYaml .Values.collector.gateway.resources | nindent 12 }}
+          {{- with .Values.collector.gateway.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.collector.gateway.readinessProbe }}
           readinessProbe:
-            tcpSocket:
-              port: otlp-http
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.collector.gateway.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       volumes:
         - name: config
           configMap:

@@ -35,7 +35,7 @@ spec:
         - name: {{ include "supabase.studio.name" $ }}
           securityContext:
             {{- toYaml .Values.studio.securityContext | nindent 12 }}
-          image: "{{ .Values.studio.image.repository }}:{{ .Values.studio.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.studio.image "name" "supabase-studio") | quote }}
           imagePullPolicy: {{ .Values.studio.image.pullPolicy }}
           env:
             {{- range $key, $value := .Values.studio.environment }}
@@ -87,15 +87,6 @@ spec:
                   name: {{ include "supabase.secret.jwt" . }}
                   key: serviceKey
                   {{- end }}
-            {{- if .Values.analytics.enabled }}
-            - name: LOGFLARE_URL
-              value: http://{{ include "supabase.analytics.fullname" . }}:{{ .Values.analytics.service.port }}
-            - name: LOGFLARE_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "supabase.secret.analytics" . }}
-                  key: apiKey
-            {{- end }}
           {{- with .Values.studio.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}

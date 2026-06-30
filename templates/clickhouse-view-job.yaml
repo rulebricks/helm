@@ -1,0 +1,64 @@
+{{- if .Values.clickhouse.enabled }}
+{{- $ch := .Values.clickhouse }}
+{{- $cv := merge (dict "global" .Values.global) (deepCopy .Values.clickhouse) -}}
+{{- $cctx := dict "Values" $cv "Release" .Release "Chart" .Chart "Template" .Template "Capabilities" .Capabilities "Files" .Files -}}
+{{- $user := $ch.auth.username | default "rulebricks" -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "rulebricks.clickhouse.fullname" . }}-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  # ClickHouse may still be starting when the hook fires; retry until it answers.
+  backoffLimit: 30
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        {{- include "rulebricks.clickhouse.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+      containers:
+        - name: init
+          image: {{ include "rulebricks.image" (dict "root" $ "image" $ch.image "name" "clickhouse-server") | quote }}
+          imagePullPolicy: {{ $ch.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rulebricks.clickhouse.credentialSecret" . }}
+                  key: {{ $ch.auth.existingSecretKey | default "admin-password" }}
+          # clickhouse-client is exec'd directly (no shell). Kubernetes substitutes
+          # $(CLICKHOUSE_PASSWORD) from the container env, so the password never
+          # appears in the rendered manifest.
+          command: ["clickhouse-client"]
+          args:
+            - "--host"
+            - {{ include "rulebricks.clickhouse.fullname" . | quote }}
+            - "--port"
+            - "9000"
+            - "--user"
+            - {{ $user | quote }}
+            - "--password"
+            - "$(CLICKHOUSE_PASSWORD)"
+            - "--multiquery"
+            - {{ include "rulebricks.clickhouse.decisionLogsViewSql" $cctx | quote }}
+{{- end }}

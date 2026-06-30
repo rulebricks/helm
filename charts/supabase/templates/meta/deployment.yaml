@@ -35,7 +35,7 @@ spec:
         - name: {{ include "supabase.meta.name" $ }}
           securityContext:
             {{- toYaml .Values.meta.securityContext | nindent 12 }}
-          image: "{{ .Values.meta.image.repository }}:{{ .Values.meta.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.meta.image "name" "supabase-postgres-meta") | quote }}
           imagePullPolicy: {{ .Values.meta.image.pullPolicy }}
           env:
             {{- $dbSkipKeys := list "DB_HOST" "DB_PORT" }}

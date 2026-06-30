@@ -1,0 +1,103 @@
+{{- /*
+External-database bootstrap.
+
+When externalDatabase.enabled=true the bundled Postgres is not deployed, so the
+roles / schemas / auth helpers / publication the Supabase services expect do not
+exist yet. This pre-install/pre-upgrade hook runs bootstrap.sql once (idempotently)
+against the external database to create them. It is the external-DB analogue of the
+initdb scripts baked into the bundled supabase/postgres image.
+
+Credentials come from one secret (master + shared service-role password): either
+a pre-created externalDatabase.bootstrap.secretRef, or - for inline values - the
+hook-scoped secret the chart materializes in db-bootstrap-secret.yaml.
+
+Set externalDatabase.bootstrap.enabled=false to skip the hook (e.g. you run
+bootstrap.sql yourself from CI).
+*/ -}}
+{{- if and .Values.externalDatabase.enabled .Values.externalDatabase.bootstrap.enabled }}
+{{- if not (or .Values.externalDatabase.bootstrap.secretRef .Values.externalDatabase.bootstrap.masterPassword) }}
+{{- fail "External-DB bootstrap needs master credentials: set externalDatabase.bootstrap.masterPassword (inline) or externalDatabase.bootstrap.secretRef (a pre-created Secret with keys master-username/master-password/service-password)." }}
+{{- end }}
+{{- $creds := .Values.externalDatabase.bootstrap.secretRef | default (printf "%s-db-bootstrap-creds" (include "supabase.fullname" .)) }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "supabase.fullname" . }}-db-bootstrap
+  labels:
+    {{- include "supabase.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "supabase.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: bootstrap
+          image: {{ if .Values.externalDatabase.bootstrap.image }}{{ .Values.externalDatabase.bootstrap.image | quote }}{{ else }}{{ include "supabase.image" (dict "root" $ "image" .Values.global.images.postgres16 "name" "postgres16") | quote }}{{ end }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "Bootstrapping external database at ${DB_HOST}:${DB_PORT}/${DB_NAME} ..."
+              psql "sslmode=require host=${DB_HOST} port=${DB_PORT} dbname=${DB_NAME} user=${MASTER_USER} password=${MASTER_PASSWORD}" \
+                --set ON_ERROR_STOP=1 \
+                --set authenticator_password="${SERVICE_DB_PASSWORD}" \
+                --set auth_admin_password="${SERVICE_DB_PASSWORD}" \
+                --set replication_admin_password="${SERVICE_DB_PASSWORD}" \
+                --set app_role="${APP_ROLE}" \
+                -f /sql/bootstrap.sql
+              echo "Bootstrap complete."
+          env:
+            - name: DB_HOST
+              value: {{ include "supabase.db.host" . | quote }}
+            - name: DB_PORT
+              value: {{ include "supabase.db.port" . | quote }}
+            - name: DB_NAME
+              value: {{ .Values.secret.db.database | default "postgres" | quote }}
+            - name: APP_ROLE
+              value: {{ .Values.externalDatabase.bootstrap.appRole | default "postgres" | quote }}
+            # master/owner creds + the shared service-role password all come from
+            # one secret (keys: master-username, master-password, service-password).
+            - name: MASTER_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $creds }}
+                  key: master-username
+            - name: MASTER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $creds }}
+                  key: master-password
+            - name: SERVICE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $creds }}
+                  key: service-password
+          volumeMounts:
+            - name: sql
+              mountPath: /sql
+      volumes:
+        - name: sql
+          configMap:
+            name: {{ include "supabase.fullname" . }}-db-bootstrap-sql
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "supabase.fullname" . }}-db-bootstrap-sql
+  labels:
+    {{- include "supabase.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-6"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  bootstrap.sql: |-
+{{ .Files.Get "bootstrap.sql" | indent 4 }}
+{{- end }}

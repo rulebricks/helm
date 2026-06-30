@@ -2,6 +2,26 @@
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "clickstack.image" -}}
+{{- $img := .image | default dict -}}
+{{- $g := .root.Values.global | default dict -}}
+{{- $registry := $img.registry | default "docker.io" -}}
+{{- with $g.imageRegistry }}{{- $registry = . -}}{{- end -}}
+{{- $repo := required "image.repository is required" $img.repository -}}
+{{- $ref := printf "%s/%s" $registry $repo -}}
+{{- $digest := $img.digest -}}
+{{- if and (not $digest) .name $g.imageDigests -}}
+{{- $digest = index $g.imageDigests .name -}}
+{{- end -}}
+{{- if $digest -}}
+{{- printf "%s@%s" $ref $digest -}}
+{{- else if $img.tag -}}
+{{- printf "%s:%s" $ref $img.tag -}}
+{{- else -}}
+{{- printf "%s:%s" $ref .root.Chart.AppVersion -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "clickstack.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}

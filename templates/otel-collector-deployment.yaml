@@ -72,6 +72,12 @@ spec:
         # Roll the collector when its config changes.
         checksum/config: {{ include (print $.Template.BasePath "/otel-collector-configmap.yaml") . | sha256sum }}
     spec:
+      imagePullSecrets:
+        - name: {{ .Release.Name }}-regcred
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
       {{- with $collector.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -86,7 +92,14 @@ spec:
       {{- end }}
       containers:
         - name: otel-collector
-          image: {{ $collector.image | default "otel/opentelemetry-collector-contrib:0.119.0" | quote }}
+          image: {{ include "rulebricks.image" (dict "root" $ "image" $collector.image "name" "opentelemetry-collector") | quote }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
           args:
             - "--config=/conf/config.yaml"
           ports:

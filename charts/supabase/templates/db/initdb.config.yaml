@@ -1,4 +1,4 @@
-{{- if .Values.db.enabled -}}
+{{- if and .Values.db.enabled (not .Values.externalDatabase.enabled) -}}
 kind: ConfigMap
 apiVersion: v1
 metadata:
@@ -6,6 +6,12 @@ metadata:
   labels:
     {{- include "supabase.labels" . | nindent 4 }}
 data:
+  {{- if .Values.db.roleInit.enabled }}
+  # Run on every boot by the db-role-init sidecar (NOT copied into the image's
+  # /docker-entrypoint-initdb.d, which the pre-seeded image skips). See deployment.yaml.
+  99-role-init.sql: |-
+{{ .Files.Get "99-role-init.sql" | indent 4 }}
+  {{- end }}
   99-jwt.sql: |
     \set jwt_secret `echo "$JWT_SECRET"`
     \set jwt_exp `echo "$JWT_EXP"`

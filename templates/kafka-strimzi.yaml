@@ -1,0 +1,144 @@
+{{- if .Values.kafka.enabled }}
+{{- $k := .Values.kafka }}
+{{- $cluster := printf "%s-kafka" .Release.Name }}
+{{- $rf := $k.replicas | default 1 }}
+{{- if $k.metrics.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-kafka-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  kafka-metrics-config.yml: |
+    lowercaseOutputName: true
+    rules:
+      - pattern: kafka.server<type=(.+), name=(.+)PerSec\w*, topic=(.+)><>Count
+        name: kafka_server_$1_$2_total
+        type: COUNTER
+        labels:
+          topic: "$3"
+      - pattern: kafka.server<type=(.+), name=(.+)PerSec\w*><>Count
+        name: kafka_server_$1_$2_total
+        type: COUNTER
+      - pattern: kafka.(\w+)<type=(.+), name=(.+)><>(Count|Value)
+        name: kafka_$1_$2_$3
+        type: GAUGE
+      - pattern: kafka.server<type=raft-metrics><>(.+):
+        name: kafka_server_raft_$1
+        type: GAUGE
+      - pattern: 'kafka.server<type=(.+), name=(.+), clientId=(.+)><>(Count|Value)'
+        name: kafka_server_$1_$2
+        type: GAUGE
+        labels:
+          clientId: "$3"
+---
+{{- end }}
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: combined
+  namespace: {{ .Release.Namespace }}
+  labels:
+    strimzi.io/cluster: {{ $cluster }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ $rf }}
+  roles:
+    - controller
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: {{ $k.storage.size | default "20Gi" }}
+        {{- with $k.storage.class }}
+        class: {{ . }}
+        {{- end }}
+        deleteClaim: false
+        kraftMetadata: shared
+  {{- with $k.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    pod:
+      {{- with $k.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      metadata:
+        labels:
+          rulebricks.com/workload-group: infrastructure
+        annotations:
+          cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: {{ $cluster }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  kafka:
+    version: {{ $k.version | default "4.2.0" | quote }}
+    image: {{ include "rulebricks.image" (dict "root" $ "image" $k.image "name" "strimzi-kafka") | quote }}
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      {{- range $key, $val := $k.config }}
+      {{ $key }}: {{ $val | quote }}
+      {{- end }}
+      # Single-broker safety: every replication factor must be 1 or the cluster
+      # never forms its internal topics.
+      offsets.topic.replication.factor: {{ $rf }}
+      transaction.state.log.replication.factor: {{ $rf }}
+      transaction.state.log.min.isr: 1
+      default.replication.factor: {{ $rf }}
+      min.insync.replicas: 1
+    {{- with $k.jvm }}
+    jvmOptions:
+      -Xms: {{ .xms | default "1g" | quote }}
+      -Xmx: {{ .xmx | default "1g" | quote }}
+      {{- with .extraOpts }}
+      "-XX":
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
+    {{- if $k.metrics.enabled }}
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: {{ .Release.Name }}-kafka-metrics
+          key: kafka-metrics-config.yml
+    {{- end }}
+  entityOperator:
+    topicOperator: {}
+{{- if and $k.metrics.enabled $k.metrics.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ .Release.Name }}-kafka
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/cluster: {{ $cluster }}
+  podMetricsEndpoints:
+    - path: /metrics
+      port: tcp-prometheus
+      interval: 30s
+{{- end }}
+{{- end }}

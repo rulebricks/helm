@@ -49,6 +49,22 @@ data:
             - k8s.pod.uid
             - k8s.container.name
             - k8s.node.name
+          labels:
+            - tag_name: service.name
+              key: app.kubernetes.io/name
+              from: pod
+            - tag_name: k8s.app.component
+              key: app.kubernetes.io/component
+              from: pod
+      transform/service_name:
+        log_statements:
+          - context: resource
+            statements:
+              - set(attributes["service.name"], attributes["k8s.container.name"]) where attributes["service.name"] == nil or attributes["service.name"] == ""
+        metric_statements:
+          - context: resource
+            statements:
+              - set(attributes["service.name"], attributes["k8s.container.name"]) where attributes["service.name"] == nil or attributes["service.name"] == ""
       resource:
         attributes:
           - key: deployment.environment
@@ -77,18 +93,23 @@ data:
           enabled: true
           num_consumers: 2
           queue_size: 1000
+    extensions:
+      # Liveness/readiness target for the collector (ClickStack distro ships this).
+      health_check:
+        endpoint: 0.0.0.0:13133
     service:
+      extensions: [health_check]
       telemetry:
         logs:
           level: info
       pipelines:
         logs:
           receivers: [filelog]
-          processors: [k8sattributes, resource, batch]
+          processors: [k8sattributes, transform/service_name, resource, batch]
           exporters: [otlp]
-        metrics:
+        metrics/k8s:
           receivers: [hostmetrics, kubeletstats]
-          processors: [k8sattributes, resource, batch]
+          processors: [k8sattributes, transform/service_name, resource, batch]
           exporters: [otlp]
 ---
 apiVersion: apps/v1
@@ -136,10 +157,18 @@ spec:
       {{- end }}
       containers:
         - name: otel-collector
-          image: "{{ .Values.collector.image.repository }}:{{ .Values.collector.image.tag }}"
+          image: {{ include "clickstack.image" (dict "root" $ "image" .Values.collector.image "name" "clickstack-otel-collector") | quote }}
           imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
+          {{- with .Values.collector.agent.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - --config=/etc/otelcol/config.yaml
+          ports:
+            - name: healthcheck
+              containerPort: 13133
+              protocol: TCP
           env:
             - name: CUSTOM_OTELCOL_CONFIG_FILE
               value: /etc/otelcol/config.yaml
@@ -174,6 +203,18 @@ spec:
               readOnly: true
           resources:
             {{- toYaml .Values.collector.agent.resources | nindent 12 }}
+          {{- with .Values.collector.agent.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.collector.agent.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.collector.agent.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       volumes:
         - name: config
           configMap:

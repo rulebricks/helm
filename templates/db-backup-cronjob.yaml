@@ -7,8 +7,8 @@
 {{- $region := include "rulebricks.storage.region" (list . "dbBackups") -}}
 {{- $container := include "rulebricks.storage.azureContainer" (list . "dbBackups") -}}
 {{- $path := include "rulebricks.storage.path" (list . "dbBackups") -}}
-{{- $dbImage := printf "%s:%s" .Values.supabase.db.image.repository (.Values.supabase.db.image.tag | default .Chart.AppVersion) -}}
-{{- $rcloneImage := (.Values.backup.rclone | default dict).image | default "rclone/rclone:latest" -}}
+{{- $dbImage := include "rulebricks.image" (dict "root" . "image" .Values.supabase.db.image "name" "supabase-postgres") -}}
+{{- $rcloneImage := include "rulebricks.image" (dict "root" . "image" .Values.global.images.rclone "name" "rclone") -}}
 {{- $target := ternary (printf "%s/%s" $container $path) (printf "%s/%s" $bucket $path) (eq $provider "azure-blob") -}}
 # Logical Postgres backup: an init container streams pg_dump over the network into
 # a shared emptyDir, then rclone uploads it to object storage using the workload

@@ -5,6 +5,26 @@ Expand the name of the chart.
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{- define "supabase.image" -}}
+{{- $img := .image | default dict -}}
+{{- $g := .root.Values.global | default dict -}}
+{{- $registry := $img.registry | default "docker.io" -}}
+{{- with $g.imageRegistry }}{{- $registry = . -}}{{- end -}}
+{{- $repo := required "image.repository is required" $img.repository -}}
+{{- $ref := printf "%s/%s" $registry $repo -}}
+{{- $digest := $img.digest -}}
+{{- if and (not $digest) .name $g.imageDigests -}}
+{{- $digest = index $g.imageDigests .name -}}
+{{- end -}}
+{{- if $digest -}}
+{{- printf "%s@%s" $ref $digest -}}
+{{- else if $img.tag -}}
+{{- printf "%s:%s" $ref $img.tag -}}
+{{- else -}}
+{{- printf "%s:%s" $ref .root.Chart.AppVersion -}}
+{{- end -}}
+{{- end -}}
+
 {{/*
 Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
@@ -65,10 +85,10 @@ Create the name of the service account to use
 Resolve the database host used by Supabase services.
 */}}
 {{- define "supabase.db.host" -}}
-{{- if .Values.db.enabled -}}
-{{- include "supabase.db.fullname" . -}}
-{{- else if and .Values.externalDatabase .Values.externalDatabase.enabled .Values.externalDatabase.host -}}
+{{- if and .Values.externalDatabase .Values.externalDatabase.enabled .Values.externalDatabase.host -}}
 {{- .Values.externalDatabase.host -}}
+{{- else if .Values.db.enabled -}}
+{{- include "supabase.db.fullname" . -}}
 {{- else -}}
 {{- .Values.auth.environment.DB_HOST -}}
 {{- end -}}
@@ -127,5 +147,45 @@ Existing external secrets keep using the normal password key for backward compat
   {{- $root.Values.secret.db.secretRefKey.password | default "password" -}}
 {{- else -}}
 password_encoded
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the database user Realtime connects as. In external-DB mode the bundled
+"supabase_admin" superuser does not exist, so Realtime uses the replication role
+that bootstrap.sql provisions. Otherwise honor the configured value.
+*/}}
+{{- define "supabase.realtime.dbUser" -}}
+{{- if and .Values.externalDatabase .Values.externalDatabase.enabled -}}
+supabase_replication_admin
+{{- else -}}
+{{- .Values.realtime.environment.DB_USER | default "supabase_admin" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve the realtime secret (SECRET_KEY_BASE / DB_ENC_KEY): a pre-created secretRef
+if provided, otherwise the chart-created secret.
+*/}}
+{{- define "supabase.realtime.secretName" -}}
+{{- if and .Values.secret.realtime .Values.secret.realtime.secretRef -}}
+{{- .Values.secret.realtime.secretRef -}}
+{{- else -}}
+{{- include "supabase.secret.realtime" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolve a realtime secret key. Usage:
+{{ include "supabase.realtime.secretKey" (dict "root" . "field" "secretKeyBase" "default" "SECRET_KEY_BASE") }}
+*/}}
+{{- define "supabase.realtime.secretKey" -}}
+{{- $root := .root -}}
+{{- $field := .field -}}
+{{- $default := .default -}}
+{{- if and $root.Values.secret.realtime $root.Values.secret.realtime.secretRef $root.Values.secret.realtime.secretRefKey -}}
+  {{- index $root.Values.secret.realtime.secretRefKey $field | default $default -}}
+{{- else -}}
+  {{- $default -}}
 {{- end -}}
 {{- end }}

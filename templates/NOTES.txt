@@ -1,3 +1,7 @@
+{{- $observabilityHost := "" -}}
+{{- if and .Values.global.clickstack .Values.global.clickstack.enabled .Values.clickstack.hyperdx.ingress.enabled -}}
+{{- $observabilityHost = (.Values.clickstack.hyperdx.ingress.hostname | default (printf "observability.%s" .Values.global.domain)) -}}
+{{- end -}}
 {{- if and .Values.global.tlsEnabled .Values.global.externalDnsEnabled }}
 =============================================================================
 RULEBRICKS INSTALLATION - COMPLETE (Automatic DNS)
@@ -10,6 +14,9 @@ DNS records being created:
   - {{ .Values.global.domain }}
   {{- if .Values.supabase.enabled }}
   - supabase.{{ .Values.global.domain }}
+  {{- end }}
+  {{- if $observabilityHost }}
+  - {{ $observabilityHost }}
   {{- end }}
 
 Once DNS propagates and certificates are ready:
@@ -50,6 +57,9 @@ DNS records being created:
   {{- if .Values.supabase.enabled }}
   - supabase.{{ .Values.global.domain }}
   {{- end }}
+  {{- if $observabilityHost }}
+  - {{ $observabilityHost }}
+  {{- end }}
 
 Since you're using external-dns, you can enable TLS right away:
 
@@ -75,6 +85,9 @@ RULEBRICKS INSTALLATION - 1/2 - DNS SETUP REQUIRED
    - {{ .Values.global.domain }}
    {{- if .Values.supabase.enabled }}
    - supabase.{{ .Values.global.domain }}
+   {{- end }}
+   {{- if $observabilityHost }}
+   - {{ $observabilityHost }}
    {{- end }}
 
 3. Enable TLS (Phase 2):

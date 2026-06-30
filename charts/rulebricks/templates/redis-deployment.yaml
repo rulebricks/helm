@@ -27,6 +27,12 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      imagePullSecrets:
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
       {{- /* Node selector: component-level overrides global */ -}}
       {{- $redisNodeSelector := .Values.redis.nodeSelector | default dict }}
       {{- if and (not $redisNodeSelector) .Values.global .Values.global.scheduling }}
@@ -56,7 +62,14 @@ spec:
       {{- end }}
       containers:
         - name: redis
-          image: valkey/valkey:{{ .Values.redis.tag | default "9.1.0" }}
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" .Values.redis.image "name" "valkey") | quote }}
+          imagePullPolicy: {{ .Values.redis.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 6379
           volumeMounts:
@@ -69,7 +82,9 @@ spec:
             limits:
               cpu: {{ .Values.redis.resources.limits.cpu | default "500m" }}
               memory: {{ .Values.redis.resources.limits.memory | default "4Gi" }}
-          args: ["--appendonly", "yes"]
+          # --dir is explicit so the AOF/RDB land on the PVC regardless of the
+          # image's WORKDIR (DHI images may differ from the official valkey image).
+          args: ["--appendonly", "yes", "--dir", "/data"]
           livenessProbe:
             tcpSocket:
               port: 6379
