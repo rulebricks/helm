@@ -50,15 +50,15 @@ jobs:
       - name: Lint
         run: helm lint .
 
-      - name: Verify Image Versions Match Manifest
-        # SSOT guard: every docker.io/rulebricks/* image the chart renders (across
-        # all feature toggles) must match an images/manifest.yaml entry at the same
-        # tag. Fails if a chart or CLI tag drifted from the manifest.
+      - name: Render chart for validation
+        # ONE full-feature render (all toggles on, supabase enabled) feeds both the
+        # image-version guard and the workload/ClickHouse checks below, so the chart
+        # isn't re-rendered several times. CI-only test secrets live in
+        # ci/validate-values.yaml (excluded from the packaged chart via .helmignore).
         run: |
           helm template rulebricks . \
             --namespace rulebricks \
-            --set global.domain=rulebricks.example.com \
-            --set global.email=ops@example.com \
+            -f ci/validate-values.yaml \
             --set monitoring.enabled=true \
             --set kube-prometheus-stack.prometheus.enabled=true \
             --set kube-prometheus-stack.grafana.enabled=true \
@@ -68,56 +68,27 @@ jobs:
             --set kube-prometheus-stack.thanosRuler.enabled=true \
             --set global.externalDnsEnabled=true --set external-dns.enabled=true \
             --set supabase.enabled=true \
-            --set global.supabase.jwtSecret=test-jwt-secret-with-at-least-32-characters-long \
-            --set supabase.secret.realtime.secretKeyBase=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-            --set supabase.secret.realtime.dbEncKey=aaaaaaaaaaaaaaaa \
-            | scripts/images/verify-versions.sh -
+            > /tmp/rulebricks-rendered.yaml
 
-      - name: Template Default Install
-        run: |
-          helm template rulebricks . \
-            --namespace rulebricks \
-            --set global.domain=rulebricks.example.com \
-            --set global.email=ops@example.com
+      - name: Verify Image Versions Match Manifest
+        # SSOT guard: every rendered docker.io/rulebricks/* image must match an
+        # images/manifest.yaml entry at the same tag (catches chart/CLI tag drift).
+        run: scripts/images/verify-versions.sh /tmp/rulebricks-rendered.yaml
 
       - name: Template Gateway API Install
+        # Cheap smoke render of the alternate ingress path (Gateway API httproute).
         run: |
           helm template rulebricks . \
             --namespace rulebricks \
-            --set global.domain=rulebricks.example.com \
-            --set global.email=ops@example.com \
+            -f ci/validate-values.yaml \
             --set rulebricks.ingress.type=gateway-api \
-            --set rulebricks.ingress.gatewayApi.gatewayName=rulebricks-gateway
-
-      - name: Template Ingress Disabled Install
-        run: |
-          helm template rulebricks . \
-            --namespace rulebricks \
-            --set global.domain=rulebricks.example.com \
-            --set global.email=ops@example.com \
-            --set rulebricks.ingress.enabled=false
-
-      - name: Template External Valkey And Auth Install
-        run: |
-          helm template rulebricks . \
-            --namespace rulebricks \
-            --set global.domain=rulebricks.example.com \
-            --set global.email=ops@example.com \
-            --set global.supabase.jwtSecret=test-jwt-secret-with-at-least-32-characters-long \
-            --set global.externalAuth.enabled=true \
-            --set rulebricks.redis.enabled=false \
-            --set rulebricks.redis.external.host=valkey.example.com
+            --set rulebricks.ingress.gatewayApi.gatewayName=rulebricks-gateway \
+            > /dev/null
 
       - name: Validate Rendered Workloads And ClickHouse Bootstrap
         run: |
-          helm template rulebricks . \
-            --namespace rulebricks \
-            --set global.domain=rulebricks.example.com \
-            --set global.email=ops@example.com \
-            > /tmp/rulebricks-rendered.yaml
-
           ruby -ryaml <<'RUBY'
-          rendered = File.read("/tmp/rulebricks-rendered.yaml")
+          rendered = File.read("/tmp/rulebricks-rendered.yaml", encoding: "UTF-8")
           docs = rendered.split(/^---\s*$/).map do |chunk|
             YAML.load(chunk)
           rescue Psych::SyntaxError
@@ -158,19 +129,24 @@ jobs:
             exit 1
           end
 
-          bootstrap = docs.find do |doc|
-            doc["kind"] == "Secret" &&
-              doc.dig("metadata", "name").to_s.end_with?("-clickhouse-init-scripts")
+          # The decision-logs view is seeded by the clickhouse-view post-install Job
+          # (its clickhouse-client args carry the SQL); this replaced the old
+          # -clickhouse-init-scripts Secret mechanism.
+          view_job = docs.find do |doc|
+            doc["kind"] == "Job" &&
+              doc.to_s.include?("CREATE OR REPLACE VIEW rulebricks.decision_logs")
           end
-          script = bootstrap&.dig("stringData", "01-decision-logs-view.sh").to_s
-
+          if view_job.nil?
+            warn "ClickHouse decision-logs view Job not found"
+            exit 1
+          end
           required = [
             "CREATE DATABASE IF NOT EXISTS otel",
             "CREATE OR REPLACE VIEW rulebricks.decision_logs"
           ]
-          missing = required.reject { |needle| script.include?(needle) }
+          missing = required.reject { |needle| view_job.to_s.include?(needle) }
           unless missing.empty?
-            warn "ClickHouse bootstrap is missing: #{missing.join(", ")}"
+            warn "ClickHouse view Job is missing: #{missing.join(", ")}"
             exit 1
           end
           RUBY

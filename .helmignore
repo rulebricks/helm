@@ -22,6 +22,8 @@
 *.tmproj
 .vscode/
 benchmarks/
+# CI-only template-validation values (not part of the chart)
+ci/
 
 
 

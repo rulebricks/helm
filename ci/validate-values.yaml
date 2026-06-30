@@ -1,0 +1,14 @@
+# CI-only values for `helm template` validation. These are NOT real secrets — they
+# exist solely to satisfy the chart's required-secret gates (e.g. Supabase realtime
+# encrypts data, so `secret.realtime.secretKeyBase`/`dbEncKey` have no safe default)
+# so the chart renders. Excluded from the packaged chart via .helmignore.
+global:
+  domain: rulebricks.example.com
+  email: ops@example.com
+  supabase:
+    jwtSecret: "ci-validate-jwt-secret-at-least-32-characters-long"
+supabase:
+  secret:
+    realtime:
+      secretKeyBase: "ci00000000000000000000000000000000000000000000000000000000000000"
+      dbEncKey: "ci00000000000000"
