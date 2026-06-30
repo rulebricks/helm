@@ -21,7 +21,9 @@ data:
     /usr/local/kong/template.yml \
     > /usr/local/kong/kong.yml
 
-    exec /docker-entrypoint.sh kong docker-start
+    # Official kong image (kong/kong, re-tagged supabase-kong) uses /entrypoint.sh,
+    # not the supabase/kong image's /docker-entrypoint.sh.
+    exec /entrypoint.sh kong docker-start
   template.yml: |
     _format_version: '3.0'
     _transform: true

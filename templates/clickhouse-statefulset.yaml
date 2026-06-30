@@ -63,6 +63,12 @@ spec:
             capabilities:
               drop: ["ALL"]
           env:
+            # Users are defined entirely by the mounted users.d configMap (the
+            # `rulebricks` user reads its password via from_env="CLICKHOUSE_PASSWORD").
+            # Skip the image entrypoint's own user setup, which would otherwise try to
+            # write default-user.xml into the read-only users.d configMap mount and crash.
+            - name: CLICKHOUSE_SKIP_USER_SETUP
+              value: "1"
             - name: CLICKHOUSE_PASSWORD
               valueFrom:
                 secretKeyRef:

@@ -107,15 +107,15 @@ spec:
             - name: PGPORT
               value: {{ .Values.db.environment.PGPORT | default "5432" | quote }}
             - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  {{- if .Values.secret.db.secretRef }}
-                  name: {{ .Values.secret.db.secretRef }}
-                  key: {{ .Values.secret.db.secretRefKey.username | default "username" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.db" . }}
-                  key: username
-                  {{- end }}
+              # The bundled supabase/postgres image ships a PRE-SEEDED PGDATA; its
+              # migrate.sh / initdb scripts and the db-role-init sidecar connect as
+              # the image's bootstrap superuser (supabase_admin) over loopback-trust.
+              # This is the image identity, NOT the app/migration role
+              # (secret.db.username, which stays the managed-instance master in
+              # external-DB mode). Sourcing POSTGRES_USER from the app username made
+              # the pre-seeded image's seed abort ("role supabase_admin does not
+              # exist") and left the DB unseeded.
+              value: {{ .Values.db.superuserName | default "supabase_admin" | quote }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -154,15 +154,15 @@ spec:
               value: {{ $value | quote }}
             {{- end }}
             - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  {{- if .Values.secret.db.secretRef }}
-                  name: {{ .Values.secret.db.secretRef }}
-                  key: {{ .Values.secret.db.secretRefKey.username | default "username" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.db" . }}
-                  key: username
-                  {{- end }}
+              # The bundled supabase/postgres image ships a PRE-SEEDED PGDATA; its
+              # migrate.sh / initdb scripts and the db-role-init sidecar connect as
+              # the image's bootstrap superuser (supabase_admin) over loopback-trust.
+              # This is the image identity, NOT the app/migration role
+              # (secret.db.username, which stays the managed-instance master in
+              # external-DB mode). Sourcing POSTGRES_USER from the app username made
+              # the pre-seeded image's seed abort ("role supabase_admin does not
+              # exist") and left the DB unseeded.
+              value: {{ .Values.db.superuserName | default "supabase_admin" | quote }}
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:

@@ -26,7 +26,7 @@ data:
       - pattern: kafka.(\w+)<type=(.+), name=(.+)><>(Count|Value)
         name: kafka_$1_$2_$3
         type: GAUGE
-      - pattern: kafka.server<type=raft-metrics><>(.+):
+      - pattern: 'kafka.server<type=raft-metrics><>(.+):'
         name: kafka_server_raft_$1
         type: GAUGE
       - pattern: 'kafka.server<type=(.+), name=(.+), clientId=(.+)><>(Count|Value)'

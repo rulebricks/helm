@@ -117,6 +117,18 @@ spec:
                   name: {{ include "supabase.secret.jwt" . }}
                   key: secret
                   {{- end }}
+            # Realtime >=2.1x requires METRICS_JWT_SECRET to sign its /metrics auth
+            # token; reuse the API JWT secret (no safe default — boot aborts without it).
+            - name: METRICS_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secret.jwt.secretRef }}
+                  name: {{ .Values.secret.jwt.secretRef }}
+                  key: {{ .Values.secret.jwt.secretRefKey.secret | default "secret" }}
+                  {{- else }}
+                  name: {{ include "supabase.secret.jwt" . }}
+                  key: secret
+                  {{- end }}
             - name: SELF_HOST_TENANT_NAME
               value: {{ include "supabase.realtime.fullname" . }}
             - name: APP_NAME

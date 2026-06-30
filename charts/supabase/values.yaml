@@ -114,6 +114,12 @@ externalDatabase:
 db:
   # Enable database provisioning
   enabled: true
+  # The bundled supabase/postgres image's built-in bootstrap superuser. POSTGRES_USER
+  # is forced to this (NOT secret.db.username) so the pre-seeded image's migrate.sh /
+  # initdb scripts and the db-role-init sidecar connect as a role that actually exists.
+  # secret.db.username stays the app/migration role (the managed-instance master in
+  # external-DB mode). Changing this away from supabase_admin breaks first-boot seeding.
+  superuserName: "supabase_admin"
   image:
     registry: docker.io
     repository: rulebricks/supabase-postgres
