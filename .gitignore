@@ -9,3 +9,5 @@ benchmarks/*.html
 benchmarks/*.json
 
 .cursor/
+
+reports/*

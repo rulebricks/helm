@@ -1,0 +1,47 @@
+{{- $cache := .Values.cache | default dict -}}
+{{- $admin := $cache.valkeyAdmin | default dict -}}
+{{- $ingress := $admin.ingress | default dict -}}
+{{- if and $admin.enabled (eq ($admin.exposure | default "internal") "ingress") $ingress.enabled (eq ($ingress.type | default "ingress") "gateway-api") -}}
+{{- $name := include "rulebricks-chart.valkeyAdmin.fullname" . -}}
+{{- $service := $admin.service | default dict -}}
+{{- $servicePort := ($service.port | default 8080) -}}
+{{- $gateway := $ingress.gatewayApi | default dict -}}
+{{- $hostname := $ingress.hostname | default (printf "valkey.%s" .Values.global.domain) -}}
+{{- if not $gateway.gatewayName }}
+{{- fail "cache.valkeyAdmin.ingress.gatewayApi.gatewayName is required when using gateway-api ingress type" }}
+{{- end }}
+{{- if not $hostname }}
+{{- fail "cache.valkeyAdmin.ingress.hostname or global.domain is required when Valkey Admin ingress is enabled" }}
+{{- end }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: valkey-admin
+  {{- with $ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    - name: {{ $gateway.gatewayName }}
+      {{- with $gateway.gatewayNamespace }}
+      namespace: {{ . }}
+      {{- end }}
+      {{- with $gateway.sectionName }}
+      sectionName: {{ . }}
+      {{- end }}
+  hostnames:
+    - {{ $hostname | quote }}
+  rules:
+    - matches:
+        - path:
+            type: {{ ternary "Exact" "PathPrefix" (eq ($ingress.pathType | default "Prefix") "Exact") }}
+            value: {{ $ingress.path | default "/" | quote }}
+      backendRefs:
+        - name: {{ $name }}
+          port: {{ $servicePort }}
+{{- end }}

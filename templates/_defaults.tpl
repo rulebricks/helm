@@ -128,8 +128,7 @@ init flow unless a .sh file is present, so this MUST be a shell script, not raw
 SQL (a prior .sql version was silently never executed -> "Database rulebricks
 does not exist"). It creates:
   - decision_logs_archive: object-storage external view (durable archive)
-  - decision_logs_recent: local MergeTree cache (query acceleration)
-  - decision_logs: compatibility view used by app/HyperDX
+  - decision_logs: compatibility view used by the app
 Keep the rendered output on a SINGLE line: the subchart serializes initdb values
 as a single-quoted YAML scalar, which folds newlines to spaces and would
 otherwise corrupt a multi-line script.
@@ -140,9 +139,8 @@ otherwise corrupt a multi-line script.
        columns by listing objects, so on a FRESH/empty bucket there are no files,
        the year/month/day/hour identifiers don't resolve, CREATE VIEW fails and the
        view step crashloops. Deriving from timestamp always resolves (timestamp is in
-       the named-collection structure), survives an empty bucket, and matches how
-       decision_logs_recent computes the same columns - so the decision_logs UNION ALL
-       stays type-consistent. Keep on a SINGLE line. */ -}}
+       the named-collection structure), survives an empty bucket, and keeps the
+       decision_logs view stable. Keep on a SINGLE line. */ -}}
 {{- define "rulebricks.clickhouse.decisionLogsViewSql" -}}
 {{- $provider := .Values.global.storage.provider | default "s3" -}}
 {{- $source := "s3(decision_logs_s3)" -}}
@@ -151,14 +149,9 @@ otherwise corrupt a multi-line script.
 {{- else if eq $provider "gcs" -}}
 {{- $source = "gcs(decision_logs_gcs)" -}}
 {{- end -}}
-{{- $clickstack := dig "clickstack" dict (.Values.global | default dict) -}}
-{{- $accelerated := $clickstack.enabled | default false -}}
-{{- $decisionLogs := dig "clickstack" "clickhouse" "decisionLogs" dict (.Values.global | default dict) -}}
-{{- $retentionDays := $decisionLogs.retentionDays | default 30 | int -}}
-{{- $fallback := dig "objectStorageFallback" "enabled" true $decisionLogs -}}
 {{- $columns := include "rulebricks.clickhouse.decisionLogSelectColumns" . -}}
 {{- $otelDb := .Values.otelDatabase | default "otel" -}}
-CREATE DATABASE IF NOT EXISTS rulebricks; CREATE DATABASE IF NOT EXISTS {{ $otelDb }}; CREATE OR REPLACE VIEW rulebricks.decision_logs_archive AS SELECT {{ $columns }}, toYear(timestamp) AS year, toMonth(timestamp) AS month, toDayOfMonth(timestamp) AS day, toHour(timestamp) AS hour FROM {{ $source }}; {{- if $accelerated }} CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent ({{ include "rulebricks.clickhouse.decisionLogLocalStructure" . }}, year UInt16 MATERIALIZED toYear(timestamp), month UInt8 MATERIALIZED toMonth(timestamp), day UInt8 MATERIALIZED toDayOfMonth(timestamp), hour UInt8 MATERIALIZED toHour(timestamp)) ENGINE = MergeTree PARTITION BY toYYYYMM(timestamp) ORDER BY (api_key, timestamp, status) TTL toDateTime(timestamp) + INTERVAL {{ $retentionDays }} DAY DELETE; ALTER TABLE rulebricks.decision_logs_recent MODIFY TTL toDateTime(timestamp) + INTERVAL {{ $retentionDays }} DAY DELETE; {{- if $fallback }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent WHERE timestamp >= now() - INTERVAL {{ $retentionDays }} DAY UNION ALL SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive WHERE timestamp < now() - INTERVAL {{ $retentionDays }} DAY;{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent;{{- end }}{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive;{{- end }}
+CREATE DATABASE IF NOT EXISTS rulebricks; CREATE DATABASE IF NOT EXISTS {{ $otelDb }}; CREATE OR REPLACE VIEW rulebricks.decision_logs_archive AS SELECT {{ $columns }}, toYear(timestamp) AS year, toMonth(timestamp) AS month, toDayOfMonth(timestamp) AS day, toHour(timestamp) AS hour FROM {{ $source }}; CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive;
 {{- end -}}
 
 {{- /* Legacy shell wrapper, retained for the Bitnami-style initdb path and the CLI's

@@ -1,0 +1,117 @@
+{{- /*
+External-Kafka topic provisioning.
+
+For the in-cluster broker (kafka.enabled: true) the Strimzi Topic Operator
+reconciles kafka.topics via KafkaTopic CRs. On an EXTERNAL managed cluster
+(kafka.enabled: false) that operator isn't deployed, and managed clusters -
+notably MSK Serverless - won't auto-create topics, so HPS stalls forever on
+UNKNOWN_TOPIC_OR_PARTITION. This pre-install/pre-upgrade hook creates the same
+kafka.topics on the managed cluster.
+
+It reaches token-auth brokers (AWS MSK IAM / GCP OAUTHBEARER) through the
+kafka-proxy bridge - run as a native sidecar (initContainer + restartPolicy:
+Always, requires k8s >= 1.29) so the plain kafka CLI can talk plaintext to
+localhost. Gated on kafkaBridge.enabled; SASL PLAIN/SCRAM clusters that a plain
+client can reach directly are out of scope for this Job (create topics yourself
+or enable auto-creation).
+*/ -}}
+{{- if and (not .Values.kafka.enabled) .Values.kafkaBridge.enabled .Values.kafka.topics }}
+{{- $prov := (.Values.kafka.provisioning) | default dict -}}
+{{- $provEnabled := true -}}{{- if hasKey $prov "enabled" }}{{- $provEnabled = $prov.enabled }}{{- end }}
+{{- if $provEnabled }}
+{{- $bridge := .Values.kafkaBridge -}}
+{{- $rf := $prov.replicationFactor | default 3 -}}
+{{- /* MSK Serverless only allows a subset of topic configs to be set; passing
+     others (e.g. segment.bytes / segment.ms) fails the create with
+     InvalidConfigurationException. Filter kafka.topics[].config to this set so
+     the same list can carry richer settings for the in-cluster Strimzi broker.
+     Provisioned MSK accepts more, but this safe subset works on both. */}}
+{{- $mskAlterable := list "compression.type" "max.message.bytes" "message.timestamp.difference.max.ms" "message.timestamp.type" "retention.bytes" "retention.ms" "cleanup.policy" -}}
+{{- $localPort := $bridge.localPort | default 19092 -}}
+{{- $proxyImage := $bridge.image | default "docker.io/rulebricks/kafka-proxy:0.4.3" -}}
+{{- $toolsImage := include "rulebricks.image" (dict "root" $ "image" .Values.kafka.image "name" "strimzi-kafka") -}}
+{{- $sa := printf "%s-kafka-topic-provision" .Release.Name -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-6"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    {{- include "rulebricks.kafka.identityAnnotations" . | nindent 4 }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: kafka-topic-provision
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-kafka-topic-provision
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: kafka-topic-provision
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: kafka-topic-provision
+    spec:
+      serviceAccountName: {{ $sa }}
+      restartPolicy: Never
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # kafka-proxy as a native sidecar: terminates the token-auth (MSK IAM /
+      # OAUTHBEARER) + TLS to the managed brokers and presents plaintext Kafka on
+      # localhost. restartPolicy: Always lets the Job complete when the CLI exits.
+      initContainers:
+        - name: kafka-proxy
+          image: {{ $proxyImage | quote }}
+          restartPolicy: Always
+          args:
+            - server
+            - --bootstrap-server-mapping={{ $bridge.brokers }},127.0.0.1:{{ $localPort }}
+            - --tls-enable
+            - --sasl-enable
+            {{- if eq ($bridge.provider | default "aws") "gcp" }}
+            - --sasl-method=OAUTHBEARER
+            {{- else }}
+            - --sasl-method=AWS_MSK_IAM
+            - --sasl-aws-region={{ required "kafkaBridge.region is required for AWS MSK IAM topic provisioning" $bridge.region }}
+            {{- end }}
+          ports:
+            - containerPort: {{ $localPort }}
+      containers:
+        - name: create-topics
+          image: {{ $toolsImage | quote }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              B=127.0.0.1:{{ $localPort }}
+              echo "Waiting for kafka-proxy on $B ..."
+              for i in $(seq 1 60); do
+                if /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$B" --list >/dev/null 2>&1; then
+                  echo "proxy ready"; break
+                fi
+                sleep 2
+              done
+              {{- range $t := .Values.kafka.topics }}
+              echo "Ensuring topic {{ $t.name }} ({{ $t.partitions | default 1 }} partitions, RF {{ $rf }}) ..."
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$B" --create --if-not-exists --topic {{ $t.name | quote }} --partitions {{ $t.partitions | default 1 }} --replication-factor {{ $rf }}{{- with $t.config }}{{- range $k, $v := . }}{{- if has $k $mskAlterable }} --config {{ printf "%s=%s" $k (toString $v) | quote }}{{- end }}{{- end }}{{- end }}
+              {{- end }}
+              echo "Topic provisioning complete."
+{{- end }}
+{{- end }}

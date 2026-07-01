@@ -81,12 +81,17 @@ hyperdx:
   env: []
   ingress:
     enabled: true
+    type: "ingress" # "ingress" or "gateway-api"
     className: traefik
     hostname: ""
     path: /
     pathType: Prefix
     annotations: {}
     allowedIPs: []
+    gatewayApi:
+      gatewayName: ""
+      gatewayNamespace: ""
+      sectionName: ""
     tls:
       enabled: ""
 
@@ -211,6 +216,37 @@ ferretdb:
       limits:
         cpu: 1000m
         memory: 1Gi
+  # Health probes (override or set to {} to disable). FerretDB exposes the
+  # Mongo-compatible listener on "mongo"; the bundled postgres sidecar uses
+  # pg_isready for readiness and a TCP liveness check on "postgres".
+  livenessProbe:
+    tcpSocket:
+      port: mongo
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    failureThreshold: 6
+  readinessProbe:
+    tcpSocket:
+      port: mongo
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  startupProbe: {}
+  postgres:
+    livenessProbe:
+      tcpSocket:
+        port: postgres
+      initialDelaySeconds: 30
+      periodSeconds: 15
+      failureThreshold: 6
+    readinessProbe:
+      exec:
+        command:
+          - /bin/sh
+          - -ec
+          - pg_isready -U "$POSTGRES_USER" -d postgres
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    startupProbe: {}
   podLabels:
     rulebricks.com/workload-group: infrastructure
   podAnnotations:

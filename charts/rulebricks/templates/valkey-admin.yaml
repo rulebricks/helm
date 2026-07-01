@@ -7,6 +7,7 @@
 {{- $resources := $admin.resources | default dict -}}
 {{- $servicePort := ($service.port | default 8080) -}}
 {{- $ingress := $admin.ingress | default dict -}}
+{{- $isTraefikIngress := and (eq ($admin.exposure | default "internal") "ingress") $ingress.enabled (ne ($ingress.type | default "ingress") "gateway-api") -}}
 {{- $basicAuth := $ingress.basicAuth | default dict -}}
 {{- $basicAuthSecret := $basicAuth.existingSecret | default (printf "%s-basic-auth" $name) -}}
 apiVersion: apps/v1
@@ -119,7 +120,7 @@ spec:
   selector:
     app.kubernetes.io/name: {{ $name }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-{{- if and (eq ($admin.exposure | default "internal") "ingress") $ingress.enabled (not $basicAuth.existingSecret) $basicAuth.users }}
+{{- if and $isTraefikIngress (not $basicAuth.existingSecret) $basicAuth.users }}
 ---
 apiVersion: v1
 kind: Secret
@@ -136,7 +137,7 @@ stringData:
     {{ . }}
     {{- end }}
 {{- end }}
-{{- if and (eq ($admin.exposure | default "internal") "ingress") $ingress.enabled }}
+{{- if $isTraefikIngress }}
 ---
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
@@ -180,7 +181,7 @@ metadata:
     {{- toYaml . | nindent 4 }}
     {{- end }}
     {{- if and .Values.global .Values.global.externalDnsEnabled }}
-    external-dns.alpha.kubernetes.io/hostname: {{ $ingress.hostname | default (printf "valkey-admin.%s" .Values.global.domain) }}
+    external-dns.alpha.kubernetes.io/hostname: {{ $ingress.hostname | default (printf "valkey.%s" .Values.global.domain) }}
     external-dns.alpha.kubernetes.io/ttl: "300"
     {{- end }}
     {{- $middlewares := list (printf "%s-%s-basic-auth@kubernetescrd" .Release.Namespace $name) -}}
@@ -200,11 +201,11 @@ spec:
   {{- if eq (include "rulebricks-chart.tlsEnabled" .) "true" }}
   tls:
     - hosts:
-        - {{ $ingress.hostname | default (printf "valkey-admin.%s" .Values.global.domain) }}
+        - {{ $ingress.hostname | default (printf "valkey.%s" .Values.global.domain) }}
       secretName: {{ include "rulebricks-chart.tls.secretName" . }}
   {{- end }}
   rules:
-    - host: {{ $ingress.hostname | default (printf "valkey-admin.%s" .Values.global.domain) | quote }}
+    - host: {{ $ingress.hostname | default (printf "valkey.%s" .Values.global.domain) | quote }}
       http:
         paths:
           - path: {{ $ingress.path | default "/" }}

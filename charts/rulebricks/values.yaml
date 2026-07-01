@@ -367,11 +367,16 @@ cache:
       port: 8080
     ingress:
       enabled: false
+      type: "ingress" # "ingress" or "gateway-api"
       className: traefik
-      hostname: "" # Defaults to valkey-admin.<global.domain>
+      hostname: "" # Defaults to valkey.<global.domain>
       annotations: {}
       path: /
       pathType: Prefix
+      gatewayApi:
+        gatewayName: ""
+        gatewayNamespace: ""
+        sectionName: ""
       basicAuth:
         # Traefik BasicAuth users in htpasswd format. The CLI should generate
         # this so plaintext passwords never land in values.yaml.

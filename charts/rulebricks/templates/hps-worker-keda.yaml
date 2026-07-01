@@ -48,7 +48,14 @@ spec:
               periodSeconds: 60
         {{- end }}
   triggers:
-  # Primary triggers: Kafka lag for each topic
+  {{- /* Lag-based scaling needs the KEDA operator to reach Kafka directly. Under
+       token auth (AWS MSK IAM / GCP OAUTHBEARER) the operator isn't wired through
+       the kafka-proxy and can't authenticate, so the trigger would only error -
+       skip it and let the CPU trigger below drive scaling. Restore lag scaling by
+       fronting Kafka with the proxy or configuring KEDA aws_msk_iam SASL + an
+       operator identity. */}}
+  {{- if not (include "rulebricks-chart.kafka.tokenAuth" .) }}
+  # Primary trigger: Kafka lag
   - type: kafka
     metadata:
       # Use templated Kafka bootstrap servers - handles any release name and namespace
@@ -66,7 +73,9 @@ spec:
       # bounded unit of work, so this approximates seconds of fleet backlog.
       lagThreshold: "{{ .Values.hps.workers.keda.lagThreshold | default 100 }}"
       offsetResetPolicy: latest
-  # Backup trigger: CPU (in case Kafka metrics fail)
+  {{- end }}
+  # CPU trigger: the safety net when Kafka lag metrics are unavailable, and the
+  # sole scaling signal under token auth (see note above).
   - type: cpu
     metadata:
       type: Utilization

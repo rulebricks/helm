@@ -376,6 +376,22 @@ com.rulebricks.
 {{- end }}
 
 {{/*
+Whether external Kafka uses a TOKEN-based SASL mechanism (AWS MSK IAM / GCP
+OAUTHBEARER). These credentials are minted per-connection from a cloud identity,
+so plain Kafka clients that only speak PLAIN/SCRAM (kafka-exporter, the KEDA Kafka
+scaler) can't authenticate directly - they must go through the kafka-proxy bridge
+or be gated off. Returns "true" or "" (empty = false), so guard with:
+  {{- if not (include "rulebricks-chart.kafka.tokenAuth" .) }}
+*/}}
+{{- define "rulebricks-chart.kafka.tokenAuth" -}}
+{{- $sasl := (((.Values.app).logging).kafkaSasl) | default dict -}}
+{{- $m := lower ($sasl.mechanism | default "") -}}
+{{- if or (eq $m "aws-iam") (eq $m "oauthbearer") (eq $m "gcp-oauthbearer") (eq $m "aws_msk_iam") -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
 Supabase Kong URL - references the supabase subchart's Kong service
 The Supabase chart creates Kong service named: <release>-supabase-kong
 */}}

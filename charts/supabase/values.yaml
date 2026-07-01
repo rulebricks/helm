@@ -32,6 +32,8 @@ secret:
     secretRef: ""
     # override secret keys for existing secret refs
     secretRefKey:
+      host: ""
+      port: ""
       username: username
       password: password
       database: database
@@ -80,10 +82,14 @@ externalDatabase:
   enabled: false
   host: ""
   port: 5432
-  # Optional: source username/password/database from one existing secret.
+  # Optional: source host/port/username/password/database from one existing secret.
   # When unset, the chart keeps using secret.db.
   secretRef: ""
   secretRefKey:
+    # host/port default empty for backward compatibility. Set these to source
+    # DB_HOST/DB_PORT from the same external database Secret.
+    host: ""
+    port: ""
     username: username
     password: password
     database: database

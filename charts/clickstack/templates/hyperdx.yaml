@@ -1,6 +1,7 @@
 {{- if and .Values.enabled .Values.hyperdx.enabled -}}
 {{- $name := include "clickstack.hyperdx.fullname" . -}}
 {{- $hostname := .Values.hyperdx.ingress.hostname | default (printf "observability.%s" .Values.global.domain) -}}
+{{- $ingressType := .Values.hyperdx.ingress.type | default "ingress" -}}
 {{- $tlsEnabled := eq (.Values.global.tlsEnabled | toString) "true" -}}
 {{- if and .Values.hyperdx.ingress.tls (hasKey .Values.hyperdx.ingress.tls "enabled") (ne (.Values.hyperdx.ingress.tls.enabled | toString) "") -}}
   {{- $tlsEnabled = eq (.Values.hyperdx.ingress.tls.enabled | toString) "true" -}}
@@ -119,26 +120,6 @@ data:
         "logSourceId": "Operational Logs",
         "traceSourceId": "Distributed Traces",
         "metricSourceId": "Metrics"
-      },
-      {
-        "from": {
-          "databaseName": "rulebricks",
-          "tableName": "decision_logs"
-        },
-        "kind": "log",
-        "name": "Decision Logs",
-        "connection": "Rulebricks ClickHouse",
-        "timestampValueExpression": "timestamp",
-        "displayedTimestampValueExpression": "timestamp",
-        "implicitColumnExpression": "decision",
-        "serviceNameExpression": "operation",
-        "bodyExpression": "decision",
-        "eventAttributesExpression": "params",
-        "defaultTableSelectExpression": "timestamp,operation,rule_name,flow_name,flow_execution_id,flow_node_id,parallel_execution_id,parallel_path,status,decision",
-        "severityTextExpression": "level",
-        "traceIdExpression": "trace_id",
-        "spanIdExpression": "span_id",
-        "traceSourceId": "Distributed Traces"
       }
     ]
   saved-searches.json: |
@@ -174,36 +155,6 @@ data:
         "query": "(Body:redis OR Body:valkey OR Body:cache) AND (SeverityText:ERROR OR Body:slow OR Body:timeout)"
       },
       {
-        "name": "Decision Logs With Trace IDs",
-        "source": "Decision Logs",
-        "query": "trace_id:*"
-      },
-      {
-        "name": "Decision Logs Missing Trace IDs",
-        "source": "Decision Logs",
-        "query": "-trace_id:*"
-      },
-      {
-        "name": "Flow-Driven Rule Executions",
-        "source": "Decision Logs",
-        "query": "flow_execution_id:*"
-      },
-      {
-        "name": "Rules For A Flow Execution",
-        "source": "Decision Logs",
-        "query": "flow_execution_id:<paste-flow-execution-id>"
-      },
-      {
-        "name": "Parallel-Solve Subsidiary Executions",
-        "source": "Decision Logs",
-        "query": "parallel_execution_id:*"
-      },
-      {
-        "name": "Rules For A Parallel-Solve Execution",
-        "source": "Decision Logs",
-        "query": "parallel_execution_id:<paste-parallel-execution-id>"
-      },
-      {
         "name": "ClickStack Collector Errors",
         "source": "Operational Logs",
         "query": "ServiceName:rulebricks-otel-collector AND (SeverityText:ERROR OR Body:error)"
@@ -213,12 +164,11 @@ data:
     [
       {
         "name": "Rulebricks Operations",
-        "description": "Starter ClickStack dashboard metadata for API/HPS logs, distributed traces, mirrored Prometheus metrics, and decision-log trace correlation.",
+        "description": "Starter ClickStack dashboard metadata for API/HPS logs, distributed traces, and mirrored Prometheus metrics.",
         "panels": [
           { "title": "Operational logs by service", "source": "Operational Logs" },
           { "title": "Trace volume by service", "source": "Distributed Traces" },
-          { "title": "Mirrored Prometheus metrics", "source": "Metrics" },
-          { "title": "Decision logs by trace id", "source": "Decision Logs" }
+          { "title": "Mirrored Prometheus metrics", "source": "Metrics" }
         ]
       }
     ]
@@ -369,7 +319,7 @@ spec:
           configMap:
             name: {{ $name }}-defaults
 ---
-{{- if .Values.hyperdx.ingress.enabled }}
+{{- if and .Values.hyperdx.ingress.enabled (ne $ingressType "gateway-api") }}
 {{- if .Values.hyperdx.ingress.allowedIPs }}
 apiVersion: traefik.io/v1alpha1
 kind: Middleware

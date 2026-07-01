@@ -138,6 +138,17 @@ CREATE SCHEMA IF NOT EXISTS extensions;
 GRANT supabase_auth_admin TO CURRENT_USER;
 ALTER SCHEMA auth OWNER TO supabase_auth_admin;
 
+-- Realtime connects as supabase_replication_admin and runs its own Ecto
+-- migrations into the _realtime schema (it issues `SET search_path TO _realtime`
+-- on connect). On the bundled supabase/postgres image a superuser owns these
+-- schemas; on an external DB the bootstrap runner (master) owns them, so the
+-- replication role can't create its migration tables and Realtime crashloops
+-- with "3F000 no schema has been selected to create in". Hand _realtime to it and
+-- grant CREATE on realtime (where app migrations later add tables to the
+-- supabase_realtime publication). Idempotent.
+ALTER SCHEMA "_realtime" OWNER TO supabase_replication_admin;
+GRANT ALL ON SCHEMA realtime TO supabase_replication_admin;
+
 GRANT USAGE ON SCHEMA extensions TO anon, authenticated, service_role;
 GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
 

@@ -107,22 +107,13 @@ global:
   # cannot see top-level clickstack.enabled.
   clickstack:
     enabled: true
-    # Cross-chart mirror of the ClickStack decision-log acceleration settings
-    # below. The ClickHouse subchart needs these under global to render bootstrap
-    # SQL, but client-facing values should use clickstack.clickhouse.decisionLogs.
-    clickhouse:
-      decisionLogs:
-        retentionDays: 30
-        objectStorageFallback:
-          enabled: true
 
 # =============================================================================
 # CLICKSTACK OBSERVABILITY BACKEND
 # Built-in logs, traces, and mirrored metrics via ClickHouse + HyperDX. When
 # enabled, the ClickStack OTel gateway owns the <release>-otel-collector service
-# that app/HPS/worker/Traefik already send OTLP to. Decision logs still use the
-# object-storage-backed ClickHouse archive; recent rows are also cached in local
-# ClickHouse storage for fast UI/API queries.
+# that app/HPS/worker/Traefik already send OTLP to. Decision logs stay in object
+# storage and are queried through the object-storage-backed ClickHouse archive.
 # =============================================================================
 clickstack:
   # Mirrors global.clickstack.enabled for readability; the dependency condition
@@ -136,17 +127,6 @@ clickstack:
     retentionDays: 7
     # Advanced override. Leave empty to derive from retentionDays.
     ttl: ""
-    # Decision-log acceleration is automatic when ClickStack is enabled. Recent
-    # decision logs are written into local ClickHouse MergeTree storage, while
-    # object storage remains the long-retention archive and fallback.
-    decisionLogs:
-      retentionDays: 30
-      sink:
-        batchMaxBytes: 10485760
-        batchTimeoutSecs: 5
-        bufferMaxSize: 1073741824
-      objectStorageFallback:
-        enabled: true
   hyperdx:
     enabled: true
     image:
@@ -162,9 +142,14 @@ clickstack:
         memory: 1Gi
     ingress:
       enabled: true
+      type: "ingress" # "ingress" or "gateway-api"
       className: traefik
       hostname: "" # Defaults to observability.<global.domain>
       allowedIPs: []
+      gatewayApi:
+        gatewayName: ""
+        gatewayNamespace: ""
+        sectionName: ""
   collector:
     image:
       registry: docker.io
@@ -763,8 +748,13 @@ rulebricks:
       exposure: internal # internal | ingress
       ingress:
         enabled: false
-        # Defaults to valkey-admin.<global.domain> when exposure=ingress.
+        type: "ingress" # "ingress" or "gateway-api"
+        # Defaults to valkey.<global.domain> when exposure=ingress.
         hostname: ""
+        gatewayApi:
+          gatewayName: ""
+          gatewayNamespace: ""
+          sectionName: ""
         basicAuth:
           # Traefik BasicAuth users in htpasswd format. The CLI should generate
           # this so plaintext passwords never land in values.yaml.
@@ -873,6 +863,18 @@ kafka:
         retention.ms: "86400000"
         retention.bytes: "268435456"
         max.message.bytes: "2097152"
+  # Topic provisioning for EXTERNAL Kafka (kafka.enabled: false). The Strimzi
+  # Topic Operator only runs for the in-cluster broker, and managed clusters
+  # (esp. MSK Serverless) won't auto-create topics - so a pre-install Job creates
+  # the `topics` above on the managed cluster through the kafka-proxy bridge,
+  # matching the app's SASL/TLS. Requires kafkaBridge.enabled (token auth); SASL
+  # PLAIN/SCRAM clusters a plain client can reach directly are not handled here.
+  provisioning:
+    enabled: true
+    # Replication factor for created topics. Managed clusters need >= 3 (MSK
+    # Serverless requires exactly 3); the per-topic `replicas` above is only for
+    # the single-broker in-cluster Strimzi path.
+    replicationFactor: 3
 
 # Strimzi cluster operator (subchart). Watches the release namespace only; the
 # operator and broker images are the official quay.io/strimzi builds (public, no
@@ -1490,10 +1492,14 @@ supabase:
     enabled: false
     host: ""
     port: 5432
-    # Credentials every service presents (one shared password, per-service username).
-    # Keep them in secret.db, or point secretRef at an existing Secret.
+    # Connection fields every service uses. Keep credentials in secret.db, or
+    # point secretRef at one existing Secret for host/port/username/password/database.
     secretRef: ""
     secretRefKey:
+      # host/port default empty for backward compatibility. Set these to source
+      # DB_HOST/DB_PORT from the same external database Secret.
+      host: ""
+      port: ""
       username: username
       password: password
       database: database

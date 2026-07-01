@@ -54,10 +54,12 @@ spec:
                 -f /sql/bootstrap.sql
               echo "Bootstrap complete."
           env:
-            - name: DB_HOST
-              value: {{ include "supabase.db.host" . | quote }}
-            - name: DB_PORT
-              value: {{ include "supabase.db.port" . | quote }}
+            {{- include "supabase.db.hostEnv" . | nindent 12 }}
+            {{- include "supabase.db.portEnv" . | nindent 12 }}
+            # The DB name is not sensitive, and this is a PRE-INSTALL hook that
+            # runs before the main <release>-supabase-db secret exists - so read it
+            # from values (default "postgres") instead of that secret, or the hook
+            # dies with CreateContainerConfigError on a fresh install.
             - name: DB_NAME
               value: {{ .Values.secret.db.database | default "postgres" | quote }}
             - name: APP_ROLE

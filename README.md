@@ -551,6 +551,36 @@ This renders `HTTPRoute` resources instead of `Ingress`. Requires a Gateway API 
 
 Use `ingress.hostname` when your application hostname differs from `global.domain` (e.g., `rulebricks.example.com` vs `example.com`).
 
+The observability and Valkey Admin endpoints can use the same Gateway API parent:
+
+```yaml
+clickstack:
+  hyperdx:
+    ingress:
+      enabled: true
+      type: "gateway-api"
+      hostname: "observability.example.com" # defaults to observability.<global.domain>
+      gatewayApi:
+        gatewayName: "my-gateway"
+        gatewayNamespace: "gateway-system"
+
+rulebricks:
+  cache:
+    valkeyAdmin:
+      enabled: true
+      exposure: ingress
+      ingress:
+        enabled: true
+        type: "gateway-api"
+        hostname: "valkey.example.com" # defaults to valkey.<global.domain>
+        annotations: {} # attach Gateway/controller-specific auth policy hooks here
+        gatewayApi:
+          gatewayName: "my-gateway"
+          gatewayNamespace: "gateway-system"
+```
+
+Valkey Admin's built-in Traefik BasicAuth/IP whitelist resources only apply when `type: "ingress"`. For `type: "gateway-api"`, protect `valkey.<global.domain>` with your Gateway implementation's auth policy or an external auth proxy.
+
 </details>
 
 <details>
@@ -586,6 +616,28 @@ supabase:
 ```
 
 For Gateway API, set `supabase.studio.ingress.type: gateway-api` and configure `supabase.studio.ingress.gatewayApi.gatewayName`. Studio dashboard authentication is controlled by `supabase.secret.dashboard.username` and `supabase.secret.dashboard.password`.
+
+</details>
+
+<details>
+<summary><strong>External Supabase Database Secret</strong></summary>
+
+For managed Postgres, `supabase.externalDatabase.secretRef` can provide the full connection tuple from one Secret. Leave `host`/`port` empty to keep using inline values, or set those keys to source `DB_HOST`/`DB_PORT` from the Secret too:
+
+```yaml
+supabase:
+  externalDatabase:
+    enabled: true
+    secretRef: "supabase-db"
+    secretRefKey:
+      host: host
+      port: port
+      username: username
+      password: password
+      database: database
+```
+
+The Secret values are consumed by the Supabase auth, rest, realtime, meta pods and the external database bootstrap job.
 
 </details>
 

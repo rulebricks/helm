@@ -55,6 +55,10 @@ spec:
               value: 1
               periodSeconds: 300
   triggers:
+    {{- /* Under token auth (AWS MSK IAM / GCP OAUTHBEARER) the KEDA operator can't
+         reach Kafka directly, so skip the lag trigger and rely on the CPU fallback.
+         See the worker scaler for the note on restoring lag-based scaling. */}}
+    {{- if not (include "rulebricks-chart.kafka.tokenAuth" .) }}
     # Primary: response-topic lag for the gather consumer group. Lag here
     # means responses are waiting to be parsed/dispatched - the direct
     # signal that the gather plane is the bottleneck.
@@ -71,7 +75,9 @@ spec:
         topic: {{ include "rulebricks-chart.kafka.topicPrefix" . }}solution-response
         lagThreshold: "{{ .Values.hps.keda.lagThreshold | default 300 }}"
         offsetResetPolicy: latest
-    # Fallback: CPU (event-loop pressure shows up as CPU on the hps container).
+    {{- end }}
+    # Fallback: CPU (event-loop pressure shows up as CPU on the hps container);
+    # the sole trigger under token auth.
     - type: cpu
       metadata:
         type: Utilization

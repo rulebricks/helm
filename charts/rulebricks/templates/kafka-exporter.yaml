@@ -1,5 +1,9 @@
 {{- $exporter := .Values.kafkaExporter | default dict -}}
-{{- if $exporter.enabled }}
+{{- /* kafka-exporter (danielqsj) only speaks PLAIN/SCRAM/GSSAPI, so it cannot
+     authenticate to a token-auth broker (AWS MSK IAM / GCP OAUTHBEARER) and would
+     crashloop. Auto-skip under token auth unless explicitly forced; front it with
+     the kafka-proxy bridge if you need Kafka metrics against a managed cluster. */}}
+{{- if and $exporter.enabled (or $exporter.forceEnable (not (include "rulebricks-chart.kafka.tokenAuth" .))) }}
 {{- $name := include "rulebricks-chart.kafkaExporter.fullname" . -}}
 {{- $image := $exporter.image | default dict -}}
 {{- $service := $exporter.service | default dict -}}

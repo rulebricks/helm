@@ -19,15 +19,13 @@ spec:
               pg_isready -h $(DB_HOST) -p $(DB_PORT) -U $(DB_USER) || $(echo "\e[0;31mFailed to connect to the database." && exit 1)
               echo "Database is ready"
           env:
-            - name: DB_HOST
-              value: {{ include "supabase.db.host" . | quote }}
+            {{- include "supabase.db.hostEnv" . | nindent 12 }}
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ include "supabase.db.secretName" . }}
                   key: {{ include "supabase.db.secretKey" (dict "root" . "field" "username" "default" "username") }}
-            - name: DB_PORT
-              value: {{ include "supabase.db.port" . | quote }}
+            {{- include "supabase.db.portEnv" . | nindent 12 }}
           image: {{ include "supabase.image" (dict "root" $ "image" .Values.global.images.postgres15 "name" "postgres15") | quote }}
           imagePullPolicy: IfNotPresent
           name: test-db

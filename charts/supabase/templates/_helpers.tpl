@@ -106,6 +106,54 @@ Resolve the database port used by Supabase services.
 {{- end }}
 
 {{/*
+Render DB_HOST as a pod env var. In external-DB mode, operators may source it
+from the same database Secret as username/password/database by setting
+externalDatabase.secretRefKey.host (or secret.db.secretRefKey.host when using
+secret.db.secretRef as the shared Secret). Otherwise this preserves the existing
+plain value rendering.
+*/}}
+{{- define "supabase.db.hostEnv" -}}
+{{- $root := . -}}
+{{- $key := "" -}}
+{{- if and $root.Values.externalDatabase $root.Values.externalDatabase.enabled $root.Values.externalDatabase.secretRef -}}
+  {{- $key = (index ($root.Values.externalDatabase.secretRefKey | default dict) "host") | default "" -}}
+{{- else if and $root.Values.externalDatabase $root.Values.externalDatabase.enabled $root.Values.secret.db.secretRef -}}
+  {{- $key = (index ($root.Values.secret.db.secretRefKey | default dict) "host") | default "" -}}
+{{- end -}}
+- name: DB_HOST
+{{- if $key }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "supabase.db.secretName" $root }}
+      key: {{ $key }}
+{{- else }}
+  value: {{ include "supabase.db.host" $root | quote }}
+{{- end }}
+{{- end }}
+
+{{/*
+Render DB_PORT as a pod env var. See supabase.db.hostEnv for Secret behavior.
+*/}}
+{{- define "supabase.db.portEnv" -}}
+{{- $root := . -}}
+{{- $key := "" -}}
+{{- if and $root.Values.externalDatabase $root.Values.externalDatabase.enabled $root.Values.externalDatabase.secretRef -}}
+  {{- $key = (index ($root.Values.externalDatabase.secretRefKey | default dict) "port") | default "" -}}
+{{- else if and $root.Values.externalDatabase $root.Values.externalDatabase.enabled $root.Values.secret.db.secretRef -}}
+  {{- $key = (index ($root.Values.secret.db.secretRefKey | default dict) "port") | default "" -}}
+{{- end -}}
+- name: DB_PORT
+{{- if $key }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "supabase.db.secretName" $root }}
+      key: {{ $key }}
+{{- else }}
+  value: {{ include "supabase.db.port" $root | quote }}
+{{- end }}
+{{- end }}
+
+{{/*
 Resolve the database credentials secret name.
 */}}
 {{- define "supabase.db.secretName" -}}

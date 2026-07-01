@@ -40,15 +40,13 @@ spec:
           image: {{ include "supabase.image" (dict "root" $ "image" .Values.global.images.postgres15 "name" "postgres15") | quote }}
           imagePullPolicy: IfNotPresent
           env:
-            - name: DB_HOST
-              value: {{ include "supabase.db.host" . | quote }}
+            {{- include "supabase.db.hostEnv" . | nindent 12 }}
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ include "supabase.db.secretName" . }}
                   key: {{ include "supabase.db.secretKey" (dict "root" . "field" "username" "default" "username") }}
-            - name: DB_PORT
-              value: {{ include "supabase.db.port" . | quote }}
+            {{- include "supabase.db.portEnv" . | nindent 12 }}
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -200,10 +198,8 @@ spec:
               value: {{ index .Values.auth.environment "GOTRUE_MAILER_AUTOCONFIRM" | default "false" | quote }}
             {{- end }}
             {{- end }}
-            - name: DB_HOST
-              value: {{ include "supabase.db.host" . | quote }}
-            - name: DB_PORT
-              value: {{ include "supabase.db.port" . | quote }}
+            {{- include "supabase.db.hostEnv" . | nindent 12 }}
+            {{- include "supabase.db.portEnv" . | nindent 12 }}
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:

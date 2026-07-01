@@ -71,9 +71,10 @@ ClickHouse, and future storage-backed jobs.
 
 {{- define "rulebricks.storage.serviceAccountAnnotations" -}}
 {{- $storage := .Values.global.storage | default dict -}}
-{{- if and (eq ($storage.provider | default "") "s3") $storage.s3 $storage.s3.iamRoleArn }}
-eks.amazonaws.com/role-arn: {{ $storage.s3.iamRoleArn | quote }}
-{{- else if and (eq ($storage.provider | default "") "gcs") $storage.gcp $storage.gcp.serviceAccountEmail }}
+{{/* AWS uses EKS Pod Identity (a namespace-scoped association created by the CLI,
+     no annotation). Only GCP/Azure workload identity bind via a ServiceAccount
+     annotation, so S3 intentionally emits nothing here. */}}
+{{- if and (eq ($storage.provider | default "") "gcs") $storage.gcp $storage.gcp.serviceAccountEmail }}
 iam.gke.io/gcp-service-account: {{ $storage.gcp.serviceAccountEmail | quote }}
 {{- else if and (eq ($storage.provider | default "") "azure-blob") $storage.azure $storage.azure.clientId }}
 azure.workload.identity/client-id: {{ $storage.azure.clientId | quote }}
@@ -105,9 +106,9 @@ com.rulebricks.
 
 {{- define "rulebricks.kafka.identityAnnotations" -}}
 {{- $bridge := .Values.kafkaBridge | default dict -}}
-{{- if and (eq ($bridge.provider | default "") "aws") $bridge.awsRoleArn }}
-eks.amazonaws.com/role-arn: {{ $bridge.awsRoleArn | quote }}
-{{- else if and (eq ($bridge.provider | default "") "gcp") $bridge.gcpServiceAccountEmail }}
+{{/* AWS MSK IAM uses EKS Pod Identity (association, no annotation). Only GCP
+     Managed Kafka binds its workload identity via a ServiceAccount annotation. */}}
+{{- if and (eq ($bridge.provider | default "") "gcp") $bridge.gcpServiceAccountEmail }}
 iam.gke.io/gcp-service-account: {{ $bridge.gcpServiceAccountEmail | quote }}
 {{- end }}
 {{- end -}}

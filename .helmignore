@@ -30,3 +30,6 @@ ci/
 
 # Editor worktrees (full duplicate chart copies — must not be packaged)
 .cursor/
+# Generated reports / SBOMs / vendored node_modules — huge, not chart content
+# (bloats the Helm release Secret past etcd's ~3 MiB limit).
+reports/

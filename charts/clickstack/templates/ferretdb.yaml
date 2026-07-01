@@ -87,14 +87,18 @@ spec:
               mountPath: /var/lib/postgresql/data
           resources:
             {{- toYaml .Values.ferretdb.resources.postgres | nindent 12 }}
+          {{- with .Values.ferretdb.postgres.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.ferretdb.postgres.readinessProbe }}
           readinessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -ec
-                - pg_isready -U "$POSTGRES_USER" -d postgres
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.ferretdb.postgres.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
         - name: ferretdb
           image: {{ include "clickstack.image" (dict "root" $ "image" .Values.ferretdb.image "name" "ferretdb") | quote }}
           imagePullPolicy: {{ .Values.ferretdb.image.pullPolicy }}
@@ -116,11 +120,18 @@ spec:
               mountPath: /state
           resources:
             {{- toYaml .Values.ferretdb.resources.ferretdb | nindent 12 }}
+          {{- with .Values.ferretdb.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.ferretdb.readinessProbe }}
           readinessProbe:
-            tcpSocket:
-              port: mongo
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.ferretdb.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       volumes:
         - name: ferretdb-state
           emptyDir: {}
