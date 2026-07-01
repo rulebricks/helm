@@ -11,3 +11,5 @@ benchmarks/*.json
 .cursor/
 
 reports/*
+
+.DS_Store

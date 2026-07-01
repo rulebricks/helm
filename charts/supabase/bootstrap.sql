@@ -18,6 +18,8 @@
 --   authenticator_password       password for the PostgREST login role
 --   auth_admin_password          password for the GoTrue login role
 --   replication_admin_password   password for the Realtime/replication login role
+--   admin_password               password for supabase_admin (Studio/postgres-meta)
+--   storage_admin_password       password for supabase_storage_admin (Storage API)
 --   app_role                     role that runs your APP migrations (default: postgres)
 -- ============================================================================
 
@@ -126,6 +128,45 @@ BEGIN
   RAISE NOTICE 'Replication configured for provider: %', provider;
 END $$;
 
+-- supabase_admin: the login role Supabase Studio's introspection backend
+-- (postgres-meta) connects as. On the bundled supabase/postgres image this is a
+-- superuser; on managed Postgres we cannot create one, so we grant it the
+-- provider's admin/superuser group where available (same probe as the
+-- replication role) plus the app roles, so Studio can see every schema. Without
+-- it Studio fails with "password authentication failed for user supabase_admin"
+-- and cannot load schemas or tables. The grant is best-effort (warns, not fatal).
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+    CREATE ROLE supabase_admin LOGIN CREATEROLE CREATEDB;
+  END IF;
+END $$;
+ALTER ROLE supabase_admin WITH PASSWORD :'admin_password';
+GRANT anon, authenticated, service_role, authenticator,
+      supabase_auth_admin, supabase_replication_admin TO supabase_admin;
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'rds_superuser') THEN
+    BEGIN EXECUTE 'GRANT rds_superuser TO supabase_admin';
+    EXCEPTION WHEN OTHERS THEN RAISE WARNING 'Could not grant rds_superuser to supabase_admin: %', SQLERRM; END;
+  ELSIF EXISTS (SELECT FROM pg_roles WHERE rolname = 'azure_pg_admin') THEN
+    BEGIN EXECUTE 'GRANT azure_pg_admin TO supabase_admin';
+    EXCEPTION WHEN OTHERS THEN RAISE WARNING 'Could not grant azure_pg_admin to supabase_admin: %', SQLERRM; END;
+  ELSIF EXISTS (SELECT FROM pg_roles WHERE rolname = 'cloudsqlsuperuser') THEN
+    BEGIN EXECUTE 'GRANT cloudsqlsuperuser TO supabase_admin';
+    EXCEPTION WHEN OTHERS THEN RAISE WARNING 'Could not grant cloudsqlsuperuser to supabase_admin: %', SQLERRM; END;
+  END IF;
+END $$;
+
+-- supabase_storage_admin: the Storage API connects as this and owns the storage
+-- schema. Created even when Storage is not deployed so it can be enabled later
+-- with no manual DB work (mirrors the bundled image).
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_storage_admin') THEN
+    CREATE ROLE supabase_storage_admin LOGIN NOINHERIT CREATEROLE;
+  END IF;
+END $$;
+ALTER ROLE supabase_storage_admin WITH PASSWORD :'storage_admin_password';
+
 -- ---------------------------------------------------------------------------
 -- Schemas
 -- ---------------------------------------------------------------------------
@@ -133,6 +174,14 @@ CREATE SCHEMA IF NOT EXISTS auth;
 CREATE SCHEMA IF NOT EXISTS realtime;
 CREATE SCHEMA IF NOT EXISTS "_realtime";   -- Realtime v2.76+ requires this; not auto-created
 CREATE SCHEMA IF NOT EXISTS extensions;
+-- storage / graphql_public exist on the bundled image (created by the Storage
+-- service and pg_graphql). PostgREST is configured to expose
+-- public,storage,graphql_public and fails its ENTIRE schema cache (PGRST002 ->
+-- every REST query 500s) if any is missing, so create them here even when
+-- Storage / pg_graphql are absent on managed Postgres. They stay empty until
+-- those components populate them.
+CREATE SCHEMA IF NOT EXISTS storage;
+CREATE SCHEMA IF NOT EXISTS graphql_public;
 
 -- Hand auth to GoTrue's admin role (requires membership in the target role)
 GRANT supabase_auth_admin TO CURRENT_USER;
@@ -151,6 +200,12 @@ GRANT ALL ON SCHEMA realtime TO supabase_replication_admin;
 
 GRANT USAGE ON SCHEMA extensions TO anon, authenticated, service_role;
 GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
+
+-- Storage schema is owned by its admin role (Storage self-migrates it when the
+-- service is deployed); the exposed roles need USAGE so PostgREST can introspect.
+ALTER SCHEMA storage OWNER TO supabase_storage_admin;
+GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA graphql_public TO anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- auth.* helper functions used by RLS policies.

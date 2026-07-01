@@ -485,6 +485,7 @@ clickstack:
       email: "email" # REQUIRED claim - used as the identity key for user upsert
       name: "name" # display name (copied to public.users.name)
     # URL-path prefixes that should bypass the token check (e.g. embedded public forms).
+    # Health, metrics, denied-page, branding, and x-api-key requests are auto-exempt by the app.
     # Rendered as a comma-separated string for EXTERNAL_AUTH_PUBLIC_PATHS.
     publicPaths: []
     # Example:

@@ -50,6 +50,8 @@ spec:
                 --set authenticator_password="${SERVICE_DB_PASSWORD}" \
                 --set auth_admin_password="${SERVICE_DB_PASSWORD}" \
                 --set replication_admin_password="${SERVICE_DB_PASSWORD}" \
+                --set admin_password="${SERVICE_DB_PASSWORD}" \
+                --set storage_admin_password="${SERVICE_DB_PASSWORD}" \
                 --set app_role="${APP_ROLE}" \
                 -f /sql/bootstrap.sql
               echo "Bootstrap complete."
