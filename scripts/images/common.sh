@@ -15,7 +15,7 @@
 #     - name: clickhouse-server          # target = docker.io/rulebricks/<name>
 #       kind: mirror                     # mirror | build | external
 #       source: dhi.io/clickhouse-server # full source ref WITHOUT tag (mirror/build base)
-#       tag: "25.8.24-debian13"
+#       tag: "25.8.28-debian13"
 #       auth: dhi                        # dhi | quay | dockerhub | none
 #       context: images/hyperdx          # only for kind: build
 #       base: dhi.io/node:22             # only for kind: build

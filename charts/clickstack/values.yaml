@@ -43,7 +43,7 @@ hyperdx:
   image:
     registry: docker.io
     repository: rulebricks/hyperdx
-    tag: "2.19.0"
+    tag: "2.29.0"
     pullPolicy: IfNotPresent
   ports:
     app: 8080
@@ -99,7 +99,7 @@ collector:
   image:
     registry: docker.io
     repository: rulebricks/clickstack-otel-collector
-    tag: "2.19.0"
+    tag: "2.29.0"
     pullPolicy: IfNotPresent
   memoryLimitMiB: 800
   gateway:
