@@ -32,7 +32,7 @@ global:
     postgres15: { registry: docker.io, repository: rulebricks/postgres, tag: "15-debian13" }
     postgres16: { registry: docker.io, repository: rulebricks/postgres, tag: "16-debian13" }
     node20: { registry: docker.io, repository: rulebricks/node, tag: "20-alpine" }
-    rclone: { registry: docker.io, repository: rulebricks/rclone, tag: "1.71.1" }
+    rclone: { registry: docker.io, repository: rulebricks/rclone, tag: "1.74.3" }
     busybox: { registry: docker.io, repository: rulebricks/busybox, tag: "1.37.0-debian13" }
     pause: { registry: docker.io, repository: rulebricks/pause, tag: "3.9" }
   # Image pull secret for the private rulebricks/* repos on Docker Hub. References
@@ -132,7 +132,7 @@ clickstack:
     image:
       registry: docker.io
       repository: rulebricks/hyperdx
-      tag: "2.19.0"
+      tag: "2.29.0"
     resources:
       requests:
         cpu: 250m
@@ -154,7 +154,7 @@ clickstack:
     image:
       registry: docker.io
       repository: rulebricks/clickstack-otel-collector
-      tag: "2.19.0"
+      tag: "2.29.0"
     memoryLimitMiB: 800
     gateway:
       replicas: 1
@@ -934,7 +934,7 @@ clickhouse:
   image:
     registry: docker.io
     repository: rulebricks/clickhouse-server
-    tag: "25.8.24-debian13"
+    tag: "25.8.28-debian13"
     pullPolicy: IfNotPresent
   # Critical-tier scheduling: set to "<release>-critical" so the single
   # replica can preempt burst workers to reschedule (CLI fills automatically).
@@ -1163,7 +1163,7 @@ vector:
   haproxy:
     image:
       repository: docker.io/rulebricks/haproxy
-      tag: "2.6.30-debian13"
+      tag: "3.4.2-debian13"
   podLabels:
     rulebricks.com/workload-group: infrastructure
   role: "Stateless-Aggregator"
@@ -1649,6 +1649,7 @@ kube-prometheus-stack:
       image:
         registry: docker.io
         repository: rulebricks/alertmanager
+        tag: "v0.33.1"
   grafana:
     # In-cluster Grafana is opt-in (the CLI enables it for the local-grafana
     # monitoring destination). When enabled, the dashboard sidecar imports the
@@ -1663,7 +1664,7 @@ kube-prometheus-stack:
       image:
         registry: docker.io
         repository: rulebricks/k8s-sidecar
-        tag: "2.8.0-debian13"
+        tag: "2.8.1-debian13"
       dashboards:
         enabled: true
         label: grafana_dashboard
@@ -1735,11 +1736,12 @@ kube-prometheus-stack:
     image:
       registry: docker.io
       repository: rulebricks/prometheus-operator
+      tag: "v0.92.1"
     prometheusConfigReloader:
       image:
         registry: docker.io
         repository: rulebricks/prometheus-config-reloader
-        tag: "0.92.0-debian13"
+        tag: "0.92.1-debian13"
     admissionWebhooks:
       patch:
         image:
@@ -1750,7 +1752,7 @@ kube-prometheus-stack:
         image:
           registry: docker.io
           repository: rulebricks/prometheus-operator-admission-webhook
-          tag: "0.92.0-debian13"
+          tag: "0.92.1-debian13"
     thanosImage:
       registry: docker.io
       repository: rulebricks/thanos
