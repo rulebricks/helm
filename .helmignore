@@ -28,6 +28,8 @@ ci/
 
 
 
+# NOTE: images/manifest.yaml MUST ship inside the chart tarball
+
 # Editor worktrees (full duplicate chart copies — must not be packaged)
 .cursor/
 # Generated reports / SBOMs / vendored node_modules — huge, not chart content

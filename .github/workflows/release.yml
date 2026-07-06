@@ -280,6 +280,13 @@ jobs:
           CHART_NAME=$(awk '/^name:/ {print $2; exit}' Chart.yaml)
           helm package . --destination dist
           CHART_PACKAGE="dist/${CHART_NAME}-${VERSION}.tgz"
+          # Public contract: the CLI resolves infrastructure image tags from the
+          # manifest inside the tarball (per chart version). A package without it
+          # would silently break CLI tag resolution — fail the release instead.
+          if ! tar -tzf "$CHART_PACKAGE" | grep -qx "${CHART_NAME}/images/manifest.yaml"; then
+            echo "::error::images/manifest.yaml is missing from ${CHART_PACKAGE}; the CLI resolves image tags from it (check .helmignore)"
+            exit 1
+          fi
           shasum -a 256 "$CHART_PACKAGE" | tee "${CHART_PACKAGE}.sha256"
           echo "chart_name=$CHART_NAME" >> "$GITHUB_OUTPUT"
           echo "chart_package=$CHART_PACKAGE" >> "$GITHUB_OUTPUT"

@@ -513,6 +513,13 @@ Avoid `nodeSelector` or `requiredDuringSchedulingIgnoredDuringExecution` unless 
 </details>
 
 <details>
+<summary><strong>Image Manifest (Single Source of Truth)</strong></summary>
+
+`images/manifest.yaml` pins every `docker.io/rulebricks/*` infrastructure image the chart pulls (the app/HPS/worker images are governed by `global.version` instead). The mirror pipeline (`.github/workflows/mirror-images.yml`) publishes from it, `scripts/images/verify-versions.sh` enforces that rendered charts match it, and — because the manifest ships inside the published chart tarball — the [Rulebricks CLI](https://github.com/rulebricks/cli) resolves image tags from it at deploy time for the exact chart version being installed. This makes the manifest a public contract: keep the entry schema and existing image names stable (or coordinate a CLI release), and never exclude `images/` via `.helmignore` (the release workflow fails the package if the manifest is missing from the tarball).
+
+</details>
+
+<details>
 <summary><strong>Kafka Image Publishing</strong></summary>
 
 The vendored Kafka subchart defaults to `docker.io/rulebricks/kafka` so installs do not depend on the upstream image namespace at deploy time. Publish the default Kafka tag as a multi-arch manifest before releasing chart changes that reference it:

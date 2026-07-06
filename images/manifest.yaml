@@ -13,6 +13,10 @@
 #            different tags (postgres15/postgres16 -> rulebricks/postgres)
 #   digest:  (written back by CI; never hand-edit)
 #
+# This file ships inside the published chart tarball and the
+# Rulebricks CLI parses it at deploy time to resolve infrastructure image tags
+# for the exact chart version being installed (no tags are pinned in the CLI).
+#
 # =============================================================================
 
 images:
