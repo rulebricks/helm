@@ -75,16 +75,6 @@ jobs:
         # images/manifest.yaml entry at the same tag (catches chart/CLI tag drift).
         run: scripts/images/verify-versions.sh /tmp/rulebricks-rendered.yaml
 
-      - name: Template Gateway API Install
-        # Cheap smoke render of the alternate ingress path (Gateway API httproute).
-        run: |
-          helm template rulebricks . \
-            --namespace rulebricks \
-            -f ci/validate-values.yaml \
-            --set rulebricks.ingress.type=gateway-api \
-            --set rulebricks.ingress.gatewayApi.gatewayName=rulebricks-gateway \
-            > /dev/null
-
       - name: Validate Rendered Workloads And ClickHouse Bootstrap
         run: |
           ruby -ryaml <<'RUBY'

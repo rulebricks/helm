@@ -1,0 +1,30 @@
+{{- /*
+  Supabase Studio (and a few other bundled components) hardcode the Postgres host
+  as "db" (the service name from the upstream docker-compose) for some of their
+  introspection/query calls, instead of using the chart's resolved host. With an
+  external managed database there is no in-cluster "db" service, so those specific
+  requests fail DNS resolution and Studio's Table Editor shows "Failed to load
+  schemas/tables". The actual data plane is unaffected (every service connects via
+  the real host from supabase.db.host), so this is purely a hardcoded-hostname gap.
+
+  Provide a "db" ExternalName alias that resolves to the managed instance so the
+  hardcoded host works. Generic across providers (RDS / Azure Flexible Server /
+  Cloud SQL) - it just mirrors, in external mode, the in-cluster "db" name those
+  components expect. Only rendered when the external host is known inline (an
+  ExternalName is a DNS CNAME, so the host must be a literal, not a Secret ref).
+*/ -}}
+{{- if and .Values.externalDatabase .Values.externalDatabase.enabled (not .Values.db.enabled) }}
+{{- $host := include "supabase.db.host" . }}
+{{- if and $host (ne $host "db") }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "supabase.labels" . | nindent 4 }}
+spec:
+  type: ExternalName
+  externalName: {{ $host | quote }}
+{{- end }}
+{{- end }}

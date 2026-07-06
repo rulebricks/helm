@@ -180,6 +180,9 @@ metadata:
     {{- with $ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+    {{- if eq (include "rulebricks-chart.tlsEnabled" .) "true" }}
+    cert-manager.io/cluster-issuer: {{ .Release.Name }}-letsencrypt
+    {{- end }}
     {{- if and .Values.global .Values.global.externalDnsEnabled }}
     external-dns.alpha.kubernetes.io/hostname: {{ $ingress.hostname | default (printf "valkey.%s" .Values.global.domain) }}
     external-dns.alpha.kubernetes.io/ttl: "300"
@@ -202,7 +205,10 @@ spec:
   tls:
     - hosts:
         - {{ $ingress.hostname | default (printf "valkey.%s" .Values.global.domain) }}
-      secretName: {{ include "rulebricks-chart.tls.secretName" . }}
+      # Dedicated per-host secret: the shared <release>-tls-secret only covers
+      # global.domain, so cert-manager (via the cluster-issuer annotation above)
+      # must issue a separate certificate for the valkey subdomain.
+      secretName: {{ $name }}-tls
   {{- end }}
   rules:
     - host: {{ $ingress.hostname | default (printf "valkey.%s" .Values.global.domain) | quote }}

@@ -165,10 +165,21 @@ spec:
             limits:
               cpu: {{ .Values.hps.workers.resources.limits.cpu | default "1000m" }}
               memory: {{ .Values.hps.workers.resources.limits.memory | default "1Gi" }}
-          {{- with .Values.hps.workers.livenessProbe }}
+          {{- /* Default liveness: the worker's /health endpoint reports 503 when
+               its Kafka consumer has fatally crashed and in-process recovery has
+               not yet succeeded (e.g. MSK IAM re-authentication failures after
+               workload-identity credential rotation). Without this probe such a
+               pod stays Running forever while consuming nothing. Thresholds are
+               generous so the worker's own reconnect/backoff recovery gets ~2
+               minutes before the pod is replaced. */}}
+          {{- $workerLiveness := .Values.hps.workers.livenessProbe | default (dict
+                "httpGet" (dict "path" "/health" "port" (.Values.metrics.worker.port | default 3000))
+                "initialDelaySeconds" 30
+                "periodSeconds" 15
+                "timeoutSeconds" 5
+                "failureThreshold" 8) }}
           livenessProbe:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- toYaml $workerLiveness | nindent 12 }}
           {{- with .Values.hps.workers.readinessProbe }}
           readinessProbe:
             {{- toYaml . | nindent 12 }}

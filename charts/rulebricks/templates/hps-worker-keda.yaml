@@ -73,11 +73,25 @@ spec:
       # bounded unit of work, so this approximates seconds of fleet backlog.
       lagThreshold: "{{ .Values.hps.workers.keda.lagThreshold | default 100 }}"
       offsetResetPolicy: latest
+    {{- /* External Kafka with a static SASL credential (Event Hubs, Confluent,
+         SCRAM clusters): without tls/sasl + the credential TriggerAuthentication
+         the trigger renders but can never authenticate. In-cluster Kafka takes
+         the empty branch and renders exactly as before. */}}
+    {{- if include "rulebricks-chart.kafka.kedaSaslMode" . }}
+      tls: {{ include "rulebricks-chart.kafka.kedaTlsMode" . }}
+      sasl: {{ include "rulebricks-chart.kafka.kedaSaslMode" . }}
+    authenticationRef:
+      name: {{ include "rulebricks-chart.kafka.triggerAuthName" . }}
+    {{- end }}
   {{- end }}
   # CPU trigger: the safety net when Kafka lag metrics are unavailable, and the
   # sole scaling signal under token auth (see note above).
+  {{- /* metricType (not metadata.type) is the KEDA >= 2.7 form; the legacy
+       metadata 'type' key was removed in KEDA 2.18 and makes the whole
+       ScaledObject fail to parse ("KEDAScalerFailed"), silently disabling
+       autoscaling. */}}
   - type: cpu
+    metricType: Utilization
     metadata:
-      type: Utilization
       value: "{{ .Values.hps.workers.keda.cpuThreshold | default 25 }}"
 {{- end }}

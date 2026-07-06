@@ -78,13 +78,16 @@ timestamp, api_key, user_id, environment, ip, method, url, status, rule_name, ru
       <date_time_input_format>best_effort</date_time_input_format>
       <input_format_skip_unknown_fields>1</input_format_skip_unknown_fields>
       {{- /* Decision logs are laid out as year=/month=/day=/hour= Hive partitions
-             in object storage. Enabling this exposes those path segments as the
-             decision_logs view's year/month/day/hour columns AND lets a query that
-             filters on them prune whole files at listing time instead of scanning
-             all of history. MUST be a profile (session) setting: when set inline in
-             the view's own SETTINGS the predicate does not push down and pruning is
-             silently lost. */}}
-      <use_hive_partitioning>1</use_hive_partitioning>
+             in object storage, but hive partitioning MUST stay DISABLED here: with
+             it on, ClickHouse >= 25.x derives partition columns from the path and
+             requires them in the named collection's pinned `structure` (which
+             intentionally omits them - the views derive year/month/day/hour from
+             the row timestamp so they survive an empty bucket). With the profile
+             set to 1 every decision-log read fails with "All hive partitioning
+             columns must be present in the schema" the moment the first blob
+             lands. Nothing is lost by disabling it: the app filters on timestamp,
+             not the path columns, so hive pruning was never exercised. */}}
+      <use_hive_partitioning>0</use_hive_partitioning>
     </default>
     <otel>
       <max_memory_usage>{{ $otelLimits.maxMemoryUsage | default 4294967296 | int64 }}</max_memory_usage>
@@ -151,6 +154,10 @@ otherwise corrupt a multi-line script.
 {{- end -}}
 {{- $columns := include "rulebricks.clickhouse.decisionLogSelectColumns" . -}}
 {{- $otelDb := .Values.otelDatabase | default "otel" -}}
+{{- /* Reads through these views REQUIRE use_hive_partitioning=0, set in the
+       default profile (queryLimitsXml above). A view-level SETTINGS clause does
+       NOT reach the underlying s3() storage read, so the profile is the only
+       place that works. See queryLimitsXml for the full rationale. */ -}}
 CREATE DATABASE IF NOT EXISTS rulebricks; CREATE DATABASE IF NOT EXISTS {{ $otelDb }}; CREATE OR REPLACE VIEW rulebricks.decision_logs_archive AS SELECT {{ $columns }}, toYear(timestamp) AS year, toMonth(timestamp) AS month, toDayOfMonth(timestamp) AS day, toHour(timestamp) AS hour FROM {{ $source }}; CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive;
 {{- end -}}
 

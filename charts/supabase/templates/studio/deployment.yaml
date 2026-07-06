@@ -67,6 +67,24 @@ spec:
             - name: STUDIO_PG_META_URL
               value: http://{{ include "supabase.meta.fullname" . }}:{{ .Values.meta.service.port }}
             {{- end }}
+            {{- /*
+              Studio's Default-Project connection (the SQL/Table editor /query
+              path) connects to the DB as the admin role using POSTGRES_PASSWORD.
+              Upstream's docker-compose sets this on the studio service; the chart
+              must too, or the Table Editor fails with "password authentication
+              failed for user supabase_admin". Sourced from the same db Secret
+              every other service uses, so it matches the role passwords.
+            */}}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.secret.db.secretRef }}
+                  name: {{ .Values.secret.db.secretRef }}
+                  key: {{ .Values.secret.db.secretRefKey.password | default "password" }}
+                  {{- else }}
+                  name: {{ include "supabase.secret.db" . }}
+                  key: password
+                  {{- end }}
             - name: SUPABASE_ANON_KEY
               valueFrom:
                 secretKeyRef:

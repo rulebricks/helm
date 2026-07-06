@@ -1,0 +1,41 @@
+{{- /*
+TriggerAuthentication for the KEDA Kafka lag triggers when EXTERNAL Kafka is
+secured with a STATIC SASL credential (PLAIN/SCRAM - e.g. Azure Event Hubs'
+$ConnectionString, Confluent API keys). KEDA's kafka scaler can only take
+username/password through a TriggerAuthentication, so without this the lag
+triggers render but can never authenticate and lag-based scaling silently
+fails (leaving CPU as the only scaling signal).
+
+Deliberately NOT created for:
+  - in-cluster Kafka (plaintext listener, no auth to carry), and
+  - token-auth mechanisms (AWS MSK IAM / OAUTHBEARER), where the lag trigger
+    is skipped entirely (see rulebricks-chart.kafka.tokenAuth).
+
+Credentials come from the same source the HPS workers use: the optional
+kafkaSasl.existingSecret (with its configurable key names), else the chart's
+app secret where inline kafkaSasl.username/password are rendered.
+*/}}
+{{- if and .Values.hps .Values.hps.enabled (or ((.Values.hps.workers).keda).enabled ((.Values.hps).keda).enabled) }}
+{{- if include "rulebricks-chart.kafka.kedaSaslMode" . }}
+{{- $sasl := .Values.app.logging.kafkaSasl }}
+{{- $secretName := $sasl.existingSecret | default (include "rulebricks-chart.app.secretName" . | trim) }}
+{{- $usernameKey := $sasl.existingSecretUsernameKey | default "KAFKA_SASL_USERNAME" }}
+{{- $passwordKey := $sasl.existingSecretPasswordKey | default "KAFKA_SASL_PASSWORD" }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "rulebricks-chart.kafka.triggerAuthName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: kafka-lag-auth
+spec:
+  secretTargetRef:
+    - parameter: username
+      name: {{ $secretName }}
+      key: {{ $usernameKey }}
+    - parameter: password
+      name: {{ $secretName }}
+      key: {{ $passwordKey }}
+{{- end }}
+{{- end }}

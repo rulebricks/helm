@@ -1188,12 +1188,41 @@ vector:
         port: 8686
         protocol: TCP
         targetPort: 8686
+  # CA TRUST BUNDLE: the hardened rulebricks/vector image ships NO system CA
+  # store (no /etc/ssl/certs at all), so every TLS sink connection - S3/GCS/
+  # Azure object storage for decision logs, Datadog/Splunk/etc. - fails at the
+  # connector level with "dispatch failure" and decision logs are silently
+  # dropped. Seed the standard bundle from the (mirrored, cert-carrying)
+  # rulebricks/curl image into an emptyDir before Vector starts. curl copies
+  # its own CA file via a file:// URL because the hardened image has no shell.
+  # SSL_CERT_FILE (env below) covers both OpenSSL and rustls code paths.
+  initContainers:
+    - name: ca-certs
+      image: docker.io/rulebricks/curl:8.14.1-debian13
+      command:
+        - curl
+        - -sSf
+        - -o
+        - /certs/ca-certificates.crt
+        - file:///etc/ssl/certs/ca-certificates.crt
+      volumeMounts:
+        - name: ca-certs
+          mountPath: /certs
+  extraVolumes:
+    - name: ca-certs
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: ca-certs
+      mountPath: /etc/ssl/certs
+      readOnly: true
   # Kafka connection settings are sourced from the templated vector-kafka-env ConfigMap
   # (see templates/vector-env-configmap.yaml). For in-cluster Kafka the internal service
   # name is derived from the release name; for external Kafka the CLI/chart sets brokers,
   # TLS, and SASL (PLAIN/SCRAM). Token mechanisms (MSK IAM / GCP OAUTHBEARER) are handled
   # by the kafka-proxy bridge sidecar and Vector connects to it over local plaintext.
   env:
+    - name: SSL_CERT_FILE
+      value: /etc/ssl/certs/ca-certificates.crt
     - name: KAFKA_BOOTSTRAP_SERVERS
       valueFrom:
         configMapKeyRef:
@@ -1378,6 +1407,31 @@ vector-agent:
   role: "Agent"
   podLabels:
     rulebricks.com/workload-group: infrastructure
+  # Same CA-bundle seeding as the decision-log `vector` aggregator above: the
+  # hardened image has no system CA store, and this agent ships logs to
+  # customer backends (Elasticsearch/Loki/HTTP) over TLS.
+  initContainers:
+    - name: ca-certs
+      image: docker.io/rulebricks/curl:8.14.1-debian13
+      command:
+        - curl
+        - -sSf
+        - -o
+        - /certs/ca-certificates.crt
+        - file:///etc/ssl/certs/ca-certificates.crt
+      volumeMounts:
+        - name: ca-certs
+          mountPath: /certs
+  extraVolumes:
+    - name: ca-certs
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: ca-certs
+      mountPath: /etc/ssl/certs
+      readOnly: true
+  env:
+    - name: SSL_CERT_FILE
+      value: /etc/ssl/certs/ca-certificates.crt
   # Tolerate active Rulebricks worker pools without tolerating shutdown,
   # out-of-service, or unreachable node taints. Add explicit architecture
   # tolerations here if those pools are tainted.

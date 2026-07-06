@@ -392,6 +392,39 @@ true
 {{- end }}
 
 {{/*
+KEDA `sasl` mode for EXTERNAL Kafka secured with a STATIC credential
+(PLAIN/SCRAM - e.g. Azure Event Hubs' $ConnectionString or Confluent API keys).
+Empty for in-cluster Kafka (plaintext, no auth needed) and for token-auth
+mechanisms (those skip the lag trigger entirely - see kafka.tokenAuth).
+Without SASL config the lag trigger renders but can never authenticate, so
+lag-based scaling silently fails and only the CPU trigger drives scaling.
+*/}}
+{{- define "rulebricks-chart.kafka.kedaSaslMode" -}}
+{{- $logging := ((.Values.app).logging) | default dict -}}
+{{- if $logging.kafkaBrokers -}}
+{{- $m := lower ((($logging.kafkaSasl) | default dict).mechanism | default "") -}}
+{{- if eq $m "plain" -}}plaintext{{- else if eq $m "scram-sha-256" -}}scram_sha256{{- else if eq $m "scram-sha-512" -}}scram_sha512{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Name of the TriggerAuthentication carrying the static Kafka SASL credentials
+for the KEDA lag triggers (created in kafka-trigger-auth.yaml).
+*/}}
+{{- define "rulebricks-chart.kafka.triggerAuthName" -}}
+{{- printf "%s-kafka-lag-auth" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+KEDA `tls` mode for external static-SASL Kafka lag triggers ("enable" when
+app.logging.kafkaSsl is "true", else "disable").
+*/}}
+{{- define "rulebricks-chart.kafka.kedaTlsMode" -}}
+{{- $ssl := toString ((((.Values.app).logging) | default dict).kafkaSsl | default "") -}}
+{{- ternary "enable" "disable" (eq $ssl "true") -}}
+{{- end }}
+
+{{/*
 Supabase Kong URL - references the supabase subchart's Kong service
 The Supabase chart creates Kong service named: <release>-supabase-kong
 */}}

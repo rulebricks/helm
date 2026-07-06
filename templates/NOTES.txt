@@ -2,6 +2,12 @@
 {{- if and .Values.global.clickstack .Values.global.clickstack.enabled .Values.clickstack.hyperdx.ingress.enabled -}}
 {{- $observabilityHost = (.Values.clickstack.hyperdx.ingress.hostname | default (printf "observability.%s" .Values.global.domain)) -}}
 {{- end -}}
+{{- $valkeyHost := "" -}}
+{{- $valkeyAdmin := (((.Values.rulebricks | default dict).cache | default dict).valkeyAdmin) | default dict -}}
+{{- $valkeyIngress := $valkeyAdmin.ingress | default dict -}}
+{{- if and $valkeyAdmin.enabled (eq ($valkeyAdmin.exposure | default "internal") "ingress") $valkeyIngress.enabled (ne ($valkeyIngress.type | default "ingress") "gateway-api") -}}
+{{- $valkeyHost = ($valkeyIngress.hostname | default (printf "valkey.%s" .Values.global.domain)) -}}
+{{- end -}}
 {{- if and .Values.global.tlsEnabled .Values.global.externalDnsEnabled }}
 =============================================================================
 RULEBRICKS INSTALLATION - COMPLETE (Automatic DNS)
@@ -17,6 +23,9 @@ DNS records being created:
   {{- end }}
   {{- if $observabilityHost }}
   - {{ $observabilityHost }}
+  {{- end }}
+  {{- if $valkeyHost }}
+  - {{ $valkeyHost }}
   {{- end }}
 
 Once DNS propagates and certificates are ready:
@@ -60,6 +69,9 @@ DNS records being created:
   {{- if $observabilityHost }}
   - {{ $observabilityHost }}
   {{- end }}
+  {{- if $valkeyHost }}
+  - {{ $valkeyHost }}
+  {{- end }}
 
 Since you're using external-dns, you can enable TLS right away:
 
@@ -88,6 +100,9 @@ RULEBRICKS INSTALLATION - 1/2 - DNS SETUP REQUIRED
    {{- end }}
    {{- if $observabilityHost }}
    - {{ $observabilityHost }}
+   {{- end }}
+   {{- if $valkeyHost }}
+   - {{ $valkeyHost }}
    {{- end }}
 
 3. Enable TLS (Phase 2):

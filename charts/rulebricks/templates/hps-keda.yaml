@@ -75,11 +75,23 @@ spec:
         topic: {{ include "rulebricks-chart.kafka.topicPrefix" . }}solution-response
         lagThreshold: "{{ .Values.hps.keda.lagThreshold | default 300 }}"
         offsetResetPolicy: latest
+      {{- /* External Kafka with a static SASL credential: see the worker scaler
+           for the rationale. Empty (unchanged trigger) for in-cluster Kafka. */}}
+      {{- if include "rulebricks-chart.kafka.kedaSaslMode" . }}
+        tls: {{ include "rulebricks-chart.kafka.kedaTlsMode" . }}
+        sasl: {{ include "rulebricks-chart.kafka.kedaSaslMode" . }}
+      authenticationRef:
+        name: {{ include "rulebricks-chart.kafka.triggerAuthName" . }}
+      {{- end }}
     {{- end }}
     # Fallback: CPU (event-loop pressure shows up as CPU on the hps container);
     # the sole trigger under token auth.
+    {{- /* metricType (not metadata.type) is the KEDA >= 2.7 form; the legacy
+         metadata 'type' key was removed in KEDA 2.18 and makes the whole
+         ScaledObject fail to parse ("KEDAScalerFailed"), silently disabling
+         autoscaling. */}}
     - type: cpu
+      metricType: Utilization
       metadata:
-        type: Utilization
         value: "{{ .Values.hps.keda.cpuThreshold | default 60 }}"
 {{- end }}
