@@ -21,7 +21,7 @@
 
 images:
   # --- Hardened infra (Docker Hardened Images, Community) ---
-  - { name: clickhouse-server, kind: mirror, source: dhi.io/clickhouse-server, tag: "25.8.24-debian13", auth: dhi, digest: "" }
+  - { name: clickhouse-server, kind: mirror, source: dhi.io/clickhouse-server, tag: "25.8.28-debian13", auth: dhi, digest: "" }
   - { name: valkey, kind: mirror, source: dhi.io/valkey, tag: "9.1.0-debian13", auth: dhi, digest: "" }
   - { name: redis-exporter, kind: mirror, source: dhi.io/redis-exporter, tag: "1.86.0-debian13", auth: dhi, digest: "" }
   - { name: kafka-exporter, kind: mirror, source: dhi.io/kafka-exporter, tag: "1.9.0-debian13", auth: dhi, digest: "" }
@@ -36,12 +36,12 @@ images:
   - { name: grafana, kind: mirror, source: dhi.io/grafana, tag: "13.1.0-debian13", auth: dhi, digest: "" }
   - { name: node-exporter, kind: mirror, source: dhi.io/node-exporter, tag: "1.11.1-debian13", auth: dhi, digest: "" }
   - { name: kube-state-metrics, kind: mirror, source: dhi.io/kube-state-metrics, tag: "2.19.1-debian13", auth: dhi, digest: "" }
-  - { name: prometheus-config-reloader, kind: mirror, source: dhi.io/prometheus-config-reloader, tag: "0.92.0-debian13", auth: dhi, digest: "" }
+  - { name: prometheus-config-reloader, kind: mirror, source: dhi.io/prometheus-config-reloader, tag: "0.92.1-debian13", auth: dhi, digest: "" }
   - { name: kube-webhook-certgen, kind: mirror, source: dhi.io/kube-webhook-certgen, tag: "1.8.4-debian13", auth: dhi, digest: "" }
-  - { name: k8s-sidecar, kind: mirror, source: dhi.io/k8s-sidecar, tag: "2.8.0-debian13", auth: dhi, digest: "" }
-  # prometheus-operator + alertmanager: DHI lacks 0.92.0 / 0.33.0 -> official upstream
-  - { name: prometheus-operator, kind: mirror, source: quay.io/prometheus-operator/prometheus-operator, tag: "v0.92.0", auth: none, digest: "" }
-  - { name: alertmanager, kind: mirror, source: quay.io/prometheus/alertmanager, tag: "v0.33.0", auth: none, digest: "" }
+  - { name: k8s-sidecar, kind: mirror, source: dhi.io/k8s-sidecar, tag: "2.8.1-debian13", auth: dhi, digest: "" }
+  # prometheus-operator + alertmanager: DHI lacks 0.92.1 / 0.33.1 -> official upstream
+  - { name: prometheus-operator, kind: mirror, source: quay.io/prometheus-operator/prometheus-operator, tag: "v0.92.1", auth: none, digest: "" }
+  - { name: alertmanager, kind: mirror, source: quay.io/prometheus/alertmanager, tag: "v0.33.1", auth: none, digest: "" }
 
   # --- Tier-2: traefik / keda / cert-manager / vector / external-dns (DHI) ---
   - { name: traefik, kind: mirror, source: dhi.io/traefik, tag: "3.7.5-debian13", auth: dhi, digest: "" }
@@ -62,12 +62,12 @@ images:
   #     rulebricks/* regardless of which features a customer enables. ---
   - { name: thanos, kind: mirror, source: dhi.io/thanos, tag: "0.41.0-debian13", auth: dhi, digest: "" }
   - { name: kube-rbac-proxy, kind: mirror, source: dhi.io/kube-rbac-proxy, tag: "0.22.0-debian13", auth: dhi, digest: "" }
-  - { name: prometheus-operator-admission-webhook, kind: mirror, source: dhi.io/prometheus-operator-admission-webhook, tag: "0.92.0-debian13", auth: dhi, digest: "" }
+  - { name: prometheus-operator-admission-webhook, kind: mirror, source: dhi.io/prometheus-operator-admission-webhook, tag: "0.92.1-debian13", auth: dhi, digest: "" }
   - { name: kubectl, kind: mirror, source: dhi.io/kubectl, tag: "1.36.2-debian13", auth: dhi, digest: "" }
   - { name: bats, kind: mirror, source: dhi.io/bats, tag: "1.13.0-debian13", auth: dhi, digest: "" }
   - { name: curl, kind: mirror, source: dhi.io/curl, tag: "8.14.1-debian13", auth: dhi, digest: "" }
   - { name: grafana-image-renderer, kind: mirror, source: dhi.io/grafana-image-renderer, tag: "5.9.1-debian13", auth: dhi, digest: "" }
-  - { name: haproxy, kind: mirror, source: dhi.io/haproxy, tag: "2.6.30-debian13", auth: dhi, digest: "" }
+  - { name: haproxy, kind: mirror, source: dhi.io/haproxy, tag: "3.4.2-debian13", auth: dhi, digest: "" }
   # windows-exporter: Windows-only (never scheduled on a Linux stack); no DHI -> official upstream
   - { name: windows-exporter, kind: mirror, source: ghcr.io/prometheus-community/windows-exporter, tag: "0.31.7", auth: none, digest: "" }
 
@@ -79,23 +79,23 @@ images:
   - { name: pause, kind: mirror, source: registry.k8s.io/pause, tag: "3.9", auth: none, digest: "" }
   # node 20 not in DHI (only 22+) -> official upstream
   - { name: node20, kind: mirror, source: docker.io/library/node, tag: "20-alpine", auth: none, target: rulebricks/node, digest: "" }
-  - { name: rclone, kind: mirror, source: docker.io/rclone/rclone, tag: "1.71.1", auth: none, digest: "" }
+  - { name: rclone, kind: mirror, source: docker.io/rclone/rclone, tag: "1.74.3", auth: none, digest: "" }
   - { name: kafka-proxy, kind: mirror, source: docker.io/grepplabs/kafka-proxy, tag: "0.4.3", auth: none, digest: "" }
-  - { name: valkey-admin, kind: mirror, source: docker.io/valkey/valkey-admin, tag: "1.0.1", auth: none, digest: "" }
+  - { name: valkey-admin, kind: mirror, source: docker.io/valkey/valkey-admin, tag: "1.0.2", auth: none, digest: "" }
   - { name: serverless-redis-http, kind: mirror, source: docker.io/hiett/serverless-redis-http, tag: "0.0.10", auth: none, digest: "" }
 
   # --- ClickStack (observability) — no DHI equivalent ---
-  - { name: hyperdx, kind: mirror, source: docker.hyperdx.io/hyperdx/hyperdx, tag: "2.19.0", auth: none, digest: "" }
-  - { name: clickstack-otel-collector, kind: mirror, source: docker.clickhouse.com/clickhouse/clickstack-otel-collector, tag: "2.19.0", auth: none, digest: "" }
+  - { name: hyperdx, kind: mirror, source: docker.hyperdx.io/hyperdx/hyperdx, tag: "2.29.0", auth: none, digest: "" }
+  - { name: clickstack-otel-collector, kind: mirror, source: docker.clickhouse.com/clickhouse/clickstack-otel-collector, tag: "2.29.0", auth: none, digest: "" }
   - { name: ferretdb, kind: mirror, source: ghcr.io/ferretdb/ferretdb, tag: "2.7.0", auth: none, digest: "" }
   - { name: postgres-documentdb, kind: mirror, source: ghcr.io/ferretdb/postgres-documentdb, tag: "17-0.107.0-ferretdb-2.7.0", auth: none, digest: "" }
 
   # --- Supabase — customized upstream builds (no DHI equivalent) ---
-  - { name: supabase-postgres, kind: mirror, source: docker.io/supabase/postgres, tag: "17.6.1.141", auth: none, digest: "" }
-  - { name: supabase-studio, kind: mirror, source: docker.io/supabase/studio, tag: "2026.06.29-sha-20290c7", auth: none, digest: "" }
+  - { name: supabase-postgres, kind: mirror, source: docker.io/supabase/postgres, tag: "17.6.1.142", auth: none, digest: "" }
+  - { name: supabase-studio, kind: mirror, source: docker.io/supabase/studio, tag: "2026.07.06-sha-66cf431", auth: none, digest: "" }
   - { name: supabase-gotrue, kind: mirror, source: docker.io/supabase/gotrue, tag: "v2.192.0", auth: none, digest: "" }
   - { name: supabase-postgrest, kind: mirror, source: docker.io/postgrest/postgrest, tag: "v14.14", auth: none, digest: "" }
-  - { name: supabase-realtime, kind: mirror, source: docker.io/supabase/realtime, tag: "v2.112.1", auth: none, digest: "" }
+  - { name: supabase-realtime, kind: mirror, source: docker.io/supabase/realtime, tag: "v2.112.4", auth: none, digest: "" }
   - { name: supabase-postgres-meta, kind: mirror, source: docker.io/supabase/postgres-meta, tag: "v0.96.6", auth: none, digest: "" }
   # supabase/kong was deprecated; supabase self-hosted uses official kong/kong with
   # chart-mounted declarative config (our kong deployment does the same).
