@@ -39,7 +39,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: bootstrap
-          image: {{ if .Values.externalDatabase.bootstrap.image }}{{ .Values.externalDatabase.bootstrap.image | quote }}{{ else }}{{ include "supabase.image" (dict "root" $ "image" .Values.global.images.postgres16 "name" "postgres16") | quote }}{{ end }}
+          image: {{ if .Values.externalDatabase.bootstrap.image }}{{ .Values.externalDatabase.bootstrap.image | quote }}{{ else }}{{ include "supabase.image" (dict "root" $ "image" .Values.global.images.postgres17 "name" "postgres17") | quote }}{{ end }}
           command: ["/bin/sh", "-c"]
           args:
             - |

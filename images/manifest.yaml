@@ -10,7 +10,7 @@
 #   auth:    dhi | quay | dockerhub | none  (which SOURCE login the job needs;
 #            the docker.io/rulebricks/* TARGET is always logged in)
 #   target:  (optional) explicit repo path when entries share one repo under
-#            different tags (postgres15/postgres16 -> rulebricks/postgres)
+#            different tags (postgres15/16/17 -> rulebricks/postgres)
 #   digest:  (written back by CI; never hand-edit)
 #
 # This file ships inside the published chart tarball and the
@@ -72,13 +72,17 @@ images:
   - { name: windows-exporter, kind: mirror, source: ghcr.io/prometheus-community/windows-exporter, tag: "0.31.7", auth: none, digest: "" }
 
   # --- Leaf utilities (init / hook / test / sidecar) ---
+  # postgres15/16 kept for already-released chart versions; new charts use postgres17.
   - { name: postgres15, kind: mirror, source: dhi.io/postgres, tag: "15-debian13", auth: dhi, target: rulebricks/postgres, digest: "" }
   - { name: postgres16, kind: mirror, source: dhi.io/postgres, tag: "16-debian13", auth: dhi, target: rulebricks/postgres, digest: "" }
+  - { name: postgres17, kind: mirror, source: dhi.io/postgres, tag: "17-debian13", auth: dhi, target: rulebricks/postgres, digest: "" }
   - { name: busybox, kind: mirror, source: dhi.io/busybox, tag: "1.37.0-debian13", auth: dhi, digest: "" }
   # pause: k8s infra image, no DHI equivalent -> official registry.k8s.io
   - { name: pause, kind: mirror, source: registry.k8s.io/pause, tag: "3.9", auth: none, digest: "" }
-  # node 20 not in DHI (only 22+) -> official upstream
-  - { name: node20, kind: mirror, source: docker.io/library/node, tag: "20-alpine", auth: none, target: rulebricks/node, digest: "" }
+  # node: the managed-supabase setup job needs a shell + apk (installs curl/CA
+  # certs, npm-installs the Supabase CLI at runtime); DHI node images ship no
+  # package manager -> official upstream alpine.
+  - { name: node24, kind: mirror, source: docker.io/library/node, tag: "24-alpine", auth: none, target: rulebricks/node, digest: "" }
   - { name: rclone, kind: mirror, source: docker.io/rclone/rclone, tag: "1.74.3", auth: none, digest: "" }
   - { name: kafka-proxy, kind: mirror, source: docker.io/grepplabs/kafka-proxy, tag: "0.4.3", auth: none, digest: "" }
   - { name: valkey-admin, kind: mirror, source: docker.io/valkey/valkey-admin, tag: "1.0.2", auth: none, digest: "" }

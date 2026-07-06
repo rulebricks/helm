@@ -109,7 +109,7 @@ externalDatabase:
     # Role your app migrations run as (the DB master/owner on RDS).
     appRole: "postgres"
     # Image providing psql for the hook job. When empty, the bootstrap job uses
-    # global.images.postgres16 (rulebricks/postgres:16-alpine) via the supabase.image
+    # global.images.postgres17 (rulebricks/postgres:17-debian13) via the supabase.image
     # helper. Set to a full image ref only to override.
     image: ""
 

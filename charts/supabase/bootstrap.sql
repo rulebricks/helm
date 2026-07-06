@@ -12,7 +12,8 @@
 --
 -- Idempotent - safe to re-run on every upgrade. Runs with rds_superuser-level
 -- privileges (NOT true superuser); on RDS, run as the master user (named postgres).
--- Validated on PostgreSQL 16 (RDS 16.9 and Azure Flexible Server 16).
+-- Validated on PostgreSQL 16 (RDS 16.9, Azure Flexible Server 16) and 17
+-- (vanilla 17.10 incl. app migrations; RDS 17 is the CLI CloudFormation default).
 --
 -- Required psql variables (pass with -v name=value):
 --   authenticator_password       password for the PostgREST login role

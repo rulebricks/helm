@@ -37,7 +37,7 @@ spec:
         {{- toYaml .Values.auth.podSecurityContext | nindent 8 }}
       initContainers:
         - name: init-db
-          image: {{ include "supabase.image" (dict "root" $ "image" .Values.global.images.postgres15 "name" "postgres15") | quote }}
+          image: {{ include "supabase.image" (dict "root" $ "image" .Values.global.images.postgres17 "name" "postgres17") | quote }}
           imagePullPolicy: IfNotPresent
           env:
             {{- include "supabase.db.hostEnv" . | nindent 12 }}

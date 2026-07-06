@@ -29,9 +29,8 @@ global:
   imageDigests: {}
   # Shared leaf images (init/hook/test utilities) rendered through the image helper.
   images:
-    postgres15: { registry: docker.io, repository: rulebricks/postgres, tag: "15-debian13" }
-    postgres16: { registry: docker.io, repository: rulebricks/postgres, tag: "16-debian13" }
-    node20: { registry: docker.io, repository: rulebricks/node, tag: "20-alpine" }
+    postgres17: { registry: docker.io, repository: rulebricks/postgres, tag: "17-debian13" }
+    node24: { registry: docker.io, repository: rulebricks/node, tag: "24-alpine" }
     rclone: { registry: docker.io, repository: rulebricks/rclone, tag: "1.74.3" }
     busybox: { registry: docker.io, repository: rulebricks/busybox, tag: "1.37.0-debian13" }
     pause: { registry: docker.io, repository: rulebricks/pause, tag: "3.9" }
@@ -107,419 +106,6 @@ global:
   # cannot see top-level clickstack.enabled.
   clickstack:
     enabled: true
-
-# =============================================================================
-# CLICKSTACK OBSERVABILITY BACKEND
-# Built-in logs, traces, and mirrored metrics via ClickHouse + HyperDX. When
-# enabled, the ClickStack OTel gateway owns the <release>-otel-collector service
-# that app/HPS/worker/Traefik already send OTLP to. Decision logs stay in object
-# storage and are queried through the object-storage-backed ClickHouse archive.
-# =============================================================================
-clickstack:
-  # Mirrors global.clickstack.enabled for readability; the dependency condition
-  # and cross-subchart wiring use global.clickstack.enabled.
-  enabled: true
-  clickhouse:
-    database: otel
-    username: rulebricks
-    existingSecret: ""
-    existingSecretKey: admin-password
-    retentionDays: 7
-    # Advanced override. Leave empty to derive from retentionDays.
-    ttl: ""
-  hyperdx:
-    enabled: true
-    image:
-      registry: docker.io
-      repository: rulebricks/hyperdx
-      tag: "2.29.0"
-    resources:
-      requests:
-        cpu: 250m
-        memory: 512Mi
-      limits:
-        cpu: 1000m
-        memory: 1Gi
-    ingress:
-      enabled: true
-      type: "ingress" # "ingress" or "gateway-api"
-      className: traefik
-      hostname: "" # Defaults to observability.<global.domain>
-      allowedIPs: []
-      gatewayApi:
-        gatewayName: ""
-        gatewayNamespace: ""
-        sectionName: ""
-  collector:
-    image:
-      registry: docker.io
-      repository: rulebricks/clickstack-otel-collector
-      tag: "2.29.0"
-    memoryLimitMiB: 800
-    gateway:
-      replicas: 1
-      resources:
-        requests:
-          cpu: 250m
-          memory: 512Mi
-        limits:
-          cpu: 2000m
-          memory: 1Gi
-    agent:
-      enabled: true
-      securityContext:
-        runAsUser: 0
-        runAsGroup: 0
-      resources:
-        requests:
-          cpu: 100m
-          memory: 256Mi
-        limits:
-          cpu: 500m
-          memory: 512Mi
-  ferretdb:
-    enabled: true
-    image:
-      registry: docker.io
-      repository: rulebricks/ferretdb
-      tag: "2.7.0"
-    postgresImage:
-      registry: docker.io
-      repository: rulebricks/postgres-documentdb
-      tag: "17-0.107.0-ferretdb-2.7.0"
-    auth:
-      username: hyperdx
-      password: ""
-      existingSecret: ""
-      existingSecretKey: password
-    persistence:
-      enabled: true
-      size: 10Gi
-    resources:
-      ferretdb:
-        requests:
-          cpu: 100m
-          memory: 256Mi
-        limits:
-          cpu: 500m
-          memory: 512Mi
-      postgres:
-        requests:
-          cpu: 250m
-          memory: 512Mi
-        limits:
-          cpu: 1000m
-          memory: 1Gi
-  # =============================================================================
-  # Distributed Tracing (OpenTelemetry)
-  # Deploys an in-cluster OpenTelemetry Collector (parent-chart templates) that
-  # receives OTLP spans from the Next.js app, the HPS gather plane, HPS workers,
-  # and Traefik, then forwards them to a customer-managed Elastic APM endpoint
-  # (BYO; e.g. Elastic Cloud or the Elastic add-on from AWS Marketplace).
-  # Self-hosted only. Lives under global so the rulebricks subchart deployments
-  # can read it and emit OTLP to the collector.
-  #
-  # Apps emit OTLP to the in-cluster collector service:
-  #   http://<release>-otel-collector.<namespace>.svc.cluster.local:4318  (HTTP)
-  #   http://<release>-otel-collector.<namespace>.svc.cluster.local:4317  (gRPC)
-  # =============================================================================
-  tracing:
-    enabled: false
-    # Trace destination the in-cluster collector exports to. One of:
-    #   elastic       -> Elastic APM / Elastic Cloud (OTLP/HTTP)        [default]
-    #   otlp          -> any generic OTLP/HTTP backend (Tempo, Honeycomb,
-    #                    Jaeger, vendor OTLP gateways, AWS/Azure OTLP ingestion)
-    #   azure-monitor -> Azure Monitor / Application Insights
-    # AWS- and Azure-compatible: pick `otlp` for a vendor-neutral endpoint or
-    # `azure-monitor` for Azure-native ingestion. The app/HPS/worker
-    # instrumentation is unchanged regardless of destination.
-    destination: "elastic"
-    # Head-sampling ratio applied by the application SDKs (0.0 - 1.0). The
-    # collector forwards everything it receives; control volume at the source.
-    samplingRatio: 1.0
-    collector:
-      # OpenTelemetry Collector, CONTRIB variant - carries the otlphttp +
-      # azuremonitor exporters used by all destinations below (the core distro
-      # does not). Self-mirrored from the DHI image into docker.io/rulebricks/*.
-      image:
-        registry: docker.io
-        repository: rulebricks/opentelemetry-collector
-        tag: "0.155.0-debian13-contrib"
-      replicas: 1
-      # Soft cap (MiB) for the memory_limiter processor before it back-pressures.
-      memoryLimitMiB: 400
-      resources:
-        requests:
-          cpu: "100m"
-          memory: "256Mi"
-        limits:
-          cpu: "500m"
-          memory: "512Mi"
-      podLabels:
-        rulebricks.com/workload-group: infrastructure
-      nodeSelector: {}
-      tolerations: []
-      affinity: {}
-    # destination: elastic -- Customer-managed Elastic APM (BYO). The collector
-    # forwards every received span to this OTLP endpoint.
-    elastic:
-      # OTLP endpoint of the Elastic APM Server / managed APM integration, e.g.
-      # https://<deployment>.apm.<region>.cloud.es.io:443
-      endpoint: ""
-      # Auth mode for the Elastic endpoint:
-      #   secret-token -> Authorization: Bearer <token>
-      #   api-key      -> Authorization: ApiKey <key>
-      #   none         -> no Authorization header
-      authMode: "secret-token"
-      # Inline credential (dev/eval only). For production reference an existing
-      # secret via existingSecret below instead of inlining here.
-      secretToken: ""
-      apiKey: ""
-      existingSecret:
-        name: ""
-        secretTokenKey: "secret-token"
-        apiKeyKey: "api-key"
-      # Skip TLS verification for the Elastic endpoint (NOT recommended).
-      tlsInsecureSkipVerify: false
-    # destination: otlp -- generic OTLP/HTTP backend.
-    otlp:
-      # Full OTLP/HTTP traces endpoint of the backend, e.g.
-      #   https://otlp-gateway-<region>.grafana.net/otlp        (Grafana Cloud)
-      #   https://api.honeycomb.io                              (Honeycomb)
-      endpoint: ""
-      # Auth mode for the generic endpoint:
-      #   none    -> no auth header
-      #   bearer  -> Authorization: Bearer <token>
-      #   api-key -> Authorization: ApiKey <token>
-      #   header  -> <headerName>: <token>   (e.g. x-honeycomb-team)
-      authMode: "none"
-      # Header name used when authMode is "header".
-      headerName: "Authorization"
-      # Inline credential for bearer/api-key/header modes (dev/eval only); use
-      # existingSecret in production.
-      token: ""
-      apiKey: ""
-      headerValue: ""
-      existingSecret:
-        name: ""
-        tokenKey: "token"
-      # Extra static (non-secret) headers added to every export request.
-      headers: {}
-      # Skip TLS verification for the endpoint (NOT recommended).
-      tlsInsecureSkipVerify: false
-    # destination: azure-monitor -- Azure Monitor / Application Insights.
-    azureMonitor:
-      # Application Insights connection string (carries the ingestion endpoint
-      # and instrumentation key). Inline for dev/eval; use existingSecret in prod.
-      connectionString: ""
-      existingSecret:
-        name: ""
-        connectionStringKey: "connection-string"
-  # =============================================================================
-  # Global Labels and Annotations
-  # Applied to ALL resources rendered by this chart (useful for compliance)
-  # =============================================================================
-  labels: {}
-  # Example:
-  #   team: rulebricks
-  #   environment: production
-
-  annotations: {}
-  # Example:
-  #   app.kubernetes.io/managed-by: helm
-
-  # Labels applied only to pod templates (not metadata)
-  podLabels: {}
-
-  # Annotations applied only to pod templates
-  podAnnotations: {}
-  # =============================================================================
-  # Global Scheduling Defaults
-  # Optional scheduling defaults for chart templates that explicitly inherit
-  # global.scheduling. Rulebricks workloads and migration jobs honor these;
-  # dependency subcharts may require their own scheduling keys.
-  # =============================================================================
-  scheduling:
-    # Node selector applied to workloads that inherit global scheduling
-    nodeSelector: {}
-    # Example for pinning to ARM64/Graviton nodes:
-    #   kubernetes.io/arch: arm64
-
-    # Tolerations applied to workloads that inherit global scheduling
-    tolerations: []
-    # Example for ARM64-tainted or dedicated node pools:
-    #   - key: "kubernetes.io/arch"
-    #     operator: "Equal"
-    #     value: "arm64"
-    #     effect: "NoSchedule"
-    #   - key: "Dedicated"
-    #     operator: "Equal"
-    #     value: "rulebricks"
-    #     effect: "NoSchedule"
-
-    # Affinity rules applied to workloads that inherit global scheduling.
-    # Prefer soft/preferred rules so node layout does not block installs.
-    affinity: {}
-  # SMTP Configuration (Vital for instance access and admin)
-  smtp:
-    host: "smtp.mailtrap.io"
-    port: 2525
-    user: ""
-    pass: ""
-    from: "no-reply@rulebricks.com"
-    fromName: "Rulebricks"
-  # Auth/Database Configuration
-  supabase:
-    # anonKey / serviceKey are derived from jwtSecret (below), NOT independent
-    # secrets. For self-hosted Supabase each is an HS256 JWT signed with jwtSecret:
-    #   payload {"role":"anon","iss":"supabase","iat":<now>,"exp":<later>}  -> anonKey
-    #   payload {"role":"service_role", ...}                                 -> serviceKey
-    # Generate them at https://supabase.com/docs/guides/self-hosting/self-hosted-auth-keys
-    # (or any JWT encoder), or just let the Rulebricks CLI derive + create them.
-    # Empty by default - never ship demo keys signed with a known secret.
-    anonKey: ""
-    serviceKey: ""
-    # Email Customization (subjects and templates for auth emails)
-    emails:
-      subjects:
-        invite: "Join your team on Rulebricks"
-        confirmation: "Confirm Your Email"
-        recovery: "Reset Your Password"
-        emailChange: "Confirm Email Change"
-      templates:
-        # HTML templates hosted on S3 (or any public URL)
-        invite: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/invite.html"
-        confirmation: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/verify.html"
-        recovery: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/password_change.html"
-        emailChange: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/email_change.html"
-    # [Managed Supabase] Leave URL empty if self-hosting
-    url: ""
-    # [Managed Supabase] Project reference (e.g., "abcdefghijkl")
-    projectRef: ""
-    # [Managed Supabase] Access token for headless CLI authentication
-    # Generate from Supabase Dashboard: Account Settings > Access Tokens
-    # Required when using managed Supabase (supabase.enabled=false)
-    accessToken: ""
-    # [Self-hosted Supabase] JWT signing secret (only needed for self-hosted Supabase).
-    # Empty by default - must be provided (>=32 chars); never ship a known default.
-    jwtSecret: ""
-  # AI Features (Optional)
-  # Enables AI-powered rule generation and suggestions
-  ai:
-    enabled: false
-    openaiApiKey: "" # Your OpenAI API key
-  # =============================================================================
-  # Secret Reference (for external secret management)
-  # Use this to reference a pre-existing secret instead of inline values
-  # Works with External Secrets Operator, sealed-secrets, or manually created secrets
-  # =============================================================================
-  secrets:
-    # Name of an existing secret to use (created by ESO, sealed-secrets, or manually)
-    # When set, the chart will reference this secret instead of creating one
-    secretRef: ""
-    # Key mappings within the referenced secret
-    secretRefKeys:
-      licenseKey: "LICENSE_KEY"
-      smtpUser: "SMTP_USER"
-      smtpPass: "SMTP_PASS"
-      supabaseServiceKey: "SUPABASE_SERVICE_KEY"
-      openaiApiKey: "OPENAI_API_KEY"
-      supabaseAccessToken: "SUPABASE_ACCESS_TOKEN"
-      ssoClientId: "SSO_CLIENT_ID"
-      ssoClientSecret: "SSO_CLIENT_SECRET"
-  # =============================================================================
-  # SSO Configuration (Optional)
-  # Enables Single Sign-On via OIDC
-  #
-  # NATIVE PROVIDERS (azure, google, okta, keycloak):
-  #   Supabase handles authentication directly.
-  #
-  # CUSTOM PROVIDERS (ory, other):
-  #   The app includes a built-in OIDC proxy that translates paths for your IdP.
-  # =============================================================================
-  sso:
-    enabled: false
-    # Provider name: azure, google, okta, keycloak (native) | ory, other (custom)
-    provider: ""
-    # Provider URL - required for all providers except Google
-    # Examples:
-    #   Azure:    https://login.microsoftonline.com/{tenant-id}
-    #   Okta:     https://your-org.okta.com
-    #   Keycloak: https://keycloak.example.com/realms/your-realm
-    #   Ory:      https://your-org.projects.oryapis.com
-    url: ""
-    # OAuth client credentials from your identity provider
-    # You will need to setup the OAuth client in your identity provider with:
-    #   scopes: openid, email, profile
-    #   response_type: code
-    #   grant_types: authorization_code, refresh_token
-    #   authentication_method: http body
-    #   Redirect URI's:
-    #     1. https://<your-domain>/api/sso-proxy/callback
-    #     2. <your-supabase-url>/auth/v1/callback
-    clientId: ""
-    clientSecret: ""
-  # =============================================================================
-  # External Authentication (Token Passthrough)
-  # For self-hosted deployments behind an identity-aware proxy or API gateway
-  # that has already authenticated the user. Rulebricks will NOT verify the
-  # token signature - it trusts whatever the upstream proxy forwards.
-  #
-  # SECURITY: Only enable this on deployments inside a private network that is
-  # fully gated by your upstream proxy. Never enable on public-facing or
-  # multi-tenant deployments. See docs: /private-deployment/sso/external-auth
-  #
-  # When enabled, the following are automatically wired to the app container:
-  #   - EXTERNAL_AUTH_TOKEN_PASSTHROUGH / NEXT_PUBLIC_EXTERNAL_AUTH_TOKEN_PASSTHROUGH = "true"
-  #   - JWT_SECRET sourced from global.supabase.jwtSecret
-  #   - EMAIL sourced from global.email (designates the workspace admin)
-  # =============================================================================
-  externalAuth:
-    enabled: false
-    # Header the upstream proxy uses to forward the JWT.
-    # Default "Authorization" auto-strips the "Bearer " prefix.
-    header: "Authorization"
-    # JWT claim paths - override only if your upstream IdP uses non-standard claim names
-    claims:
-      id: "sub" # stable external user id (stored in user_metadata.external_sub)
-      email: "email" # REQUIRED claim - used as the identity key for user upsert
-      name: "name" # display name (copied to public.users.name)
-    # URL-path prefixes that should bypass the token check (e.g. embedded public forms).
-    # Health, metrics, denied-page, branding, and x-api-key requests are auto-exempt by the app.
-    # Rendered as a comma-separated string for EXTERNAL_AUTH_PUBLIC_PATHS.
-    publicPaths: []
-    # Example:
-    #   - /form/
-    #   - /api/form/
-
-# =============================================================================
-# DATABASE BACKUPS
-# Periodic Supabase Postgres base backups are written to global.storage.dbBackups.
-# Requires self-hosted Supabase.
-# =============================================================================
-backup:
-  enabled: false
-  schedule: "0 2 * * *"
-  retentionDays: 30
-  # Postgres role used for logical dumps/restores. Must be a superuser so it can
-  # read schemas owned by supabase_admin (auth, storage, realtime, etc.).
-  superuser: supabase_admin
-  # Time to keep completed backup jobs and their pod logs (seconds, default 30 days)
-  ttlSecondsAfterFinished: 2592000
-  # Cross-cloud uploader. rclone speaks S3 / Azure Blob / GCS and authenticates via
-  # the pod's workload identity (env_auth), so no per-cloud CLI or custom image is
-  # needed. The image is centralized at global.images.rclone (digest-pinned by CI);
-  # the pg_dump step reuses supabase.db.image.
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: "1"
-      memory: 1Gi
-  jobHistory:
-    successful: 30
-    failed: 30
 
 # =============================================================================
 # RULEBRICKS APPLICATION STACK
@@ -1149,6 +735,137 @@ cert-manager:
       tag: "1.20.3-debian13"
 
 # =============================================================================
+# SELF-HOSTED DATABASE SETTINGS (Supabase)
+# Set enabled: false to use an external Supabase instance instead
+# =============================================================================
+supabase:
+  enabled: true
+  # Database options:
+  #   1. Self-hosted (default): bundled in-cluster Postgres (db.* below).
+  #   2. External (managed) PostgreSQL: set externalDatabase.enabled: true. That one
+  #      switch disables the bundled database, points every Supabase service at your
+  #      instance, and runs a one-time hook to initialize it (externalDatabase.bootstrap).
+  externalDatabase:
+    enabled: false
+    host: ""
+    port: 5432
+    # Connection fields every service uses. Keep credentials in secret.db, or
+    # point secretRef at one existing Secret for host/port/username/password/database.
+    secretRef: ""
+    secretRefKey:
+      # host/port default empty for backward compatibility. Set these to source
+      # DB_HOST/DB_PORT from the same external database Secret.
+      host: ""
+      port: ""
+      username: username
+      password: password
+      database: database
+    # One-time initialization of a bare external database (roles, schemas, auth
+    # helpers, publication). Set enabled: false if you run bootstrap.sql yourself.
+    bootstrap:
+      enabled: true
+      # Inline master/owner creds (materialized into a short-lived hook Secret).
+      masterUsername: "postgres"
+      masterPassword: ""     # required unless secretRef is set
+      # Advanced: pre-created Secret (keys: master-username/master-password/service-password)
+      secretRef: ""
+      appRole: "postgres"    # role your app migrations run as (DB master on RDS)
+  secret:
+    # SMTP credentials are sourced from global.smtp.user and global.smtp.pass
+    # JWT keys are sourced from global.supabase.* (anonKey, serviceKey, jwtSecret)
+    # Empty by default - provide your own (or let the CLI create the Secret and
+    # set secretRef). No shipped working defaults.
+    db:
+      username: "postgres"
+      password: ""
+      database: "postgres"
+    dashboard:
+      username: "supabase"
+      password: ""
+  # Database resource and storage configuration (for self-hosted)
+  db:
+    # Critical-tier scheduling + eviction protection: the primary datastore
+    # must always be able to preempt burst workers to reschedule, and the
+    # cluster-autoscaler must never evict it during node scale-down.
+    # priorityClassName is "<release>-critical" (CLI fills automatically).
+    priorityClassName: ""
+    podAnnotations:
+      cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClassName: gp3
+  # Kong API Gateway ingress configuration
+  kong:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+    ingress:
+      enabled: true
+      className: traefik
+      annotations: {}
+  # Optional separate hostname for Supabase Studio
+  studio:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+    podDisruptionBudget:
+      enabled: false
+      minAvailable: ""
+      maxUnavailable: ""
+    ingress:
+      enabled: false
+      type: "ingress"
+      className: traefik
+      hostname: "" # Defaults to studio.<global.domain>
+      annotations: {}
+  auth:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+  rest:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+  realtime:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+  meta:
+    podLabels:
+      rulebricks.com/workload-group: infrastructure
+
+# =============================================================================
+# DATABASE BACKUPS
+# Periodic Supabase Postgres base backups are written to global.storage.dbBackups.
+# Requires self-hosted Supabase.
+# =============================================================================
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  retentionDays: 30
+  # Postgres role used for logical dumps/restores. Must be a superuser so it can
+  # read schemas owned by supabase_admin (auth, storage, realtime, etc.).
+  superuser: supabase_admin
+  # Time to keep completed backup jobs and their pod logs (seconds, default 30 days)
+  ttlSecondsAfterFinished: 2592000
+  # Cross-cloud uploader. rclone speaks S3 / Azure Blob / GCS and authenticates via
+  # the pod's workload identity (env_auth), so no per-cloud CLI or custom image is
+  # needed. The image is centralized at global.images.rclone (digest-pinned by CI);
+  # the pg_dump step reuses supabase.db.image.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  jobHistory:
+    successful: 30
+    failed: 30
+
+# =============================================================================
 # DECISION LOGS (Vector)
 # Aggregates and forwards rule execution logs to one or more configurable sinks (console, S3, etc.)
 # The Kafka broker address is automatically configured via the vector-env-configmap.yaml template.
@@ -1533,106 +1250,388 @@ vector-agent:
       #     codec: json
 
 # =============================================================================
-# SELF-HOSTED DATABASE SETTINGS (Supabase)
-# Set enabled: false to use an external Supabase instance instead
+# CLICKSTACK OBSERVABILITY BACKEND
+# Built-in logs, traces, and mirrored metrics via ClickHouse + HyperDX. When
+# enabled, the ClickStack OTel gateway owns the <release>-otel-collector service
+# that app/HPS/worker/Traefik already send OTLP to. Decision logs stay in object
+# storage and are queried through the object-storage-backed ClickHouse archive.
 # =============================================================================
-supabase:
+clickstack:
+  # Mirrors global.clickstack.enabled for readability; the dependency condition
+  # and cross-subchart wiring use global.clickstack.enabled.
   enabled: true
-  # Database options:
-  #   1. Self-hosted (default): bundled in-cluster Postgres (db.* below).
-  #   2. External (managed) PostgreSQL: set externalDatabase.enabled: true. That one
-  #      switch disables the bundled database, points every Supabase service at your
-  #      instance, and runs a one-time hook to initialize it (externalDatabase.bootstrap).
-  externalDatabase:
-    enabled: false
-    host: ""
-    port: 5432
-    # Connection fields every service uses. Keep credentials in secret.db, or
-    # point secretRef at one existing Secret for host/port/username/password/database.
-    secretRef: ""
-    secretRefKey:
-      # host/port default empty for backward compatibility. Set these to source
-      # DB_HOST/DB_PORT from the same external database Secret.
-      host: ""
-      port: ""
-      username: username
-      password: password
-      database: database
-    # One-time initialization of a bare external database (roles, schemas, auth
-    # helpers, publication). Set enabled: false if you run bootstrap.sql yourself.
-    bootstrap:
-      enabled: true
-      # Inline master/owner creds (materialized into a short-lived hook Secret).
-      masterUsername: "postgres"
-      masterPassword: ""     # required unless secretRef is set
-      # Advanced: pre-created Secret (keys: master-username/master-password/service-password)
-      secretRef: ""
-      appRole: "postgres"    # role your app migrations run as (DB master on RDS)
-  secret:
-    # SMTP credentials are sourced from global.smtp.user and global.smtp.pass
-    # JWT keys are sourced from global.supabase.* (anonKey, serviceKey, jwtSecret)
-    # Empty by default - provide your own (or let the CLI create the Secret and
-    # set secretRef). No shipped working defaults.
-    db:
-      username: "postgres"
-      password: ""
-      database: "postgres"
-    dashboard:
-      username: "supabase"
-      password: ""
-  # Database resource and storage configuration (for self-hosted)
-  db:
-    # Critical-tier scheduling + eviction protection: the primary datastore
-    # must always be able to preempt burst workers to reschedule, and the
-    # cluster-autoscaler must never evict it during node scale-down.
-    # priorityClassName is "<release>-critical" (CLI fills automatically).
-    priorityClassName: ""
-    podAnnotations:
-      cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
-    podLabels:
-      rulebricks.com/workload-group: infrastructure
+  clickhouse:
+    database: otel
+    username: rulebricks
+    existingSecret: ""
+    existingSecretKey: admin-password
+    retentionDays: 7
+    # Advanced override. Leave empty to derive from retentionDays.
+    ttl: ""
+  hyperdx:
+    enabled: true
+    image:
+      registry: docker.io
+      repository: rulebricks/hyperdx
+      tag: "2.29.0"
     resources:
       requests:
-        cpu: "500m"
-        memory: "1Gi"
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+    ingress:
+      enabled: true
+      type: "ingress" # "ingress" or "gateway-api"
+      className: traefik
+      hostname: "" # Defaults to observability.<global.domain>
+      allowedIPs: []
+      gatewayApi:
+        gatewayName: ""
+        gatewayNamespace: ""
+        sectionName: ""
+  collector:
+    image:
+      registry: docker.io
+      repository: rulebricks/clickstack-otel-collector
+      tag: "2.29.0"
+    memoryLimitMiB: 800
+    gateway:
+      replicas: 1
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 2000m
+          memory: 1Gi
+    agent:
+      enabled: true
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+  ferretdb:
+    enabled: true
+    image:
+      registry: docker.io
+      repository: rulebricks/ferretdb
+      tag: "2.7.0"
+    postgresImage:
+      registry: docker.io
+      repository: rulebricks/postgres-documentdb
+      tag: "17-0.107.0-ferretdb-2.7.0"
+    auth:
+      username: hyperdx
+      password: ""
+      existingSecret: ""
+      existingSecretKey: password
     persistence:
       enabled: true
       size: 10Gi
-      storageClassName: gp3
-  # Kong API Gateway ingress configuration
-  kong:
-    podLabels:
-      rulebricks.com/workload-group: infrastructure
-    ingress:
-      enabled: true
-      className: traefik
-      annotations: {}
-  # Optional separate hostname for Supabase Studio
-  studio:
-    podLabels:
-      rulebricks.com/workload-group: infrastructure
-    podDisruptionBudget:
-      enabled: false
-      minAvailable: ""
-      maxUnavailable: ""
-    ingress:
-      enabled: false
-      type: "ingress"
-      className: traefik
-      hostname: "" # Defaults to studio.<global.domain>
-      annotations: {}
-  auth:
-    podLabels:
-      rulebricks.com/workload-group: infrastructure
-  rest:
-    podLabels:
-      rulebricks.com/workload-group: infrastructure
-  realtime:
-    podLabels:
-      rulebricks.com/workload-group: infrastructure
-  meta:
-    podLabels:
-      rulebricks.com/workload-group: infrastructure
+    resources:
+      ferretdb:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      postgres:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 1000m
+          memory: 1Gi
+  # =============================================================================
+  # Distributed Tracing (OpenTelemetry)
+  # Deploys an in-cluster OpenTelemetry Collector (parent-chart templates) that
+  # receives OTLP spans from the Next.js app, the HPS gather plane, HPS workers,
+  # and Traefik, then forwards them to a customer-managed Elastic APM endpoint
+  # (BYO; e.g. Elastic Cloud or the Elastic add-on from AWS Marketplace).
+  # Self-hosted only. Lives under global so the rulebricks subchart deployments
+  # can read it and emit OTLP to the collector.
+  #
+  # Apps emit OTLP to the in-cluster collector service:
+  #   http://<release>-otel-collector.<namespace>.svc.cluster.local:4318  (HTTP)
+  #   http://<release>-otel-collector.<namespace>.svc.cluster.local:4317  (gRPC)
+  # =============================================================================
+  tracing:
+    enabled: false
+    # Trace destination the in-cluster collector exports to. One of:
+    #   elastic       -> Elastic APM / Elastic Cloud (OTLP/HTTP)        [default]
+    #   otlp          -> any generic OTLP/HTTP backend (Tempo, Honeycomb,
+    #                    Jaeger, vendor OTLP gateways, AWS/Azure OTLP ingestion)
+    #   azure-monitor -> Azure Monitor / Application Insights
+    # AWS- and Azure-compatible: pick `otlp` for a vendor-neutral endpoint or
+    # `azure-monitor` for Azure-native ingestion. The app/HPS/worker
+    # instrumentation is unchanged regardless of destination.
+    destination: "elastic"
+    # Head-sampling ratio applied by the application SDKs (0.0 - 1.0). The
+    # collector forwards everything it receives; control volume at the source.
+    samplingRatio: 1.0
+    collector:
+      # OpenTelemetry Collector, CONTRIB variant - carries the otlphttp +
+      # azuremonitor exporters used by all destinations below (the core distro
+      # does not). Self-mirrored from the DHI image into docker.io/rulebricks/*.
+      image:
+        registry: docker.io
+        repository: rulebricks/opentelemetry-collector
+        tag: "0.155.0-debian13-contrib"
+      replicas: 1
+      # Soft cap (MiB) for the memory_limiter processor before it back-pressures.
+      memoryLimitMiB: 400
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+      podLabels:
+        rulebricks.com/workload-group: infrastructure
+      nodeSelector: {}
+      tolerations: []
+      affinity: {}
+    # destination: elastic -- Customer-managed Elastic APM (BYO). The collector
+    # forwards every received span to this OTLP endpoint.
+    elastic:
+      # OTLP endpoint of the Elastic APM Server / managed APM integration, e.g.
+      # https://<deployment>.apm.<region>.cloud.es.io:443
+      endpoint: ""
+      # Auth mode for the Elastic endpoint:
+      #   secret-token -> Authorization: Bearer <token>
+      #   api-key      -> Authorization: ApiKey <key>
+      #   none         -> no Authorization header
+      authMode: "secret-token"
+      # Inline credential (dev/eval only). For production reference an existing
+      # secret via existingSecret below instead of inlining here.
+      secretToken: ""
+      apiKey: ""
+      existingSecret:
+        name: ""
+        secretTokenKey: "secret-token"
+        apiKeyKey: "api-key"
+      # Skip TLS verification for the Elastic endpoint (NOT recommended).
+      tlsInsecureSkipVerify: false
+    # destination: otlp -- generic OTLP/HTTP backend.
+    otlp:
+      # Full OTLP/HTTP traces endpoint of the backend, e.g.
+      #   https://otlp-gateway-<region>.grafana.net/otlp        (Grafana Cloud)
+      #   https://api.honeycomb.io                              (Honeycomb)
+      endpoint: ""
+      # Auth mode for the generic endpoint:
+      #   none    -> no auth header
+      #   bearer  -> Authorization: Bearer <token>
+      #   api-key -> Authorization: ApiKey <token>
+      #   header  -> <headerName>: <token>   (e.g. x-honeycomb-team)
+      authMode: "none"
+      # Header name used when authMode is "header".
+      headerName: "Authorization"
+      # Inline credential for bearer/api-key/header modes (dev/eval only); use
+      # existingSecret in production.
+      token: ""
+      apiKey: ""
+      headerValue: ""
+      existingSecret:
+        name: ""
+        tokenKey: "token"
+      # Extra static (non-secret) headers added to every export request.
+      headers: {}
+      # Skip TLS verification for the endpoint (NOT recommended).
+      tlsInsecureSkipVerify: false
+    # destination: azure-monitor -- Azure Monitor / Application Insights.
+    azureMonitor:
+      # Application Insights connection string (carries the ingestion endpoint
+      # and instrumentation key). Inline for dev/eval; use existingSecret in prod.
+      connectionString: ""
+      existingSecret:
+        name: ""
+        connectionStringKey: "connection-string"
+  # =============================================================================
+  # Global Labels and Annotations
+  # Applied to ALL resources rendered by this chart (useful for compliance)
+  # =============================================================================
+  labels: {}
+  # Example:
+  #   team: rulebricks
+  #   environment: production
+
+  annotations: {}
+  # Example:
+  #   app.kubernetes.io/managed-by: helm
+
+  # Labels applied only to pod templates (not metadata)
+  podLabels: {}
+
+  # Annotations applied only to pod templates
+  podAnnotations: {}
+  # =============================================================================
+  # Global Scheduling Defaults
+  # Optional scheduling defaults for chart templates that explicitly inherit
+  # global.scheduling. Rulebricks workloads and migration jobs honor these;
+  # dependency subcharts may require their own scheduling keys.
+  # =============================================================================
+  scheduling:
+    # Node selector applied to workloads that inherit global scheduling
+    nodeSelector: {}
+    # Example for pinning to ARM64/Graviton nodes:
+    #   kubernetes.io/arch: arm64
+
+    # Tolerations applied to workloads that inherit global scheduling
+    tolerations: []
+    # Example for ARM64-tainted or dedicated node pools:
+    #   - key: "kubernetes.io/arch"
+    #     operator: "Equal"
+    #     value: "arm64"
+    #     effect: "NoSchedule"
+    #   - key: "Dedicated"
+    #     operator: "Equal"
+    #     value: "rulebricks"
+    #     effect: "NoSchedule"
+
+    # Affinity rules applied to workloads that inherit global scheduling.
+    # Prefer soft/preferred rules so node layout does not block installs.
+    affinity: {}
+  # SMTP Configuration (Vital for instance access and admin)
+  smtp:
+    host: "smtp.mailtrap.io"
+    port: 2525
+    user: ""
+    pass: ""
+    from: "no-reply@rulebricks.com"
+    fromName: "Rulebricks"
+  # Auth/Database Configuration
+  supabase:
+    # anonKey / serviceKey are derived from jwtSecret (below), NOT independent
+    # secrets. For self-hosted Supabase each is an HS256 JWT signed with jwtSecret:
+    #   payload {"role":"anon","iss":"supabase","iat":<now>,"exp":<later>}  -> anonKey
+    #   payload {"role":"service_role", ...}                                 -> serviceKey
+    # Generate them at https://supabase.com/docs/guides/self-hosting/self-hosted-auth-keys
+    # (or any JWT encoder), or just let the Rulebricks CLI derive + create them.
+    # Empty by default - never ship demo keys signed with a known secret.
+    anonKey: ""
+    serviceKey: ""
+    # Email Customization (subjects and templates for auth emails)
+    emails:
+      subjects:
+        invite: "Join your team on Rulebricks"
+        confirmation: "Confirm Your Email"
+        recovery: "Reset Your Password"
+        emailChange: "Confirm Email Change"
+      templates:
+        # HTML templates hosted on S3 (or any public URL)
+        invite: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/invite.html"
+        confirmation: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/verify.html"
+        recovery: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/password_change.html"
+        emailChange: "https://prefix-files.s3.us-west-2.amazonaws.com/templates/email_change.html"
+    # [Managed Supabase] Leave URL empty if self-hosting
+    url: ""
+    # [Managed Supabase] Project reference (e.g., "abcdefghijkl")
+    projectRef: ""
+    # [Managed Supabase] Access token for headless CLI authentication
+    # Generate from Supabase Dashboard: Account Settings > Access Tokens
+    # Required when using managed Supabase (supabase.enabled=false)
+    accessToken: ""
+    # [Self-hosted Supabase] JWT signing secret (only needed for self-hosted Supabase).
+    # Empty by default - must be provided (>=32 chars); never ship a known default.
+    jwtSecret: ""
+  # AI Features (Optional)
+  # Enables AI-powered rule generation and suggestions
+  ai:
+    enabled: false
+    openaiApiKey: "" # Your OpenAI API key
+  # =============================================================================
+  # Secret Reference (for external secret management)
+  # Use this to reference a pre-existing secret instead of inline values
+  # Works with External Secrets Operator, sealed-secrets, or manually created secrets
+  # =============================================================================
+  secrets:
+    # Name of an existing secret to use (created by ESO, sealed-secrets, or manually)
+    # When set, the chart will reference this secret instead of creating one
+    secretRef: ""
+    # Key mappings within the referenced secret
+    secretRefKeys:
+      licenseKey: "LICENSE_KEY"
+      smtpUser: "SMTP_USER"
+      smtpPass: "SMTP_PASS"
+      supabaseServiceKey: "SUPABASE_SERVICE_KEY"
+      openaiApiKey: "OPENAI_API_KEY"
+      supabaseAccessToken: "SUPABASE_ACCESS_TOKEN"
+      ssoClientId: "SSO_CLIENT_ID"
+      ssoClientSecret: "SSO_CLIENT_SECRET"
+  # =============================================================================
+  # SSO Configuration (Optional)
+  # Enables Single Sign-On via OIDC
+  #
+  # NATIVE PROVIDERS (azure, google, okta, keycloak):
+  #   Supabase handles authentication directly.
+  #
+  # CUSTOM PROVIDERS (ory, other):
+  #   The app includes a built-in OIDC proxy that translates paths for your IdP.
+  # =============================================================================
+  sso:
+    enabled: false
+    # Provider name: azure, google, okta, keycloak (native) | ory, other (custom)
+    provider: ""
+    # Provider URL - required for all providers except Google
+    # Examples:
+    #   Azure:    https://login.microsoftonline.com/{tenant-id}
+    #   Okta:     https://your-org.okta.com
+    #   Keycloak: https://keycloak.example.com/realms/your-realm
+    #   Ory:      https://your-org.projects.oryapis.com
+    url: ""
+    # OAuth client credentials from your identity provider
+    # You will need to setup the OAuth client in your identity provider with:
+    #   scopes: openid, email, profile
+    #   response_type: code
+    #   grant_types: authorization_code, refresh_token
+    #   authentication_method: http body
+    #   Redirect URI's:
+    #     1. https://<your-domain>/api/sso-proxy/callback
+    #     2. <your-supabase-url>/auth/v1/callback
+    clientId: ""
+    clientSecret: ""
+  # =============================================================================
+  # External Authentication (Token Passthrough)
+  # For self-hosted deployments behind an identity-aware proxy or API gateway
+  # that has already authenticated the user. Rulebricks will NOT verify the
+  # token signature - it trusts whatever the upstream proxy forwards.
+  #
+  # SECURITY: Only enable this on deployments inside a private network that is
+  # fully gated by your upstream proxy. Never enable on public-facing or
+  # multi-tenant deployments. See docs: /private-deployment/sso/external-auth
+  #
+  # When enabled, the following are automatically wired to the app container:
+  #   - EXTERNAL_AUTH_TOKEN_PASSTHROUGH / NEXT_PUBLIC_EXTERNAL_AUTH_TOKEN_PASSTHROUGH = "true"
+  #   - JWT_SECRET sourced from global.supabase.jwtSecret
+  #   - EMAIL sourced from global.email (designates the workspace admin)
+  # =============================================================================
+  externalAuth:
+    enabled: false
+    # Header the upstream proxy uses to forward the JWT.
+    # Default "Authorization" auto-strips the "Bearer " prefix.
+    header: "Authorization"
+    # JWT claim paths - override only if your upstream IdP uses non-standard claim names
+    claims:
+      id: "sub" # stable external user id (stored in user_metadata.external_sub)
+      email: "email" # REQUIRED claim - used as the identity key for user upsert
+      name: "name" # display name (copied to public.users.name)
+    # URL-path prefixes that should bypass the token check (e.g. embedded public forms).
+    # Health, metrics, denied-page, branding, and x-api-key requests are auto-exempt by the app.
+    # Rendered as a comma-separated string for EXTERNAL_AUTH_PUBLIC_PATHS.
+    publicPaths: []
+    # Example:
+    #   - /form/
+    #   - /api/form/
 
 # =============================================================================
 # MONITORING & ALERTING

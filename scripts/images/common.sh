@@ -76,7 +76,7 @@ manifest_names() {
 # target_ref <name> <tag> — compose the target ref docker.io/rulebricks/<repo>:<tag>.
 # A manifest entry may set an explicit `target:` repo path (namespace + name, e.g.
 # `target: rulebricks/postgres`) when several entries share one repo under different
-# tags (postgres15/postgres16). Otherwise the repo defaults to <namespace>/<name>.
+# tags (postgres15/16/17). Otherwise the repo defaults to <namespace>/<name>.
 target_ref() {
   local name="$1" tag="$2" repo
   repo="$(manifest_field "${name}" target)"
