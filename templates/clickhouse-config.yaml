@@ -77,4 +77,24 @@ data:
 {{ include "rulebricks.clickhouse.queryLimitsXml" $cctx | indent 4 }}
   11-named-collection-access.xml: |
 {{ include "rulebricks.clickhouse.userAccessXml" $cctx | indent 4 }}
+{{- if not .Values.clickhouse.persistence.enabled }}
+---
+{{- /* Stateless mode only: mounted at /docker-entrypoint-initdb.d so the image
+       entrypoint re-seeds the decision-log views whenever a pod starts with a
+       fresh (empty) data dir. With emptyDir storage that happens on every pod
+       reschedule; the post-install/post-upgrade view Job alone would leave the
+       views missing until the next helm upgrade. The SQL is idempotent
+       (CREATE ... IF NOT EXISTS / CREATE OR REPLACE) and identical to the
+       view Job's. */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rulebricks.clickhouse.fullname" . }}-init-scripts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
+data:
+  01-decision-log-views.sql: |
+    {{ include "rulebricks.clickhouse.decisionLogsViewSql" $cctx }}
+{{- end }}
 {{- end }}

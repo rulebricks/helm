@@ -533,6 +533,12 @@ clickhouse:
     password: ""
     existingSecret: '{{ printf "%s-clickhouse-credentials" .Release.Name }}'
     existingSecretKey: admin-password
+  # Persistence: required while clickstack.enabled (telemetry lives in local
+  # MergeTree tables). With ClickStack disabled, set enabled: false to run
+  # ClickHouse stateless (no PVC/StatefulSet storage): decision logs stay in
+  # object storage and the query views are re-seeded automatically on pod
+  # start via /docker-entrypoint-initdb.d. The chart refuses to render
+  # persistence.enabled=false while global.clickstack.enabled=true.
   persistence:
     enabled: true
     size: 100Gi

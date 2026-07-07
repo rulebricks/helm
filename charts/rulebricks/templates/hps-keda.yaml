@@ -31,7 +31,7 @@ metadata:
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
-    kind: StatefulSet
+    kind: Deployment
     name: {{ include "rulebricks-chart.hps.fullname" . }}
   minReplicaCount: {{ .Values.hps.keda.minReplicaCount | default (.Values.hps.replicas | default 2) }}
   maxReplicaCount: {{ .Values.hps.keda.maxReplicaCount | default 8 }}

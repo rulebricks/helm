@@ -1,25 +1,14 @@
 {{- if and .Values.hps .Values.hps.enabled }}
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "rulebricks-chart.hps.headless" . }}
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "rulebricks-chart.labels" . | nindent 4 }}
-    app.kubernetes.io/component: hps
-spec:
-  clusterIP: None
-  selector:
-    app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
-  ports:
-    - port: 3000
-      targetPort: 3000
-      protocol: TCP
-      name: http
----
+{{- /* HPS is stateless: no volumes, no reliance on stable pod identity. It was
+     historically a StatefulSet because response partitions were derived from
+     the pod ordinal; partition selection now comes from live consumer-group
+     assignments (gated by the /ready probe), so a Deployment is correct.
+     UPGRADE NOTE: releases prior to this change shipped a StatefulSet (and a
+     companion -hps-headless Service) with the same name; Helm replaces the
+     workload kind and removes the headless Service during upgrade. HPS pods
+     briefly cycle and the response consumer group rebalances once. */}}
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: {{ include "rulebricks-chart.hps.fullname" . }}
   namespace: {{ .Release.Namespace }}
@@ -27,8 +16,16 @@ metadata:
     {{- include "rulebricks-chart.labels" . | nindent 4 }}
     app.kubernetes.io/component: hps
 spec:
-  serviceName: {{ include "rulebricks-chart.hps.headless" . }}
   replicas: {{ .Values.hps.replicas | default 1 }}
+  {{- /* Surge one pod at a time and wait for readiness (Kafka group join)
+       before terminating an old pod: every HPS membership change rebalances
+       the response consumer group, so rollouts must stay gradual - the same
+       reasoning as the deliberately conservative KEDA scaler (hps-keda.yaml). */}}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}

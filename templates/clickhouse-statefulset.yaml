@@ -1,5 +1,14 @@
 {{- if .Values.clickhouse.enabled }}
 {{- $ch := .Values.clickhouse }}
+{{- /* Stateless mode (persistence.enabled=false) keeps decision-log querying
+     fully functional - the archive lives in object storage and is read through
+     the named-collection views - but local MergeTree data does NOT survive pod
+     rescheduling. ClickStack stores its telemetry (logs/traces/metrics) in
+     local MergeTree tables on this same ClickHouse, so the two settings are
+     incompatible. */}}
+{{- if and (not $ch.persistence.enabled) .Values.global.clickstack.enabled }}
+{{- fail "clickhouse.persistence.enabled=false requires the ClickStack observability backend to be disabled (global.clickstack.enabled=false): ClickStack stores telemetry in local MergeTree tables that would be lost on every ClickHouse pod restart. Enable persistence or disable ClickStack." }}
+{{- end }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -74,6 +83,16 @@ spec:
                 secretKeyRef:
                   name: {{ include "rulebricks.clickhouse.credentialSecret" . }}
                   key: {{ $ch.auth.existingSecretKey | default "admin-password" }}
+            {{- if not $ch.persistence.enabled }}
+            {{- /* Stateless mode runs the entrypoint's initdb flow on every fresh
+                 data dir (pod reschedule loses the emptyDir). The entrypoint's
+                 embedded clickhouse-client authenticates as CLICKHOUSE_USER
+                 (default "default", which our users.d locks to loopback with an
+                 EMPTY password - it would fail with CLICKHOUSE_PASSWORD set), so
+                 point it at the rulebricks user instead. */}}
+            - name: CLICKHOUSE_USER
+              value: {{ $ch.auth.username | default "rulebricks" | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8123
@@ -106,6 +125,10 @@ spec:
               mountPath: /etc/clickhouse-server/config.d
             - name: users-d
               mountPath: /etc/clickhouse-server/users.d
+            {{- if not $ch.persistence.enabled }}
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+            {{- end }}
       volumes:
         - name: logs
           emptyDir: {}
@@ -115,6 +138,18 @@ spec:
         - name: users-d
           configMap:
             name: {{ include "rulebricks.clickhouse.fullname" . }}-users-d
+        {{- if not $ch.persistence.enabled }}
+        {{- /* Stateless mode: /var/lib/clickhouse only holds the decision-log
+             view definitions (metadata) plus scratch space for queries. The
+             init-scripts mount below recreates the views whenever a pod starts
+             with a fresh data dir, so nothing here needs to survive. */}}
+        - name: data
+          emptyDir: {}
+        - name: init-scripts
+          configMap:
+            name: {{ include "rulebricks.clickhouse.fullname" . }}-init-scripts
+        {{- end }}
+  {{- if $ch.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -126,4 +161,5 @@ spec:
         resources:
           requests:
             storage: {{ $ch.persistence.size | default "100Gi" }}
+  {{- end }}
 {{- end }}

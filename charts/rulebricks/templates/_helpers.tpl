@@ -276,13 +276,6 @@ HPS service name
 {{- end }}
 
 {{/*
-HPS headless service name (for StatefulSet)
-*/}}
-{{- define "rulebricks-chart.hps.headless" -}}
-{{- printf "%s-hps-headless" .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- end }}
-
-{{/*
 HPS Worker service name
 */}}
 {{- define "rulebricks-chart.hps-worker.fullname" -}}

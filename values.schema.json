@@ -1042,6 +1042,15 @@
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean", "default": true },
+        "persistence": {
+          "type": "object",
+          "description": "Local MergeTree storage. Required while clickstack.enabled; set enabled: false (with ClickStack disabled) to run ClickHouse stateless over the object-storage decision-log archive.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "size": { "type": "string" },
+            "storageClass": { "type": "string" }
+          }
+        },
         "queryLimits": {
           "type": "object",
           "properties": {
