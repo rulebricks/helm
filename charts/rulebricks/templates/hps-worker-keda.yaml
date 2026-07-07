@@ -48,20 +48,22 @@ spec:
               periodSeconds: 60
         {{- end }}
   triggers:
-  {{- /* Lag-based scaling needs the KEDA operator to reach Kafka directly. Under
-       token auth (AWS MSK IAM / GCP OAUTHBEARER) the operator isn't wired through
-       the kafka-proxy and can't authenticate, so the trigger would only error -
-       skip it and let the CPU trigger below drive scaling. Restore lag scaling by
-       fronting Kafka with the proxy or configuring KEDA aws_msk_iam SASL + an
-       operator identity. */}}
-  {{- if not (include "rulebricks-chart.kafka.tokenAuth" .) }}
+  {{- /* Lag-based scaling needs the KEDA operator to reach Kafka directly.
+       AWS MSK IAM is spoken natively (aws_msk_iam SASL + the operator's pod
+       identity - see kafka-trigger-auth.yaml). GCP-flavored OAUTHBEARER is
+       not: the operator isn't wired through the kafka-proxy and can't
+       authenticate, so the trigger would only error - skip it and let the
+       CPU trigger below drive scaling. */}}
+  {{- if not (include "rulebricks-chart.kafka.gatedTokenAuth" .) }}
   # Primary trigger: Kafka lag
   - type: kafka
     metadata:
       # Use templated Kafka bootstrap servers - handles any release name and namespace
       {{- $kafkaBrokers := "" }}
+      {{- $externalKafka := false }}
       {{- if and .Values.app .Values.app.logging .Values.app.logging.kafkaBrokers }}
         {{- $kafkaBrokers = .Values.app.logging.kafkaBrokers }}
+        {{- $externalKafka = true }}
       {{- else }}
         {{- $kafkaBrokers = (include "rulebricks-chart.kafka.bootstrapServers" .) }}
       {{- end }}
@@ -73,11 +75,21 @@ spec:
       # bounded unit of work, so this approximates seconds of fleet backlog.
       lagThreshold: "{{ .Values.hps.workers.keda.lagThreshold | default 100 }}"
       offsetResetPolicy: latest
+    {{- if and $externalKafka (include "rulebricks-chart.kafka.awsIamAuth" .) }}
+      {{- /* AWS MSK IAM: the operator signs the connection with its own cloud
+           identity (podIdentity TriggerAuthentication). MSK IAM is TLS-only,
+           and KEDA has no env fallback for the region, so it is required. */}}
+      {{- $sasl := (((.Values.app).logging).kafkaSasl) | default dict }}
+      tls: enable
+      sasl: aws_msk_iam
+      awsRegion: {{ required "app.logging.kafkaSasl.region is required when kafkaSasl.mechanism is aws-iam" $sasl.region }}
+    authenticationRef:
+      name: {{ include "rulebricks-chart.kafka.triggerAuthName" . }}
+    {{- else if include "rulebricks-chart.kafka.kedaSaslMode" . }}
     {{- /* External Kafka with a static SASL credential (Event Hubs, Confluent,
          SCRAM clusters): without tls/sasl + the credential TriggerAuthentication
          the trigger renders but can never authenticate. In-cluster Kafka takes
          the empty branch and renders exactly as before. */}}
-    {{- if include "rulebricks-chart.kafka.kedaSaslMode" . }}
       tls: {{ include "rulebricks-chart.kafka.kedaTlsMode" . }}
       sasl: {{ include "rulebricks-chart.kafka.kedaSaslMode" . }}
     authenticationRef:
@@ -85,7 +97,7 @@ spec:
     {{- end }}
   {{- end }}
   # CPU trigger: the safety net when Kafka lag metrics are unavailable, and the
-  # sole scaling signal under token auth (see note above).
+  # sole scaling signal under GCP-flavored token auth (see note above).
   {{- /* metricType (not metadata.type) is the KEDA >= 2.7 form; the legacy
        metadata 'type' key was removed in KEDA 2.18 and makes the whole
        ScaledObject fail to parse ("KEDAScalerFailed"), silently disabling

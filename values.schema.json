@@ -904,6 +904,17 @@
             "brokers": { "type": "string" },
             "topicFilter": { "type": "string" },
             "groupFilter": { "type": "string" },
+            "tlsInsecureSkipVerify": { "type": "boolean", "default": false },
+            "extraArgs": { "type": "array", "items": { "type": "string" } },
+            "serviceAccount": {
+              "type": "object",
+              "description": "Dedicated ServiceAccount for the exporter; the IAM identity attachment point for MSK IAM (IRSA annotation or EKS Pod Identity association).",
+              "properties": {
+                "create": { "type": "boolean", "default": true },
+                "name": { "type": "string" },
+                "annotations": { "type": "object", "additionalProperties": { "type": "string" } }
+              }
+            },
             "resources": { "$ref": "#/definitions/resources" },
             "nodeSelector": { "type": "object", "additionalProperties": { "type": "string" } },
             "tolerations": { "type": "array", "items": { "$ref": "#/definitions/toleration" } },

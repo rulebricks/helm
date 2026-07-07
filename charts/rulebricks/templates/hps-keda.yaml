@@ -55,18 +55,21 @@ spec:
               value: 1
               periodSeconds: 300
   triggers:
-    {{- /* Under token auth (AWS MSK IAM / GCP OAUTHBEARER) the KEDA operator can't
-         reach Kafka directly, so skip the lag trigger and rely on the CPU fallback.
-         See the worker scaler for the note on restoring lag-based scaling. */}}
-    {{- if not (include "rulebricks-chart.kafka.tokenAuth" .) }}
+    {{- /* Under GCP-flavored OAUTHBEARER the KEDA operator can't reach Kafka
+         directly, so skip the lag trigger and rely on the CPU fallback. AWS
+         MSK IAM is spoken natively - see the worker scaler and
+         kafka-trigger-auth.yaml. */}}
+    {{- if not (include "rulebricks-chart.kafka.gatedTokenAuth" .) }}
     # Primary: response-topic lag for the gather consumer group. Lag here
     # means responses are waiting to be parsed/dispatched - the direct
     # signal that the gather plane is the bottleneck.
     - type: kafka
       metadata:
         {{- $kafkaBrokers := "" }}
+        {{- $externalKafka := false }}
         {{- if and .Values.app .Values.app.logging .Values.app.logging.kafkaBrokers }}
           {{- $kafkaBrokers = .Values.app.logging.kafkaBrokers }}
+          {{- $externalKafka = true }}
         {{- else }}
           {{- $kafkaBrokers = (include "rulebricks-chart.kafka.bootstrapServers" .) }}
         {{- end }}
@@ -75,9 +78,18 @@ spec:
         topic: {{ include "rulebricks-chart.kafka.topicPrefix" . }}solution-response
         lagThreshold: "{{ .Values.hps.keda.lagThreshold | default 300 }}"
         offsetResetPolicy: latest
+      {{- if and $externalKafka (include "rulebricks-chart.kafka.awsIamAuth" .) }}
+        {{- /* AWS MSK IAM: operator pod identity signs the connection; see the
+             worker scaler for the full rationale. */}}
+        {{- $sasl := (((.Values.app).logging).kafkaSasl) | default dict }}
+        tls: enable
+        sasl: aws_msk_iam
+        awsRegion: {{ required "app.logging.kafkaSasl.region is required when kafkaSasl.mechanism is aws-iam" $sasl.region }}
+      authenticationRef:
+        name: {{ include "rulebricks-chart.kafka.triggerAuthName" . }}
+      {{- else if include "rulebricks-chart.kafka.kedaSaslMode" . }}
       {{- /* External Kafka with a static SASL credential: see the worker scaler
            for the rationale. Empty (unchanged trigger) for in-cluster Kafka. */}}
-      {{- if include "rulebricks-chart.kafka.kedaSaslMode" . }}
         tls: {{ include "rulebricks-chart.kafka.kedaTlsMode" . }}
         sasl: {{ include "rulebricks-chart.kafka.kedaSaslMode" . }}
       authenticationRef:
@@ -85,7 +97,7 @@ spec:
       {{- end }}
     {{- end }}
     # Fallback: CPU (event-loop pressure shows up as CPU on the hps container);
-    # the sole trigger under token auth.
+    # the sole trigger under GCP-flavored token auth.
     {{- /* metricType (not metadata.type) is the KEDA >= 2.7 form; the legacy
          metadata 'type' key was removed in KEDA 2.18 and makes the whole
          ScaledObject fail to parse ("KEDAScalerFailed"), silently disabling

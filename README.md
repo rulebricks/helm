@@ -310,9 +310,16 @@ The migration job will:
 <details>
 <summary><strong>External Kafka SSL/SASL</strong></summary>
 
-To use external/managed Kafka, set `kafka.enabled: false` and configure `rulebricks.app.logging.kafkaBrokers` plus the optional `kafkaSsl` / `kafkaSasl` settings. The chart exposes these to the app, HPS, HPS workers, and Vector. The `wait-for-kafka` init container is automatically skipped when `kafkaBrokers` is set.
+To use external/managed Kafka, set `kafka.enabled: false` and configure `rulebricks.app.logging.kafkaBrokers` plus the optional `kafkaSsl` / `kafkaSasl` settings. The chart exposes these to the app, HPS, HPS workers, Vector, the KEDA lag scalers, and kafka-exporter. The `wait-for-kafka` init container is automatically skipped when `kafkaBrokers` is set.
 
-Two consumers connect to Kafka: HPS (KafkaJS, produces/consumes the solution + logs topics) and Vector (consumes the `logs` topic for the decision-log archive). They have different auth capabilities, so the right preset depends on your provider.
+Several components connect to Kafka: HPS (KafkaJS, produces/consumes the solution + logs topics), Vector (consumes the `logs` topic for the decision-log archive), the KEDA operator (reads consumer-group lag for autoscaling), and kafka-exporter (Prometheus metrics). They have different auth capabilities, so the right preset depends on your provider:
+
+| Mechanism (`kafkaSasl.mechanism`) | app / HPS | KEDA lag scaling | kafka-exporter | Vector | Topic provisioning |
+|---|---|---|---|---|---|
+| _(empty)_ — in-cluster plaintext | native | native | native | native | Strimzi Topic Operator |
+| `plain` / `scram-sha-256` / `scram-sha-512` (Redpanda, Confluent, Event Hubs `$ConnectionString`) | native | native (secret TriggerAuthentication) | native | native | create topics yourself / auto-create |
+| `aws-iam` (AWS MSK) | native (pod IAM identity) | native (operator pod identity) | native (pod IAM identity) | kafka-proxy bridge | kafka-proxy bridge job |
+| `oauthbearer` (GCP Managed Kafka) | native (workload identity) | skipped — CPU trigger only | skipped | kafka-proxy bridge | kafka-proxy bridge job |
 
 **AWS MSK with IAM auth** — credentials come from pod identity (IRSA), no static secrets:
 
@@ -333,6 +340,24 @@ rulebricks:
       create: true
       annotations:
         eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT:role/msk-access"
+  # kafka-exporter authenticates with --sasl.mechanism=awsiam automatically;
+  # attach a read-only metrics role to its dedicated ServiceAccount (or use an
+  # EKS Pod Identity association with "<release>-kafka-exporter" and omit the
+  # annotation):
+  kafkaExporter:
+    serviceAccount:
+      annotations:
+        eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT:role/msk-metrics-read"
+# KEDA lag-based autoscaling works natively against MSK IAM: the ScaledObjects
+# render sasl: aws_msk_iam and the KEDA operator's own identity signs the
+# connection. Give the operator ServiceAccount a role via IRSA (below) or an
+# EKS Pod Identity association with "keda-operator":
+keda:
+  podIdentity:
+    aws:
+      irsa:
+        enabled: true
+        roleArn: "arn:aws:iam::ACCOUNT:role/msk-metrics-read"
 # Vector cannot speak MSK IAM directly, so it uses the kafka-proxy bridge sidecar:
 kafkaBridge:
   enabled: true
@@ -361,6 +386,10 @@ vector:
 ```
 
 HPS must include the KafkaJS `oauthbearer` implementation using `aws-msk-iam-sasl-signer-js`; the chart only passes configuration to the pods.
+
+The kafka-exporter and KEDA operator roles need `kafka-cluster:Connect`, `kafka-cluster:DescribeCluster`, `kafka-cluster:DescribeTopic`, and `kafka-cluster:DescribeGroup` on the cluster, topic, and group ARNs (lag reads are metadata-only; no `ReadData` required). Until the IAM identities are attached, the exporter pod will fail readiness and the lag triggers will error (the CPU trigger keeps scaling working); set `rulebricks.kafkaExporter.enabled: false` to opt out of Kafka metrics entirely.
+
+**SASL PLAIN/SCRAM clusters (Redpanda, Confluent, self-managed Kafka)** — every component (HPS, Vector, KEDA lag scaling, kafka-exporter) inherits the same `kafkaSasl` credentials automatically; nothing else to configure. For self-signed broker certificates set `rulebricks.kafkaExporter.tlsInsecureSkipVerify: true` (and use `kafkaExporter.extraArgs` for anything exotic, e.g. `--tls.server-name=...`).
 
 **Azure Event Hubs (Kafka endpoint)** — SASL PLAIN with the namespace connection string. Both HPS and Vector connect directly; no bridge sidecar required:
 

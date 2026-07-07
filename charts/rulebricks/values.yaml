@@ -440,6 +440,31 @@ kafkaExporter:
   brokers: ""
   topicFilter: ".*"
   groupFilter: ".*"
+  # SASL/TLS against external brokers is inherited from app.logging.kafkaSsl and
+  # app.logging.kafkaSasl automatically: PLAIN/SCRAM credentials (existingSecret
+  # or the inline username/password) wire into the exporter, and "aws-iam" uses
+  # the pod IAM identity (see serviceAccount below). No exporter-specific auth
+  # values are needed.
+  # Skip TLS certificate verification (self-signed broker certs, common with
+  # self-managed Redpanda/Kafka).
+  tlsInsecureSkipVerify: false
+  # Extra kafka_exporter flags appended verbatim (e.g. "--kafka.version=3.6.0",
+  # "--tls.server-name=broker.example.com").
+  extraArgs: []
+  # Dedicated ServiceAccount for the exporter pod. When app.logging.kafkaSasl
+  # uses mechanism "aws-iam" the exporter authenticates to MSK automatically
+  # (--sasl.mechanism=awsiam); this SA is where its IAM identity attaches:
+  #   - IRSA: set annotations: {eks.amazonaws.com/role-arn: "<role arn>"}
+  #   - EKS Pod Identity: no values change - associate the role with the
+  #     "<release>-kafka-exporter" ServiceAccount in the release namespace.
+  # The role needs kafka-cluster:Connect, DescribeCluster, DescribeTopic and
+  # DescribeGroup on the cluster/topic/group ARNs. Harmless on clusters that
+  # attach no identity (plain SA with default permissions).
+  serviceAccount:
+    create: true
+    # Defaults to the exporter fullname ("<release>-kafka-exporter").
+    name: ""
+    annotations: {}
   resources:
     requests:
       cpu: "50m"
