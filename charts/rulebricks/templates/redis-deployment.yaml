@@ -84,7 +84,13 @@ spec:
               memory: {{ .Values.redis.resources.limits.memory | default "4Gi" }}
           # --dir is explicit so the AOF/RDB land on the PVC regardless of the
           # image's WORKDIR (DHI images may differ from the official valkey image).
-          args: ["--appendonly", "yes", "--dir", "/data"]
+          # --protected-mode no is required with DHI images: the official
+          # valkey/redis Docker images patch the compiled default to "no", but
+          # hardened images keep the upstream default ("yes"), which rejects
+          # every non-loopback connection when no password is set and breaks
+          # HPS, SRH, and the valkey-admin console. The service is ClusterIP,
+          # so it is only reachable from inside the cluster.
+          args: ["--appendonly", "yes", "--dir", "/data", "--protected-mode", "no"]
           livenessProbe:
             tcpSocket:
               port: 6379
