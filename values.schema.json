@@ -156,12 +156,15 @@
                 "comment": "The well-known Supabase self-hosting demo service_role key; see anonKey."
               }
             },
-            "anonKeySecretRef": {
+            "secretRef": {
+              "type": "string",
+              "description": "Runtime alternative to an inline anonKey: an existing Secret carrying the public anon key, injected as an explicit env var on the app deployment (overrides the ConfigMap's template-time value). Same pattern as the supabase subchart's secret.* blocks; sources ONLY the anon key (other Supabase secrets ride global.secrets.secretRef)."
+            },
+            "secretRefKey": {
               "type": "object",
-              "description": "Runtime alternative to an inline anonKey: an existing Secret carrying the public anon key, injected as an explicit env var on the app deployment (overrides the ConfigMap's template-time value).",
+              "description": "Override secret keys for the existing secret ref.",
               "properties": {
-                "name": { "type": "string" },
-                "key": { "type": "string" }
+                "anonKey": { "type": "string" }
               }
             },
             "url": { "type": "string" },
@@ -1466,7 +1469,7 @@
     },
     {
       "title": "Supabase Anon Key Validation",
-      "description": "The browser client authenticates every API-gateway request with the public anon key, which the app ConfigMap embeds at TEMPLATE time - global.secrets.secretRef cannot supply it. Deliberately NOT excused by a secretRef: either set global.supabase.anonKey inline (it is the public key, safe in values) or point global.supabase.anonKeySecretRef.name at an existing Secret carrying it.",
+      "description": "The browser client authenticates every API-gateway request with the public anon key, which the app ConfigMap embeds at TEMPLATE time - global.secrets.secretRef cannot supply it. Deliberately NOT excused by the app-level secretRef: either set global.supabase.anonKey inline (it is the public key, safe in values) or point global.supabase.secretRef at an existing Secret carrying it.",
       "anyOf": [
         {
           "properties": {
@@ -1493,15 +1496,9 @@
               "properties": {
                 "supabase": {
                   "type": "object",
-                  "required": ["anonKeySecretRef"],
+                  "required": ["secretRef"],
                   "properties": {
-                    "anonKeySecretRef": {
-                      "type": "object",
-                      "required": ["name"],
-                      "properties": {
-                        "name": { "type": "string", "minLength": 1 }
-                      }
-                    }
+                    "secretRef": { "type": "string", "minLength": 1 }
                   }
                 }
               }
