@@ -1,37 +1,31 @@
 {{- $exporter := .Values.kafkaExporter | default dict -}}
-{{- /* kafka-exporter (danielqsj, chart ships v1.9.0) speaks PLAIN/SCRAM natively
-     (credentials inherited from app.logging.kafkaSasl - existingSecret or the
-     chart's app secret) and AWS MSK IAM via --sasl.mechanism=awsiam (credentials
-     come from the pod's IAM identity - attach a role to the exporter's
-     ServiceAccount via IRSA or an EKS Pod Identity association, see
-     kafkaExporter.serviceAccount). Only GCP-flavored OAUTHBEARER
-     (metadata-server tokens) remains unsupported and auto-skips; front the
-     broker with the kafka-proxy bridge and set forceEnable if you need Kafka
-     metrics there. */}}
-{{- if and $exporter.enabled (or $exporter.forceEnable (not (include "rulebricks-chart.kafka.gatedTokenAuth" .))) }}
+{{- /* SASL/TLS against external brokers is inherited from app.logging.kafkaSsl/
+     kafkaSasl: PLAIN/SCRAM natively, AWS MSK IAM via IRSA only (the exporter's
+     AWS SDK does not support EKS Pod Identity, kafka_exporter#494). To avoid an
+     unauthenticatable pod, aws-iam auto-skips until the IRSA annotation is set
+     on kafkaExporter.serviceAccount; GCP-flavored OAUTHBEARER always auto-skips
+     (front with the kafka-proxy bridge + forceEnable if needed). */}}
+{{- $serviceAccount := $exporter.serviceAccount | default dict -}}
+{{- /* External brokers only: the in-cluster Strimzi listener is plaintext, so
+     kafkaSasl/kafkaSsl (which describe the external cluster) must not apply. */ -}}
+{{- $externalBrokers := or $exporter.brokers .Values.app.logging.kafkaBrokers -}}
+{{- $awsIam := and $externalBrokers (include "rulebricks-chart.kafka.awsIamAuth" .) -}}
+{{- $awsIamUnwired := and $awsIam (not $serviceAccount.annotations) -}}
+{{- if and $exporter.enabled (or $exporter.forceEnable (and (not (include "rulebricks-chart.kafka.gatedTokenAuth" .)) (not $awsIamUnwired))) }}
 {{- $name := include "rulebricks-chart.kafkaExporter.fullname" . -}}
 {{- $image := $exporter.image | default dict -}}
 {{- $service := $exporter.service | default dict -}}
 {{- $resources := $exporter.resources | default dict -}}
 {{- $brokers := $exporter.brokers | default .Values.app.logging.kafkaBrokers | default (printf "%s-kafka-kafka-bootstrap:9092" .Release.Name) -}}
-{{- /* SASL/TLS only apply when the exporter targets EXTERNAL brokers: kafkaSasl
-     describes the external cluster's auth, and the in-cluster Strimzi listener
-     is plaintext (a stray mechanism must not break the in-cluster exporter). */ -}}
-{{- $externalBrokers := or $exporter.brokers .Values.app.logging.kafkaBrokers -}}
 {{- $sasl := (((.Values.app).logging).kafkaSasl) | default dict -}}
-{{- $awsIam := and $externalBrokers (include "rulebricks-chart.kafka.awsIamAuth" .) -}}
 {{- $staticMechanism := include "rulebricks-chart.kafka.exporterSaslMechanism" . -}}
-{{- /* Static PLAIN/SCRAM needs a credential to carry: an existingSecret, or
-     inline username/password rendered into the chart's app secret. */ -}}
+{{- /* Static SASL needs a credential to carry: existingSecret or inline
+     username/password (rendered into the chart's app secret). */ -}}
 {{- $staticSasl := and $externalBrokers $staticMechanism (or $sasl.existingSecret $sasl.username) -}}
 {{- $kafkaSsl := eq (toString (.Values.app.logging.kafkaSsl | default false)) "true" -}}
-{{- $serviceAccount := $exporter.serviceAccount | default dict -}}
 {{- $saCreate := true -}}{{- if hasKey $serviceAccount "create" }}{{- $saCreate = $serviceAccount.create }}{{- end -}}
 {{- $saName := $serviceAccount.name | default (ternary $name "default" $saCreate) -}}
 {{- if $saCreate }}
-{{- /* Dedicated ServiceAccount so the exporter's IAM role (MSK IAM metrics
-     read) can be scoped narrowly, separate from HPS/app identities. Inert on
-     clusters that don't attach an identity to it. */}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -106,11 +100,8 @@ spec:
             capabilities:
               drop: ["ALL"]
           {{- if $staticSasl }}
-          {{- /* Same credential resolution as the KEDA TriggerAuthentication:
-               the user's existingSecret (with its configurable key names), else
-               the chart's app secret where inline kafkaSasl.username/password
-               are rendered. Exposed as env so the password reaches the flags
-               via $(VAR) expansion and never lands in the pod spec. */}}
+          {{- /* Env + $(VAR) expansion keeps the password out of the pod spec.
+               Credential resolution matches kafka-trigger-auth.yaml. */}}
           {{- $secretName := $sasl.existingSecret | default (include "rulebricks-chart.app.secretName" . | trim) }}
           env:
             - name: KAFKA_SASL_USERNAME
@@ -131,9 +122,7 @@ spec:
             - --topic.filter={{ $exporter.topicFilter | default ".*" }}
             - --group.filter={{ $exporter.groupFilter | default ".*" }}
             {{- if $awsIam }}
-            {{- /* Credentials come from the pod's IAM identity via the
-                 ServiceAccount above. Region falls back to the AWS_REGION env
-                 the IRSA webhook injects when unset. */}}
+            {{- /* Region falls back to the AWS_REGION env IRSA injects. */}}
             - --sasl.enabled
             - --sasl.mechanism=awsiam
             {{- with $sasl.region }}

@@ -82,7 +82,11 @@ spec:
           restartPolicy: Always
           args:
             - server
-            - --bootstrap-server-mapping={{ $bridge.brokers }},127.0.0.1:{{ $localPort }}
+            {{- /* One mapping per broker on sequential local ports; kafka-proxy
+                 rejects a comma-separated broker list in a single mapping. */}}
+            {{- range $i, $b := splitList "," $bridge.brokers }}
+            - --bootstrap-server-mapping={{ trim $b }},127.0.0.1:{{ add $localPort $i }}
+            {{- end }}
             - --tls-enable
             - --sasl-enable
             {{- if eq ($bridge.provider | default "aws") "gcp" }}
@@ -92,7 +96,9 @@ spec:
             - --sasl-aws-region={{ required "kafkaBridge.region is required for AWS MSK IAM topic provisioning" $bridge.region }}
             {{- end }}
           ports:
-            - containerPort: {{ $localPort }}
+            {{- range $i, $b := splitList "," $bridge.brokers }}
+            - containerPort: {{ add $localPort $i }}
+            {{- end }}
       containers:
         - name: create-topics
           image: {{ $toolsImage | quote }}

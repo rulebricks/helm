@@ -369,12 +369,8 @@ com.rulebricks.
 {{- end }}
 
 {{/*
-Whether external Kafka uses AWS MSK IAM auth. Credentials are minted
-per-connection from the pod's IAM identity (IRSA / EKS Pod Identity), so there
-is no static username/password - but the binaries the chart ships DO speak this
-mechanism natively: kafka_exporter >= 1.9.0 (--sasl.mechanism=awsiam, via
-aws-msk-iam-sasl-signer-go) and the KEDA kafka scaler >= 2.14 (sasl:
-aws_msk_iam, operator pod identity). Returns "true" or "" (empty = false).
+Whether external Kafka uses AWS MSK IAM auth (credentials come from the pod's
+IAM identity; there is no static username/password). Returns "true" or "".
 */}}
 {{- define "rulebricks-chart.kafka.awsIamAuth" -}}
 {{- $sasl := (((.Values.app).logging).kafkaSasl) | default dict -}}
@@ -385,13 +381,10 @@ true
 {{- end }}
 
 {{/*
-Whether external Kafka uses a token-based SASL mechanism that NO shipped
-sidecar binary can speak (GCP-flavored OAUTHBEARER, minted from the metadata
-server). These clusters still gate kafka-exporter off and skip the KEDA lag
-triggers - reach them through the kafka-proxy bridge instead. AWS MSK IAM is
-deliberately NOT in this bucket (see kafka.awsIamAuth). Returns "true" or ""
-(empty = false), so guard with:
-  {{- if not (include "rulebricks-chart.kafka.gatedTokenAuth" .) }}
+Whether external Kafka uses a token mechanism no shipped binary can speak
+(GCP-flavored OAUTHBEARER): kafka-exporter is gated off and the KEDA lag
+triggers are skipped - reach these brokers through the kafka-proxy bridge.
+Returns "true" or "".
 */}}
 {{- define "rulebricks-chart.kafka.gatedTokenAuth" -}}
 {{- $sasl := (((.Values.app).logging).kafkaSasl) | default dict -}}
@@ -402,10 +395,9 @@ true
 {{- end }}
 
 {{/*
-kafka_exporter --sasl.mechanism flag value for STATIC-credential external
-Kafka (Redpanda/Confluent SCRAM, Event Hubs PLAIN). The binary spells SCRAM
-without the second dash (scram-sha256), unlike the chart's kafkaSasl values.
-Empty for token mechanisms and for in-cluster plaintext.
+kafka_exporter --sasl.mechanism value for static-credential mechanisms. The
+binary spells SCRAM without the second dash (scram-sha256), unlike the
+kafkaSasl values. Empty for token mechanisms and in-cluster plaintext.
 */}}
 {{- define "rulebricks-chart.kafka.exporterSaslMechanism" -}}
 {{- $sasl := (((.Values.app).logging).kafkaSasl) | default dict -}}

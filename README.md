@@ -318,7 +318,7 @@ Several components connect to Kafka: HPS (KafkaJS, produces/consumes the solutio
 |---|---|---|---|---|---|
 | _(empty)_ — in-cluster plaintext | native | native | native | native | Strimzi Topic Operator |
 | `plain` / `scram-sha-256` / `scram-sha-512` (Redpanda, Confluent, Event Hubs `$ConnectionString`) | native | native (secret TriggerAuthentication) | native | native | create topics yourself / auto-create |
-| `aws-iam` (AWS MSK) | native (pod IAM identity) | native (operator pod identity) | native (pod IAM identity) | kafka-proxy bridge | kafka-proxy bridge job |
+| `aws-iam` (AWS MSK) | native (pod IAM identity) | native (operator pod identity) | native via IRSA only (auto-skipped until annotated) | kafka-proxy bridge | kafka-proxy bridge job |
 | `oauthbearer` (GCP Managed Kafka) | native (workload identity) | skipped — CPU trigger only | skipped | kafka-proxy bridge | kafka-proxy bridge job |
 
 **AWS MSK with IAM auth** — credentials come from pod identity (IRSA), no static secrets:
@@ -340,18 +340,14 @@ rulebricks:
       create: true
       annotations:
         eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT:role/msk-access"
-  # kafka-exporter authenticates with --sasl.mechanism=awsiam automatically;
-  # attach a read-only metrics role to its dedicated ServiceAccount (or use an
-  # EKS Pod Identity association with "<release>-kafka-exporter" and omit the
-  # annotation):
+  # Kafka metrics on MSK require IRSA (kafka-exporter does not support EKS Pod
+  # Identity); the exporter is skipped until this annotation is set:
   kafkaExporter:
     serviceAccount:
       annotations:
         eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT:role/msk-metrics-read"
-# KEDA lag-based autoscaling works natively against MSK IAM: the ScaledObjects
-# render sasl: aws_msk_iam and the KEDA operator's own identity signs the
-# connection. Give the operator ServiceAccount a role via IRSA (below) or an
-# EKS Pod Identity association with "keda-operator":
+# Lag-based autoscaling: the KEDA operator's own identity signs the MSK
+# connection - via IRSA (below) or a Pod Identity association with "keda-operator":
 keda:
   podIdentity:
     aws:
@@ -387,7 +383,7 @@ vector:
 
 HPS must include the KafkaJS `oauthbearer` implementation using `aws-msk-iam-sasl-signer-js`; the chart only passes configuration to the pods.
 
-The kafka-exporter and KEDA operator roles need `kafka-cluster:Connect`, `kafka-cluster:DescribeCluster`, `kafka-cluster:DescribeTopic`, and `kafka-cluster:DescribeGroup` on the cluster, topic, and group ARNs (lag reads are metadata-only; no `ReadData` required). Until the IAM identities are attached, the exporter pod will fail readiness and the lag triggers will error (the CPU trigger keeps scaling working); set `rulebricks.kafkaExporter.enabled: false` to opt out of Kafka metrics entirely.
+The kafka-exporter and KEDA operator roles need `kafka-cluster:Connect`, `kafka-cluster:DescribeCluster`, `kafka-cluster:DescribeTopic`, and `kafka-cluster:DescribeGroup` on the cluster, topic, and group ARNs (metadata-only; no `ReadData` required). Until the KEDA operator's identity is attached, the lag triggers error and the CPU trigger keeps scaling working.
 
 **SASL PLAIN/SCRAM clusters (Redpanda, Confluent, self-managed Kafka)** — every component (HPS, Vector, KEDA lag scaling, kafka-exporter) inherits the same `kafkaSasl` credentials automatically; nothing else to configure. For self-signed broker certificates set `rulebricks.kafkaExporter.tlsInsecureSkipVerify: true` (and use `kafkaExporter.extraArgs` for anything exotic, e.g. `--tls.server-name=...`).
 

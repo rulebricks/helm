@@ -98,6 +98,23 @@ spec:
             timeoutSeconds: {{ .Values.app.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.app.readinessProbe.failureThreshold }}
           env:
+            {{- /* Next.js standalone (server.js) uses $HOSTNAME as its bind
+                 address, and Kubernetes sets HOSTNAME to the pod name. On CNIs
+                 where the pod name resolves to an address other than the pod IP
+                 the kubelet probes, every probe is refused and the pod is
+                 killed on the liveness timer (~120s silent crashloop). Bind to
+                 all interfaces by default; an explicit HOSTNAME entry in
+                 app.extraEnv replaces this. */ -}}
+            {{- $hostnameOverridden := false }}
+            {{- range .Values.app.extraEnv }}
+              {{- if eq (default "" .name) "HOSTNAME" }}
+                {{- $hostnameOverridden = true }}
+              {{- end }}
+            {{- end }}
+            {{- if not $hostnameOverridden }}
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            {{- end }}
             # License and contact (from secret)
             - name: LICENSE_KEY
               valueFrom:

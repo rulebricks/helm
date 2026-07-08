@@ -56,9 +56,7 @@ spec:
               periodSeconds: 300
   triggers:
     {{- /* Under GCP-flavored OAUTHBEARER the KEDA operator can't reach Kafka
-         directly, so skip the lag trigger and rely on the CPU fallback. AWS
-         MSK IAM is spoken natively - see the worker scaler and
-         kafka-trigger-auth.yaml. */}}
+         directly, so skip the lag trigger and rely on the CPU fallback. */}}
     {{- if not (include "rulebricks-chart.kafka.gatedTokenAuth" .) }}
     # Primary: response-topic lag for the gather consumer group. Lag here
     # means responses are waiting to be parsed/dispatched - the direct
@@ -79,11 +77,13 @@ spec:
         lagThreshold: "{{ .Values.hps.keda.lagThreshold | default 300 }}"
         offsetResetPolicy: latest
       {{- if and $externalKafka (include "rulebricks-chart.kafka.awsIamAuth" .) }}
-        {{- /* AWS MSK IAM: operator pod identity signs the connection; see the
-             worker scaler for the full rationale. */}}
+        {{- /* MSK IAM = KEDA's oauthbearer SASL with the aws_msk_iam token
+             provider (there is no `sasl: aws_msk_iam` mode). TLS-only, and
+             KEDA has no env fallback for the region. */}}
         {{- $sasl := (((.Values.app).logging).kafkaSasl) | default dict }}
         tls: enable
-        sasl: aws_msk_iam
+        sasl: oauthbearer
+        saslTokenProvider: aws_msk_iam
         awsRegion: {{ required "app.logging.kafkaSasl.region is required when kafkaSasl.mechanism is aws-iam" $sasl.region }}
       authenticationRef:
         name: {{ include "rulebricks-chart.kafka.triggerAuthName" . }}

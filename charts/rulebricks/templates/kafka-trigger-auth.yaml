@@ -1,25 +1,15 @@
 {{- /*
-TriggerAuthentication for the KEDA Kafka lag triggers against EXTERNAL Kafka.
-Two mutually exclusive variants keyed off app.logging.kafkaSasl.mechanism:
-
-  - aws-iam: `podIdentity: aws` - the KEDA operator's own cloud identity
-    (IRSA / EKS Pod Identity on the keda-operator ServiceAccount, see
-    keda.podIdentity.aws.irsa in the umbrella values) signs the MSK
-    connection. No static credentials exist for this mechanism.
-  - PLAIN/SCRAM (e.g. Azure Event Hubs' $ConnectionString, Confluent API
-    keys): static credentials via secretTargetRef. KEDA's kafka scaler can
-    only take username/password through a TriggerAuthentication, so without
-    this the lag triggers render but can never authenticate and lag-based
-    scaling silently fails (leaving CPU as the only scaling signal).
-
-Deliberately NOT created for:
-  - in-cluster Kafka (plaintext listener, no auth to carry), and
-  - GCP-flavored OAUTHBEARER, where the lag trigger is skipped entirely
-    (see rulebricks-chart.kafka.gatedTokenAuth).
-
-Static credentials come from the same source the HPS workers use: the optional
-kafkaSasl.existingSecret (with its configurable key names), else the chart's
-app secret where inline kafkaSasl.username/password are rendered.
+TriggerAuthentication for the KEDA Kafka lag triggers (external Kafka only),
+keyed off app.logging.kafkaSasl.mechanism:
+  - aws-iam: podIdentity aws - the KEDA operator's own identity signs the MSK
+    connection (attach it to the keda-operator ServiceAccount via IRSA or an
+    EKS Pod Identity association).
+  - PLAIN/SCRAM: secretTargetRef - KEDA can only take username/password
+    through a TriggerAuthentication. Credentials resolve like the HPS
+    workers': kafkaSasl.existingSecret (with its key names), else the chart's
+    app secret.
+Not created for in-cluster Kafka (plaintext) or GCP-flavored OAUTHBEARER (lag
+trigger skipped entirely - see kafka.gatedTokenAuth).
 */}}
 {{- if and .Values.hps .Values.hps.enabled (or ((.Values.hps.workers).keda).enabled ((.Values.hps).keda).enabled) }}
 {{- $logging := ((.Values.app).logging) | default dict }}

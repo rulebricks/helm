@@ -359,20 +359,16 @@ rulebricks:
     podLabels:
       rulebricks.com/workload-group: infrastructure
     # SASL/TLS against external brokers is inherited from
-    # rulebricks.app.logging.kafkaSsl / kafkaSasl automatically: PLAIN/SCRAM
-    # credentials (existingSecret or inline username/password) wire into the
-    # exporter, and "aws-iam" uses the pod IAM identity (serviceAccount below).
+    # rulebricks.app.logging.kafkaSsl / kafkaSasl; no exporter-specific auth
+    # values are needed.
     # Skip TLS certificate verification (self-signed broker certs).
     tlsInsecureSkipVerify: false
-    # Extra kafka_exporter flags appended verbatim (e.g. "--kafka.version=3.6.0").
+    # Extra kafka_exporter flags, e.g. "--kafka.version=3.6.0".
     extraArgs: []
-    # Dedicated ServiceAccount for the exporter pod. When
-    # rulebricks.app.logging.kafkaSasl uses mechanism "aws-iam" the exporter
-    # authenticates to MSK automatically (--sasl.mechanism=awsiam); attach its
-    # IAM identity here (IRSA annotation) or via an EKS Pod Identity
-    # association with the "<release>-kafka-exporter" ServiceAccount. The role
-    # needs kafka-cluster:Connect, DescribeCluster, DescribeTopic and
-    # DescribeGroup. Inert when no identity is attached.
+    # For AWS MSK IAM, set the IRSA annotation (eks.amazonaws.com/role-arn)
+    # with a role granting kafka-cluster:Connect + Describe* actions. The
+    # exporter is skipped under aws-iam until the annotation is present (the
+    # exporter does not support EKS Pod Identity).
     serviceAccount:
       create: true
       name: ""
