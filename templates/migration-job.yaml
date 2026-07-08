@@ -152,7 +152,13 @@ spec:
               else
                 echo "No migrations found in /assets/migrations"
               fi
-              
+
+              # PostgREST caches the DB schema at connect time and only refreshes
+              # on NOTIFY...
+              echo "Reloading PostgREST schema cache..."
+              psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -c "NOTIFY pgrst, 'reload schema';" \
+                || echo "Warning: PostgREST schema reload failed; run \"NOTIFY pgrst, 'reload schema';\" manually if REST queries return PGRST205."
+
               echo "Migrations completed."
           env:
             - name: DB_HOST
