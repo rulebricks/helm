@@ -72,7 +72,8 @@ global:
 | `global.smtp.pass`                   | SMTP password                                                             |
 | `global.smtp.from`                   | Sender email address                                                      |
 | `global.smtp.fromName`               | Sender display name                                                       |
-| `global.supabase.anonKey`            | Supabase anonymous/public key                                             |
+| `global.supabase.anonKey`            | Supabase anonymous/public key (required; embedded at template time, `global.secrets.secretRef` cannot supply it) |
+| `global.supabase.anonKeySecretRef`   | Alternative to inline `anonKey`: `{name, key}` of an existing Secret carrying the public anon key, injected at runtime (key defaults to `anonKey`) |
 | `global.supabase.serviceKey`         | Supabase service role key                                                 |
 | `global.supabase.emails.subjects.*`  | Email subject customization (invite, confirmation, recovery, emailChange) |
 | `global.supabase.emails.templates.*` | Email template URLs (invite, confirmation, recovery, emailChange)         |

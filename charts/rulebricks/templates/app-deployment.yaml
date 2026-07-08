@@ -143,6 +143,30 @@ spec:
                 secretKeyRef:
                   name: {{ include "rulebricks-chart.app.secretName" . | trim }}
                   key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "supabaseServiceKey" "default" "SUPABASE_SERVICE_KEY") | trim }}
+            {{- /* Public anon key runtime seam: when global.supabase.anonKeySecretRef
+                 names an existing Secret, inject the browser-facing key from it.
+                 Explicit env beats envFrom, so this overrides the ConfigMap's
+                 template-time value (empty when anonKey is kept out of values,
+                 e.g. external secret stores). The entrypoint substitutes
+                 NEXT_PUBLIC_* into the client bundle at container start. */ -}}
+            {{- $anonKeyRef := dict }}
+            {{- if and .Values.global .Values.global.supabase .Values.global.supabase.anonKeySecretRef }}
+              {{- if .Values.global.supabase.anonKeySecretRef.name }}
+                {{- $anonKeyRef = .Values.global.supabase.anonKeySecretRef }}
+              {{- end }}
+            {{- end }}
+            {{- if $anonKeyRef.name }}
+            - name: SUPABASE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $anonKeyRef.name }}
+                  key: {{ $anonKeyRef.key | default "anonKey" }}
+            - name: NEXT_PUBLIC_SUPABASE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $anonKeyRef.name }}
+                  key: {{ $anonKeyRef.key | default "anonKey" }}
+            {{- end }}
             # AI API key (from secret, optional)
             {{- $aiEnabled := false }}
             {{- if and .Values.global .Values.global.ai .Values.global.ai.enabled }}

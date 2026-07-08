@@ -31,6 +31,19 @@ data:
   {{- if not $supabaseUrl }}
     {{- $supabaseUrl = printf "%s://supabase.%s" $protocol $domain }}
   {{- end }}
+  {{- /* The browser Supabase client authenticates every request to the Kong
+       gateway with this key (the `apikey` header); without it, every
+       dashboard -> PostgREST call 401s even though server-side calls (which
+       use the service key from the app Secret) keep working. It is consumed
+       here at TEMPLATE time, so global.secrets.secretRef cannot supply it -
+       require an inline value or the runtime anonKeySecretRef seam. */ -}}
+  {{- $anonKeyRefName := "" }}
+  {{- if and .Values.global .Values.global.supabase .Values.global.supabase.anonKeySecretRef }}
+    {{- $anonKeyRefName = .Values.global.supabase.anonKeySecretRef.name | default "" }}
+  {{- end }}
+  {{- if and (not $supabaseAnonKey) (not $anonKeyRefName) }}
+    {{- fail "global.supabase.anonKey is required: it is the PUBLIC Supabase key the browser sends to the API gateway, and the app ConfigMap embeds it at template time (global.secrets.secretRef cannot supply it). Set global.supabase.anonKey inline (derive it from jwtSecret, see values.yaml), or set global.supabase.anonKeySecretRef.name to an existing Secret carrying it (key defaults to 'anonKey')." }}
+  {{- end }}
   # Public key is safe for ConfigMap (embedded in client bundle for Next.js)
   SUPABASE_PUBLIC_KEY: {{ $supabaseAnonKey | quote }}
   SUPABASE_URL: {{ $supabaseUrl | quote }}

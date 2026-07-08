@@ -268,6 +268,18 @@ global:
     # Empty by default - never ship demo keys signed with a known secret.
     anonKey: ""
     serviceKey: ""
+    # Runtime alternative to an inline anonKey: reference an existing Secret
+    # (e.g. synced by External Secrets Operator from an external secret store)
+    # that carries the public anon key. The app deployment injects it as an
+    # explicit env var, overriding the ConfigMap's template-time value.
+    # NOTE: global.secrets.secretRef canNOT supply the anon key - the app
+    # ConfigMap consumes global.supabase.anonKey at template time - so either
+    # set anonKey inline (it is the *public* key, safe in values/ConfigMaps)
+    # or point this at the Secret that carries it (the CLI-created
+    # <release>-supabase-jwt Secret stores it under the "anonKey" key).
+    anonKeySecretRef:
+      name: ""
+      key: "anonKey"
     # Email Customization (subjects and templates for auth emails)
     emails:
       subjects:

@@ -5,8 +5,16 @@
 global:
   domain: rulebricks.example.com
   email: ops@example.com
+  # Required by the Inline Secrets Validation schema gate whenever
+  # global.secrets.secretRef is empty. CI-only fakes.
+  smtp:
+    user: "ci-validate-smtp-user"
+    pass: "ci-validate-smtp-pass"
   supabase:
     jwtSecret: "ci-validate-jwt-secret-at-least-32-characters-long"
+    # Required by the anon-key gate (schema + app-configmap template guard).
+    # Structurally a JWT but signed with the CI-only secret above; NOT usable.
+    anonKey: "ci-validate-anon-key"
 supabase:
   secret:
     db:

@@ -48,7 +48,10 @@ jobs:
         run: helm dependency build .
 
       - name: Lint
-        run: helm lint .
+        # The schema intentionally rejects the shipped defaults (secrets have no
+        # working defaults and must be provided at install time), so lint needs
+        # the same CI-only fake secrets the render step uses.
+        run: helm lint . -f ci/validate-values.yaml
 
       - name: Render chart for validation
         # ONE full-feature render (all toggles on, supabase enabled) feeds both the
