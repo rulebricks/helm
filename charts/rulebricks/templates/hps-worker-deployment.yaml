@@ -198,6 +198,14 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           env:
+            {{- if eq (include "rulebricks-chart.redis.hasAuth" .) "true" }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- include "rulebricks-chart.redis.passwordSecretRef" . | nindent 18 }}
+            - name: REDIS_URL
+              value: {{ include "rulebricks-chart.redis.connectionStringAuth" . | quote }}
+            {{- end }}
             - name: WORKER_TOPICS
               value: {{ .Values.hps.workers.topics | default "solution" | quote }}
             - name: NODE_ENV
