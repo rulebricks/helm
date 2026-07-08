@@ -1,4 +1,3 @@
-{{- if .Values.enabled -}}
 {{- $retentionDays := .Values.clickhouse.retentionDays | default 7 | int -}}
 {{- $derivedTtl := printf "%dh" (mul $retentionDays 24) -}}
 {{- $ttl := .Values.clickhouse.ttl | default $derivedTtl -}}
@@ -289,4 +288,3 @@ spec:
         - name: config
           configMap:
             name: {{ include "clickstack.collector.gateway.fullname" . }}-config
-{{- end }}

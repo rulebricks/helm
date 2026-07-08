@@ -1,4 +1,4 @@
-{{- if and .Values.enabled .Values.hyperdx.enabled -}}
+{{- if .Values.hyperdx.enabled -}}
 {{- $name := include "clickstack.hyperdx.fullname" . -}}
 {{- $hostname := .Values.hyperdx.ingress.hostname | default (printf "observability.%s" .Values.global.domain) -}}
 {{- $ingressType := .Values.hyperdx.ingress.type | default "ingress" -}}

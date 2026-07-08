@@ -1055,7 +1055,7 @@
         "enabled": { "type": "boolean", "default": true },
         "persistence": {
           "type": "object",
-          "description": "Local MergeTree storage. Required while clickstack.enabled; set enabled: false (with ClickStack disabled) to run ClickHouse stateless over the object-storage decision-log archive.",
+          "description": "Local MergeTree storage. Required while clickstack.enabled; set enabled: false (with ClickStack disabled) to run ClickHouse stateless over the object-storage decision-log archive - rendered as a Deployment instead of a StatefulSet, with no PVC.",
           "properties": {
             "enabled": { "type": "boolean", "default": true },
             "size": { "type": "string" },
@@ -1085,9 +1085,8 @@
     },
     "clickstack": {
       "type": "object",
-      "description": "Built-in ClickStack observability backend (HyperDX UI, OTel collectors, FerretDB). The dependency condition uses global.clickstack.enabled so sibling subcharts can share the same switch.",
+      "description": "Built-in ClickStack observability backend (HyperDX UI, OTel collectors, FerretDB). The on/off switch is global.clickstack.enabled (the subchart's dependency condition, shared with sibling subcharts); the keys here only configure ClickStack when enabled.",
       "properties": {
-        "enabled": { "type": "boolean", "default": true },
         "clickhouse": {
           "type": "object",
           "properties": {

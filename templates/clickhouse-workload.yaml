@@ -9,15 +9,33 @@
 {{- if and (not $ch.persistence.enabled) .Values.global.clickstack.enabled }}
 {{- fail "clickhouse.persistence.enabled=false requires the ClickStack observability backend to be disabled (global.clickstack.enabled=false): ClickStack stores telemetry in local MergeTree tables that would be lost on every ClickHouse pod restart. Enable persistence or disable ClickStack." }}
 {{- end }}
+{{- /* Stateless mode renders a Deployment, not a StatefulSet: there are no
+     volume claims and no reliance on stable pod identity (the ClusterIP
+     Service fronts the single pod either way), so the workload kind itself
+     is proof that ClickHouse holds no state. Recreate matches the
+     single-instance semantics of the StatefulSet and avoids a surge pod
+     briefly doubling the memory request at critical priority.
+     UPGRADE NOTE: releases prior to this change shipped a StatefulSet with
+     the same name in stateless mode; Helm replaces the workload kind during
+     upgrade. The kind swap also applies when flipping an existing persistent
+     install to stateless (previously rejected: volumeClaimTemplates is an
+     immutable StatefulSet field). A leftover data-<release>-clickhouse-0 PVC
+     from a previously-persistent install is NOT auto-deleted - remove it
+     manually to reclaim the disk. */}}
 apiVersion: apps/v1
-kind: StatefulSet
+kind: {{ ternary "StatefulSet" "Deployment" $ch.persistence.enabled }}
 metadata:
   name: {{ include "rulebricks.clickhouse.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
 spec:
+  {{- if $ch.persistence.enabled }}
   serviceName: {{ include "rulebricks.clickhouse.fullname" . }}
+  {{- else }}
+  strategy:
+    type: Recreate
+  {{- end }}
   replicas: 1
   selector:
     matchLabels:

@@ -1,4 +1,4 @@
-{{- if and .Values.enabled .Values.hyperdx.enabled .Values.hyperdx.ingress.enabled (eq (.Values.hyperdx.ingress.type | default "ingress") "gateway-api") -}}
+{{- if and .Values.hyperdx.enabled .Values.hyperdx.ingress.enabled (eq (.Values.hyperdx.ingress.type | default "ingress") "gateway-api") -}}
 {{- $name := include "clickstack.hyperdx.fullname" . -}}
 {{- $ingress := .Values.hyperdx.ingress | default dict -}}
 {{- $gateway := $ingress.gatewayApi | default dict -}}
