@@ -1219,6 +1219,17 @@
       "description": "Kubernetes cluster-autoscaler subchart (AWS EKS only; GKE/AKS node pools autoscale natively). autoDiscovery.clusterName and awsRegion are required when enabled.",
       "properties": {
         "enabled": { "type": "boolean" },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string" },
+            "pullSecrets": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
         "autoDiscovery": {
           "type": "object",
           "properties": {

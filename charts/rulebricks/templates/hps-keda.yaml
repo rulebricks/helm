@@ -3,11 +3,10 @@ HPS gather-plane autoscaler.
 
 HPS pods do double duty: they serve HTTP AND consume/parse every chunk
 response from the solution-response topic (the "gather plane"). Gather work
-scales linearly with request rate, so a fixed replica count becomes the
-system's throughput ceiling (observed in load testing: response-topic lag
-accumulates, latency climbs, client throughput plateaus while workers and
-Kafka sit idle).
-
+scales with request traffic, so a fixed replica count becomes the system's
+throughput ceiling. Scale-up is batched (2 pods/30s) rather than exponential:
+each scale event rebalances the response consumer group, which the HPS
+orphan-response relay makes lossless but still briefly pauses consumption.
 */}}
 {{- if and .Values.hps .Values.hps.enabled (.Values.hps.keda).enabled }}
 apiVersion: keda.sh/v1alpha1
@@ -24,15 +23,12 @@ spec:
     kind: Deployment
     name: {{ include "rulebricks-chart.hps.fullname" . }}
   minReplicaCount: {{ .Values.hps.keda.minReplicaCount | default (.Values.hps.replicas | default 2) }}
-  {{- /* Default gather ceiling derives from the worker fleet ceiling at ~1:4.
-       Derivation (aws-p3 load tests): a saturated worker emits ~4-12 chunk
-       responses/sec (one chunk = up to FLOW_CHUNK_MAX_ITEMS payloads at
-       ~0.3-0.6ms each) and one HPS pod gathers ~40-60 msg/s, so each HPS pod
-       keeps up with roughly 4-8 flat-out workers. Floor of 8: below that a
-       single scale event is too large a fraction of the fleet, and 3 pods
-       demonstrably collapse (0% success at 100k payloads/s) while 8 hold.
-       Upper bound is the solution-response partition count - consumers beyond
-       it sit idle. */}}
+  {{- /* Default gather ceiling derives from the worker fleet ceiling at ~1:4:
+       a saturated worker emits ~4-12 chunk responses/sec and one HPS pod
+       gathers ~40-60, so each gather pod keeps up with roughly 4-8 flat-out
+       workers. Floor of 8 so a single scale event stays a small fraction of
+       the fleet; the solution-response partition count is the hard upper
+       bound (consumers beyond it sit idle). */}}
   {{- $workerMax := ((((.Values.hps).workers).keda).maxReplicaCount) | default 8 }}
   maxReplicaCount: {{ .Values.hps.keda.maxReplicaCount | default (max 8 (div $workerMax 4)) }}
   pollingInterval: {{ .Values.hps.keda.pollingInterval | default 15 }}
@@ -41,12 +37,9 @@ spec:
     horizontalPodAutoscalerConfig:
       behavior:
         {{- if .Values.hps.keda.scalingBehavior }}
-        {{- /* Override seam: pre-relay HPS builds should pin the old
-             conservative cadence, e.g.
-             scalingBehavior:
-               scaleUp:
-                 stabilizationWindowSeconds: 60
-                 policies: [{type: Pods, value: 1, periodSeconds: 120}] */}}
+        {{- /* Override seam. HPS builds without the orphan-response relay
+             lose in-flight requests on every rebalance and should pin a
+             one-pod-at-a-time cadence here. */}}
         {{- toYaml .Values.hps.keda.scalingBehavior | nindent 8 }}
         {{- else }}
         scaleUp:

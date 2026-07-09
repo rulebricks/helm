@@ -42,6 +42,7 @@ jobs:
           helm repo add jetstack https://charts.jetstack.io --force-update
           helm repo add vector https://helm.vector.dev --force-update
           helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/ --force-update
+          helm repo add autoscaler https://kubernetes.github.io/autoscaler --force-update
           helm repo update
 
       - name: Build Dependencies
@@ -70,6 +71,9 @@ jobs:
             --set kube-prometheus-stack.prometheusOperator.admissionWebhooks.enabled=true \
             --set kube-prometheus-stack.thanosRuler.enabled=true \
             --set global.externalDnsEnabled=true --set external-dns.enabled=true \
+            --set cluster-autoscaler.enabled=true \
+            --set cluster-autoscaler.autoDiscovery.clusterName=ci-cluster \
+            --set cluster-autoscaler.awsRegion=us-east-1 \
             --set supabase.enabled=true \
             > /tmp/rulebricks-rendered.yaml
 
@@ -170,6 +174,7 @@ jobs:
               - 'templates/**'
               - 'charts/**'
               - 'crds/**'
+              - 'images/manifest.yaml'
 
   release:
     name: Release Chart
@@ -271,6 +276,7 @@ jobs:
           helm repo add jetstack https://charts.jetstack.io --force-update
           helm repo add vector https://helm.vector.dev --force-update
           helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/ --force-update
+          helm repo add autoscaler https://kubernetes.github.io/autoscaler --force-update
           helm repo update
 
       - name: Build Dependencies

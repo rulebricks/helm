@@ -43,7 +43,8 @@ images:
   - { name: prometheus-operator, kind: mirror, source: quay.io/prometheus-operator/prometheus-operator, tag: "v0.92.1", auth: none, digest: "" }
   - { name: alertmanager, kind: mirror, source: quay.io/prometheus/alertmanager, tag: "v0.33.1", auth: none, digest: "" }
 
-  # --- Tier-2: traefik / keda / cert-manager / vector / external-dns (DHI) ---
+  # --- Tier-2: traefik / keda / cert-manager / vector / external-dns /
+  #     cluster-autoscaler (DHI) ---
   - { name: traefik, kind: mirror, source: dhi.io/traefik, tag: "3.7.5-debian13", auth: dhi, digest: "" }
   - { name: keda, kind: mirror, source: dhi.io/keda, tag: "2.20.1-debian13", auth: dhi, digest: "" }
   - { name: keda-metrics-apiserver, kind: mirror, source: dhi.io/keda-metrics-apiserver, tag: "2.20.1-debian13", auth: dhi, digest: "" }
@@ -55,6 +56,7 @@ images:
   - { name: cert-manager-acmesolver, kind: mirror, source: dhi.io/cert-manager-acmesolver, tag: "1.20.3-debian13", auth: dhi, digest: "" }
   - { name: vector, kind: mirror, source: dhi.io/vector, tag: "0.56.0-debian13", auth: dhi, digest: "" }
   - { name: external-dns, kind: mirror, source: dhi.io/external-dns, tag: "0.21.0-debian13", auth: dhi, digest: "" }
+  - { name: cluster-autoscaler, kind: mirror, source: dhi.io/kubernetes-cluster-autoscaler, tag: "1.34.3-debian13", auth: dhi, digest: "" }
 
   # --- Tier-2 dormant/optional sub-images (only pulled when a specific feature
   #     toggle is on: thanos, admission webhooks, grafana renderer/tests, CRD jobs,

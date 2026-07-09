@@ -42,7 +42,7 @@ dependencies:
   # re-images). Every image these charts pull is re-pointed to
   # docker.io/rulebricks/* through each chart's native image values; the CLI sets
   # those defaults and applies global.imageRegistry (see values.yaml). NOTE: only
-  # kube-prometheus-stack honors a parent global.imageRegistry — the other five
+  # kube-prometheus-stack honors a parent global.imageRegistry — the other six
   # need their per-chart image keys set (the CLI does this; hand-installers must
   # set them too). Versions confirmed against the upstream repos.
   - name: kube-prometheus-stack
@@ -79,6 +79,6 @@ dependencies:
   # leaves this disabled there). Without it, KEDA worker scale-outs strand
   # Pending pods and the burst nodegroup never leaves desired=0.
   - name: cluster-autoscaler
-    version: 9.58.0
+    version: 9.53.0
     repository: https://kubernetes.github.io/autoscaler
     condition: cluster-autoscaler.enabled
