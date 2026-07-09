@@ -1214,6 +1214,20 @@
         "enabled": { "type": "boolean" }
       }
     },
+    "cluster-autoscaler": {
+      "type": "object",
+      "description": "Kubernetes cluster-autoscaler subchart (AWS EKS only; GKE/AKS node pools autoscale natively). autoDiscovery.clusterName and awsRegion are required when enabled.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "autoDiscovery": {
+          "type": "object",
+          "properties": {
+            "clusterName": { "type": "string" }
+          }
+        },
+        "awsRegion": { "type": "string" }
+      }
+    },
     "migrations": {
       "type": "object",
       "description": "Configuration for database migration jobs",

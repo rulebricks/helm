@@ -473,16 +473,28 @@ rulebricks:
       image: busybox:1.38.0
     replicas: 3 # Minimum recommended
     # Gather-plane autoscaling. HPS consumes/parses every chunk response, so
-    # its capacity scales with request rate; this scaler adds pods when the
+    # its capacity scales with request traffic; this scaler adds pods when the
     # response topic lags.
     keda:
       enabled: true
       minReplicaCount: 3
-      maxReplicaCount: 8
+      # Sized in proportion to the worker fleet ceiling (~1 HPS per 4 workers,
+      # see the derivation in the hps-keda.yaml template): 64-worker fleets
+      # saturate ~3x more gather capacity than the old ceiling of 8 provided.
+      # The solution-response topic's 128 partitions are the hard upper bound.
+      maxReplicaCount: 16
       pollingInterval: 15
       cooldownPeriod: 600
-      lagThreshold: 300
-      cpuThreshold: 60
+      # Lag is in chunk MESSAGES (self-tuned size, ~50 small payloads or up
+      # to 256KiB each), so 50 messages of standing lag is already thousands
+      # of payload results waiting to be gathered. The old 300 never fired
+      # before the 10s request window collapsed; scale-up remains
+      # one-pod-at-a-time regardless (see template scaling policies).
+      lagThreshold: 50
+      # Event-loop saturation reads as ~50% container CPU of the 1-CPU request
+      # (the JS thread pegs one core while I/O threads add little), so 60
+      # never fired under real saturation. 45 fires just below that plateau.
+      cpuThreshold: 45
     # Pre-pull HPS server + worker images onto every node so burst scale-outs
     # skip image pulls
     imagePrepull:
@@ -528,14 +540,23 @@ rulebricks:
         maxUnavailable: ""
       # Workers are single-threaded Node processes doing CPU-bound rule
       # evaluation. The limit is one full core (the single-threaded ceiling)
-      # so a busy worker can burst to a whole CPU; the request sits well below
-      # it so a large warm fleet packs tightly and scale-out replicas schedule
-      # without immediately demanding new nodes. Trade-off: Burstable QoS means
-      # a worker can be CFS-throttled toward its request under genuine node
-      # contention. Scale OUT (replicas) for throughput.
+      # so a busy worker can burst to a whole CPU.
+      #
+      # The REQUEST is what converts replicas into node capacity: the
+      # cluster-autoscaler provisions burst nodes to fit replicas x request,
+      # and a saturated fleet can consume every core those nodes have
+      # (workers are the only burst-pool tenants). At 250m a full 128-worker
+      # fleet only ever claimed 2 burst nodes (~32 cores, ~90k payloads/s)
+      # and hit an artificial wall while node CPUs idled at 50%. 500m makes
+      # the scheduler's view match reality (saturated workers measure
+      # 300-900m): 128 workers claim ~4 nodes / 64 cores, in line with the
+      # ~0.35ms/payload cost model. Trade-off: on a tightly-packed core pool
+      # the 8-replica baseline may cost one extra core node at idle (KEDA
+      # sheds scaled-out replicas within minutes, and the autoscaler follows,
+      # so the burst pool itself still drains to zero).
       resources:
         requests:
-          cpu: "250m"
+          cpu: "500m"
           memory: "1Gi"
         limits:
           cpu: "1000m"
@@ -554,11 +575,7 @@ rulebricks:
         # no scaling event at all; bursts scale out from here exponentially
         # (see scalingBehavior defaults in the worker ScaledObject template).
         minReplicaCount: 8
-        # Bounded by solutionPartitions (a worker beyond the partition count
-        # would sit idle). Equal to solutionPartitions: the fleet is
-        # effectively unbounded up to the partition ceiling; the cluster
-        # autoscaler's node ceiling is the real capacity limit.
-        maxReplicaCount: 64
+        maxReplicaCount: 128
         # Poll fast so bursts are detected within seconds.
         pollingInterval: 5
         cooldownPeriod: 300
@@ -884,8 +901,10 @@ traefik:
   autoscaling:
     enabled: true
     minReplicas: 1
-    # Headroom for colocated clients pushing multi-hundred-RPS bulk traffic.
-    maxReplicas: 4
+    # Headroom for high-RPS clients (small-payload traffic is request-rate
+    # bound at the proxy). Traefik pods are cheap (100m request) and the HPA
+    # sheds them at idle
+    maxReplicas: 8
   resources:
     requests:
       cpu: "100m"
@@ -1939,3 +1958,52 @@ external-dns:
   # azure:
   #   resourceGroup: "your-resource-group"
   #   subscriptionId: "your-subscription-id"
+
+# Kubernetes cluster-autoscaler (AWS EKS only). GKE and AKS autoscale their
+# node pools natively; EKS managed nodegroups do NOT - something must move the
+# ASG desired count when pods go Pending. Without this, the KEDA worker scaler
+# strands Pending pods and the burst nodegroup (rulebricks.com/pool=burst,
+# min 0) never activates, capping throughput at the warm fleet (observed in
+# load testing: 50/63 workers Pending while the burst pool sat empty).
+#
+# The CLI enables this for AWS deployments and sets autoDiscovery.clusterName;
+# IAM comes from the cluster-setup stack's <cluster>-cluster-autoscaler Pod
+# Identity role, bound to this ServiceAccount by the CLI's workload-identity
+# step (no annotations needed with EKS Pod Identity).
+cluster-autoscaler:
+  enabled: false
+  cloudProvider: aws
+  # autoDiscovery.clusterName is REQUIRED when enabling: the autoscaler finds
+  # nodegroup ASGs by the k8s.io/cluster-autoscaler/<clusterName> tags that
+  # EKS managed nodegroups apply automatically.
+  autoDiscovery:
+    clusterName: ""
+  # awsRegion is REQUIRED when enabling (no metadata-service fallback needed).
+  awsRegion: ""
+  # Fixed ServiceAccount name so the workload-identity binding is stable
+  # across releases.
+  rbac:
+    serviceAccount:
+      name: cluster-autoscaler
+  extraArgs:
+    # Nodegroups span AZs; treat per-AZ groups as one pool.
+    balance-similar-node-groups: true
+    # Burst nodes should drain promptly once the worker fleet cools down
+    # (KEDA cooldown is 300s; the default 10m unneeded-time doubles the tail).
+    scale-down-unneeded-time: 5m
+    # Workers are the only tenants of burst nodes; don't let lingering
+    # DaemonSet-adjacent system pods block scale-down.
+    skip-nodes-with-system-pods: false
+    expander: least-waste
+  # The autoscaler must never be evicted or preempted by the workloads it
+  # rescues; it is also the component that un-sticks Pending critical pods.
+  priorityClassName: system-cluster-critical
+  podAnnotations:
+    cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "300Mi"
+    limits:
+      cpu: "500m"
+      memory: "600Mi"

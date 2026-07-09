@@ -918,7 +918,7 @@ rulebricks:
       httpGet:
         path: /api/health
         port: 3000
-      initialDelaySeconds: 30
+      initialDelaySeconds: 120
       periodSeconds: 10
     readinessProbe:
       httpGet:

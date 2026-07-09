@@ -99,7 +99,7 @@ app:
     httpGet:
       path: /api/health
       port: 3000
-    initialDelaySeconds: 30
+    initialDelaySeconds: 120
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 6
@@ -153,11 +153,18 @@ hps:
   keda:
     enabled: false
     minReplicaCount: 2
-    maxReplicaCount: 8
+    # Leave maxReplicaCount unset to inherit the derived default (~1 HPS per
+    # 4 workers of the worker fleet ceiling, floor 8 - see hps-keda.yaml).
+    # maxReplicaCount: 16
     pollingInterval: 15
     cooldownPeriod: 600
-    lagThreshold: 300
-    cpuThreshold: 60
+    # Lag is in chunk MESSAGES (up to FLOW_CHUNK_MAX_ITEMS payload results
+    # each); 50 standing messages is already a large payload backlog. Higher
+    # thresholds never fire before gather latency crosses the request window.
+    lagThreshold: 50
+    # Gather saturation shows as ~50% of the 1-CPU request (single JS thread
+    # pegs one core); 45 fires just below that plateau, 60 never did.
+    cpuThreshold: 45
   # Pre-pull the HPS server + worker images onto every node (DaemonSet) so
   # burst scale-outs skip the image pull on freshly provisioned nodes.
   imagePrepull:
