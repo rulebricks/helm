@@ -35,6 +35,13 @@ MANIFEST="${MANIFEST:-${REPO_ROOT}/images/manifest.yaml}"
 # Where per-image <name>.digest fragments are written. CI uploads these as artifacts.
 OUT_DIR="${OUT_DIR:-/tmp}"
 
+# Docker Hub can briefly return 5xx responses while a newly pushed manifest and
+# its blobs propagate through the registry CDN. Keep digest lookup retries
+# bounded and configurable so callers can tune CI without changing the scripts.
+DIGEST_RESOLVE_ATTEMPTS="${DIGEST_RESOLVE_ATTEMPTS:-6}"
+DIGEST_RETRY_INITIAL_DELAY_SECONDS="${DIGEST_RETRY_INITIAL_DELAY_SECONDS:-5}"
+DIGEST_RETRY_MAX_DELAY_SECONDS="${DIGEST_RETRY_MAX_DELAY_SECONDS:-30}"
+
 # die <message...> — print to stderr and exit non-zero.
 die() {
   echo "error: $*" >&2
@@ -86,14 +93,45 @@ target_ref() {
 
 # resolve_digest <ref> — print the multi-arch manifest-list digest of a pushed ref.
 resolve_digest() {
-  local ref="$1" digest
-  digest="$(docker buildx imagetools inspect "${ref}" --format '{{.Manifest.Digest}}')"
-  [ -n "${digest}" ] || die "could not resolve manifest digest for ${ref}"
-  case "${digest}" in
-    sha256:*) : ;;
-    *) die "resolved digest for ${ref} is not a sha256 ref: ${digest}" ;;
+  local ref="$1" digest=""
+  local attempt=1 delay="${DIGEST_RETRY_INITIAL_DELAY_SECONDS}"
+
+  case "${DIGEST_RESOLVE_ATTEMPTS}" in
+    ''|*[!0-9]*|0) die "DIGEST_RESOLVE_ATTEMPTS must be a positive integer" ;;
   esac
-  printf '%s' "${digest}"
+  case "${DIGEST_RETRY_INITIAL_DELAY_SECONDS}" in
+    ''|*[!0-9]*) die "DIGEST_RETRY_INITIAL_DELAY_SECONDS must be a non-negative integer" ;;
+  esac
+  case "${DIGEST_RETRY_MAX_DELAY_SECONDS}" in
+    ''|*[!0-9]*) die "DIGEST_RETRY_MAX_DELAY_SECONDS must be a non-negative integer" ;;
+  esac
+  if [ "${delay}" -gt "${DIGEST_RETRY_MAX_DELAY_SECONDS}" ]; then
+    delay="${DIGEST_RETRY_MAX_DELAY_SECONDS}"
+  fi
+
+  while [ "${attempt}" -le "${DIGEST_RESOLVE_ATTEMPTS}" ]; do
+    if digest="$(docker buildx imagetools inspect "${ref}" --format '{{.Manifest.Digest}}')" \
+      && [ -n "${digest}" ]; then
+      case "${digest}" in
+        sha256:*) printf '%s' "${digest}"; return 0 ;;
+        *) die "resolved digest for ${ref} is not a sha256 ref: ${digest}" ;;
+      esac
+    fi
+
+    if [ "${attempt}" -eq "${DIGEST_RESOLVE_ATTEMPTS}" ]; then
+      break
+    fi
+
+    echo "warning: digest lookup for ${ref} failed (attempt ${attempt}/${DIGEST_RESOLVE_ATTEMPTS}); retrying in ${delay}s" >&2
+    sleep "${delay}"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+    if [ "${delay}" -gt "${DIGEST_RETRY_MAX_DELAY_SECONDS}" ]; then
+      delay="${DIGEST_RETRY_MAX_DELAY_SECONDS}"
+    fi
+  done
+
+  die "could not resolve manifest digest for ${ref} after ${DIGEST_RESOLVE_ATTEMPTS} attempts"
 }
 
 # write_digest <name> <digest> — persist the resolved digest fragment + echo it.
