@@ -125,6 +125,22 @@ spec:
               serviceName: {{ include "rulebricks-chart.hps.fullname" $ }}
               servicePort: 80
               {{- end }}
+          # Context batch ingestion (self-hosted bulk mode). Fixed prefix:
+          # the context slug follows /batch/, so the rest of
+          # /api/v1/contexts/* stays on the app ("batch" is a reserved
+          # context slug).
+          - path: /api/v1/contexts/batch/
+            pathType: Prefix
+            backend:
+              {{- if semverCompare ">=1.19-0" $.Capabilities.KubeVersion.GitVersion }}
+              service:
+                name: {{ include "rulebricks-chart.hps.fullname" $ }}
+                port:
+                  number: 80
+              {{- else }}
+              serviceName: {{ include "rulebricks-chart.hps.fullname" $ }}
+              servicePort: 80
+              {{- end }}
           {{- end }}
 
           {{- if $appIngressEnabled }}

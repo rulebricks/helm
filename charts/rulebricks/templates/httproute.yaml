@@ -71,6 +71,15 @@ spec:
       backendRefs:
         - name: {{ include "rulebricks-chart.hps.fullname" . }}
           port: 80
+    # Context batch ingestion (self-hosted bulk mode); "batch" is a reserved
+    # context slug so the rest of /api/v1/contexts/* stays on the app
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/contexts/batch/
+      backendRefs:
+        - name: {{ include "rulebricks-chart.hps.fullname" . }}
+          port: 80
     {{- end }}
     {{- if $appIngressEnabled }}
     # Default route - all other traffic to main app
