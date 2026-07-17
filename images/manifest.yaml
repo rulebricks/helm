@@ -114,7 +114,8 @@ images:
   # supabase/kong was deprecated; supabase self-hosted uses official kong/kong with
   # chart-mounted declarative config (our kong deployment does the same).
   - { name: supabase-kong, kind: mirror, source: docker.io/kong/kong, tag: "3.9.3", auth: none, digest: "" }
-  # curljq: helm-test hook image (bash+curl+jq). Built in-repo on the DHI curl
-  # -dev base (the unlicensed kdevup/curljq mirror was dropped — no redistribution
-  # rights). Tag tracks the DHI curl version of the base.
-  - { name: curljq, kind: build, context: images/curljq, base: dhi.io/curl:8.14.1-debian13-dev, tag: "8.14.1-debian13", auth: dhi, digest: "" }
+  # curljq: helm-test hook image (bash+curl+jq). Built in-repo on the official
+  # Alpine base (the unlicensed kdevup/curljq mirror was dropped — no
+  # redistribution rights). DHI runtime images ship no shell and their -dev
+  # variants fight apt installs, so plain Alpine is the pragmatic base here.
+  - { name: curljq, kind: build, context: images/curljq, base: docker.io/library/alpine:3.22, tag: "1.0.0", auth: none, digest: "" }

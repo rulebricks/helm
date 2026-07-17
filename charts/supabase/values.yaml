@@ -801,10 +801,10 @@ kong:
 
 # Helm test hook images (curl/jq based health checks). Routed through the
 # supabase.image helper so they honor global.imageRegistry and digest pinning.
-# rulebricks/curljq is built in-repo (images/curljq) on the DHI curl -dev base;
-# the tag tracks the DHI curl version (see images/manifest.yaml).
+# rulebricks/curljq is built in-repo (images/curljq, Alpine + bash/curl/jq);
+# see images/manifest.yaml.
 test:
   image:
     registry: docker.io
     repository: rulebricks/curljq
-    tag: "8.14.1-debian13"
+    tag: "1.0.0"
