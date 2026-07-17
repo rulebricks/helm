@@ -14,8 +14,8 @@ name: Mirror Images
 
 on:
   schedule:
-    # Daily freshness re-mirror + re-pin (avoids the bitnamilegacy staleness trap).
-    - cron: "0 6 * * *"
+    # Weekly freshness re-mirror for mutable tags and same-tag upstream rebuilds.
+    - cron: "0 6 * * 1"
   workflow_dispatch:
   push:
     paths:
@@ -51,6 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 8
       matrix:
         entry: ${{ fromJson(needs.plan.outputs.matrix) }}
     steps:

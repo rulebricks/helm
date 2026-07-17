@@ -469,11 +469,6 @@ rulebricks:
       registry: docker.io
       repository: rulebricks/hps
       pullPolicy: Always # HPS image may receive silent updates
-    # Init container image that waits for Kafka (broker + group coordinator)
-    # before HPS starts. Uses the Kafka CLI image; keep aligned with the Kafka
-    # image used by the kafka-topic-align Job.
-    waitForKafka:
-      image: busybox:1.38.0
     replicas: 3 # Minimum recommended
     # Gather-plane autoscaling. HPS consumes/parses every chunk response, so
     # its capacity scales with request traffic; this scaler adds pods when the
@@ -800,6 +795,55 @@ strimzi-kafka-operator:
       registry: docker.io
       repository: rulebricks
       name: strimzi-operator
+  # Auxiliary component defaults injected into the operator's STRIMZI_DEFAULT_*
+  # env vars. Dormant (only pulled when a KafkaBridge / Connect-build / exporter /
+  # Cruise Control / MirrorMaker2 CR feature is enabled) but pinned to mirrored
+  # rulebricks/* images so no Strimzi toggle ever references an unmirrored image.
+  # Exporter / Cruise Control / MirrorMaker2 all run from the Strimzi Kafka image.
+  # NOTE: the operator's STRIMZI_KAFKA_*_IMAGES version maps also list Kafka
+  # 4.1.x entries; only the chart-pinned 4.2.0 tag is mirrored (DHI builds no
+  # 4.1.x on the 1.0.1 stream). Unreachable unless kafka.version is set to 4.1.x.
+  kafkaExporter:
+    image:
+      registry: docker.io
+      repository: rulebricks
+      name: strimzi-kafka
+  cruiseControl:
+    image:
+      registry: docker.io
+      repository: rulebricks
+      name: strimzi-kafka
+  kafkaMirrorMaker2:
+    image:
+      registry: docker.io
+      repository: rulebricks
+      name: strimzi-kafka
+  kafkaBridge:
+    image:
+      registry: docker.io
+      repository: rulebricks
+      name: strimzi-kafka-bridge
+      tag: "1.0.0-debian13"
+  # Connect-build tools: mirrored from quay.io/strimzi (no DHI equivalent), so
+  # their tags carry no -debian13 suffix and must override defaultImageTag.
+  kanikoExecutor:
+    image:
+      registry: docker.io
+      repository: rulebricks
+      name: kaniko-executor
+      tag: "1.0.1"
+  buildah:
+    image:
+      registry: docker.io
+      repository: rulebricks
+      name: buildah
+      tag: "1.0.1"
+  mavenBuilder:
+    image:
+      registry: docker.io
+      repository: rulebricks
+      name: maven-builder
+      tag: "1.0.1"
 
 # Rulebricks always deploys ClickHouse for native decision-log query support.
 # Decision logs remain object-storage-backed via a view. When clickstack.enabled
@@ -1813,6 +1857,13 @@ kube-prometheus-stack:
       tag: "1.11.1-debian13"
       # DHI node-exporter is already distroless; don't append the chart's -distroless suffix.
       distroless: false
+    # Dormant (kubeRBACProxy.enabled defaults false); pinned so enabling it never
+    # pulls the upstream quay.io/brancz default (matches the kube-state-metrics pin).
+    kubeRBACProxy:
+      image:
+        registry: docker.io
+        repository: rulebricks/kube-rbac-proxy
+        tag: "0.22.0-debian13"
     permissionInitContainer:
       image:
         registry: docker.io

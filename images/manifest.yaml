@@ -30,6 +30,14 @@ images:
   # --- Strimzi (Kafka operator + broker) — DHI 1.0.1 / Kafka 4.2.0 ---
   - { name: strimzi-operator, kind: mirror, source: dhi.io/strimzi-operator, tag: "1.0.1-debian13", auth: dhi, digest: "" }
   - { name: strimzi-kafka, kind: mirror, source: dhi.io/strimzi-kafka, tag: "1.0.1-debian13-kafka-4.2.0", auth: dhi, digest: "" }
+  # Strimzi auxiliary images, referenced by the cluster-operator's STRIMZI_DEFAULT_*
+  # env defaults (dormant unless a KafkaBridge / KafkaConnect-build CR is created);
+  # pinned so no Strimzi feature toggle ever references an unmirrored image.
+  - { name: strimzi-kafka-bridge, kind: mirror, source: dhi.io/strimzi-kafka-bridge, tag: "1.0.0-debian13", auth: dhi, digest: "" }
+  # Connect-build tools: no DHI equivalent -> official quay.io/strimzi, version matches operator 1.0.1
+  - { name: kaniko-executor, kind: mirror, source: quay.io/strimzi/kaniko-executor, tag: "1.0.1", auth: none, digest: "" }
+  - { name: buildah, kind: mirror, source: quay.io/strimzi/buildah, tag: "1.0.1", auth: none, digest: "" }
+  - { name: maven-builder, kind: mirror, source: quay.io/strimzi/maven-builder, tag: "1.0.1", auth: none, digest: "" }
 
   # --- Tier-2: kube-prometheus-stack sub-images ---
   - { name: prometheus, kind: mirror, source: dhi.io/prometheus, tag: "3.12.0-debian13", auth: dhi, digest: "" }
@@ -106,4 +114,7 @@ images:
   # supabase/kong was deprecated; supabase self-hosted uses official kong/kong with
   # chart-mounted declarative config (our kong deployment does the same).
   - { name: supabase-kong, kind: mirror, source: docker.io/kong/kong, tag: "3.9.3", auth: none, digest: "" }
-  - { name: curljq, kind: mirror, source: docker.io/kdevup/curljq, tag: "latest", auth: none, digest: "" }
+  # curljq: helm-test hook image (bash+curl+jq). Built in-repo on the DHI curl
+  # -dev base (the unlicensed kdevup/curljq mirror was dropped — no redistribution
+  # rights). Tag tracks the DHI curl version of the base.
+  - { name: curljq, kind: build, context: images/curljq, base: dhi.io/curl:8.14.1-debian13-dev, tag: "8.14.1-debian13", auth: dhi, digest: "" }

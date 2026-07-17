@@ -35,7 +35,7 @@ dependencies:
     repository: file://charts/clickstack
     condition: global.clickstack.enabled
   - name: supabase
-    version: 0.1.4
+    version: 0.1.5
     repository: file://charts/supabase
     condition: supabase.enabled
   # Tier-2 dependencies — upstream community charts (reverted from the DHI

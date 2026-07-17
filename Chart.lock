@@ -10,7 +10,7 @@ dependencies:
   version: 0.1.0
 - name: supabase
   repository: file://charts/supabase
-  version: 0.1.4
+  version: 0.1.5
 - name: kube-prometheus-stack
   repository: https://prometheus-community.github.io/helm-charts
   version: 87.3.0
@@ -35,5 +35,5 @@ dependencies:
 - name: cluster-autoscaler
   repository: https://kubernetes.github.io/autoscaler
   version: 9.53.0
-digest: sha256:ad86bdcc86a142015662927a1fdd2a6989bf001b796672fa8ede9098be77ee84
-generated: "2026-07-09T10:58:11.65551-07:00"
+digest: sha256:c4339b19cfd83811a8f2b344944a155a6c127d9e81074653358e383d8d111b45
+generated: "2026-07-16T21:29:46.10952-07:00"

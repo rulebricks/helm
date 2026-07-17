@@ -58,10 +58,16 @@ with open(os.environ["MANIFEST"]) as f:
         expected[f"docker.io/{repo}:{tg}"] = nm
         count += 1
 
+# Scan `image:` fields AND env `value:` lines. The latter catches operator-style
+# image defaults (e.g. the Strimzi cluster-operator's STRIMZI_DEFAULT_*_IMAGE env
+# vars), which previously escaped this guard entirely. Version-map block-scalar
+# lines ("4.1.0=docker.io/rulebricks/...") are deliberately NOT scanned: those
+# maps are multi-version by design and only the chart-pinned Kafka version is
+# guaranteed mirrored.
 rendered = set()
 with open(os.environ["RENDERED_FILE"]) as f:
     for line in f:
-        m = re.search(r'image:\s*["\']?(docker\.io/rulebricks/[^"\'\s]+)', line)
+        m = re.search(r'(?:image|value):\s*["\']?(docker\.io/rulebricks/[^"\'\s]+)', line)
         if m:
             rendered.add(m.group(1))
 
