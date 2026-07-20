@@ -49,10 +49,17 @@ Usage: {{ include "rulebricks-chart.image" (dict "root" . "image" $img "name" "v
 {{- end }}
 
 {{/*
-Registry secret name
+Registry secret name. BYO seam: global.registry.existingPullSecret names a
+pre-created kubernetes.io/dockerconfigjson Secret; the chart then skips
+rendering <release>-regcred from the license key.
 */}}
 {{- define "rulebricks-chart.registrySecretName" -}}
-{{- printf "%s-regcred" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- $registry := dig "registry" (dict) (.Values.global | default dict) -}}
+{{- if $registry.existingPullSecret -}}
+{{- $registry.existingPullSecret -}}
+{{- else -}}
+{{- printf "%s-regcred" .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 {{- end }}
 
 {{/*

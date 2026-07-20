@@ -90,6 +90,12 @@ app:
       existingSecret: ""
       existingSecretUsernameKey: "KAFKA_SASL_USERNAME"
       existingSecretPasswordKey: "KAFKA_SASL_PASSWORD"
+  # ClickHouse credentials for the decision-log query path. Defaults to the
+  # parent chart's <release>-clickhouse-credentials Secret; set existingSecret
+  # to match a BYO clickhouse.auth.existingSecret in the parent chart.
+  clickhouse:
+    existingSecret: ""
+    existingSecretKey: "admin-password"
   # AI features (optional)
   ai:
     enabled: false

@@ -55,6 +55,16 @@
           "description": "Pull secrets for the private rulebricks/* images (and any custom registry the imageRegistry override points at)",
           "items": { "type": "object" }
         },
+        "registry": {
+          "type": "object",
+          "description": "Image registry credential seams",
+          "properties": {
+            "existingPullSecret": {
+              "type": "string",
+              "description": "Name of a pre-created kubernetes.io/dockerconfigjson Secret; when set the chart does not render <release>-regcred from the license key"
+            }
+          }
+        },
         "tlsEnabled": {
           "type": "boolean",
           "description": "Enable TLS/HTTPS"
@@ -456,23 +466,9 @@
     },
     "externalSecrets": {
       "type": "object",
-      "description": "Overlay-facing External Secrets metadata (not rendered directly by this chart)",
+      "description": "External Secrets Operator convenience toggle. The chart consumes pre-existing Secrets via *.secretRef seams and renders no ExternalSecret/SecretStore resources; see examples/external-secrets/. Unknown keys are tolerated for older overlay-era values files.",
       "properties": {
-        "enabled": { "type": "boolean", "default": false },
-        "secretStoreRef": {
-          "type": "object",
-          "properties": {
-            "name": { "type": "string" },
-            "kind": { "type": "string", "enum": ["SecretStore", "ClusterSecretStore"] }
-          }
-        },
-        "refreshInterval": { "type": "string", "default": "1h" },
-        "remoteRefs": {
-          "type": "object",
-          "description": "Map local keys to remote secret paths",
-          "additionalProperties": { "type": "string" }
-        },
-        "targetSecretName": { "type": "string" }
+        "installOperator": { "type": "boolean", "default": false }
       }
     },
     "rulebricks": {
@@ -1618,7 +1614,7 @@
     },
     {
       "title": "External Database Validation",
-      "description": "If supabase.externalDatabase is enabled (self-hosted Supabase services against an external PostgreSQL), the config must be workable end to end: (1) supabase.db.enabled must be false so the bundled Postgres, the in-cluster db alias, and the migration job all agree on the external server; (2) the host must be resolvable, either inline (externalDatabase.host) or from a Secret (externalDatabase.secretRef + secretRefKey.host); (3) the shared service-role password must have a source (supabase.secret.db.password inline, supabase.secret.db.secretRef, or externalDatabase.secretRef); (4) while externalDatabase.bootstrap.enabled is true (the default), master credentials are required (bootstrap.masterPassword inline or bootstrap.secretRef with keys master-username/master-password/service-password) - disable bootstrap only if you run bootstrap.sql yourself; (5) the migration job needs migrations.externalDb.host (it does not read externalDatabase.host).",
+      "description": "If supabase.externalDatabase is enabled (self-hosted Supabase services against an external PostgreSQL), the config must be workable end to end: (1) supabase.db.enabled must be false so the bundled Postgres, the in-cluster db alias, and the migration job all agree on the external server; (2) the host must be resolvable, either inline (externalDatabase.host) or from a Secret (externalDatabase.secretRef + secretRefKey.host); (3) the shared service-role password must have a source (supabase.secret.db.password inline, supabase.secret.db.secretRef, or externalDatabase.secretRef); (4) while externalDatabase.bootstrap.enabled is true (the default), master credentials are required (bootstrap.masterPassword inline or bootstrap.secretRef with keys master-username/master-password/service-password) - disable bootstrap only if you run bootstrap.sql yourself; (5) the migration job needs a host source: migrations.externalDb.host or externalDatabase.secretRef + secretRefKey.host (it does not read externalDatabase.host).",
       "if": {
         "properties": {
           "supabase": {
@@ -1841,7 +1837,7 @@
             ]
           },
           {
-            "description": "Migration job host: migrations.externalDb.host (or the legacy supabase.auth.environment.DB_HOST seam).",
+            "description": "Migration job host: migrations.externalDb.host, the external database Secret (externalDatabase.secretRef + secretRefKey.host), or the legacy supabase.auth.environment.DB_HOST seam.",
             "anyOf": [
               {
                 "properties": {
@@ -1860,6 +1856,30 @@
                   }
                 },
                 "required": ["migrations"]
+              },
+              {
+                "properties": {
+                  "supabase": {
+                    "type": "object",
+                    "required": ["externalDatabase"],
+                    "properties": {
+                      "externalDatabase": {
+                        "type": "object",
+                        "required": ["secretRef", "secretRefKey"],
+                        "properties": {
+                          "secretRef": { "type": "string", "minLength": 1 },
+                          "secretRefKey": {
+                            "type": "object",
+                            "required": ["host"],
+                            "properties": {
+                              "host": { "type": "string", "minLength": 1 }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
               },
               {
                 "properties": {

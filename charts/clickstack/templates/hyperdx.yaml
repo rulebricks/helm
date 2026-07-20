@@ -244,6 +244,27 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.ferretdb.enabled }}
+      initContainers:
+        {{- /* HyperDX's API process wedges permanently when its initial Mongo
+             connection fails (mongoose does not retry the first connect): every
+             OpAMP request then 500s, which crash-loops all collectors. Gate
+             startup on FerretDB accepting connections. timeout(1) guards nc:
+             busybox nc's -w only bounds the connect, so an accepted-but-silent
+             connection would otherwise block the read forever. */}}
+        - name: wait-for-ferretdb
+          image: {{ include "clickstack.image" (dict "root" $ "image" .Values.global.images.busybox "name" "busybox") | quote }}
+          command: ["sh", "-ec"]
+          args:
+            - |
+              HOST="{{ include "clickstack.ferretdb.fullname" . }}"
+              echo "Waiting for FerretDB $HOST:27017 ..."
+              until echo | timeout 5 nc -w 2 "$HOST" 27017 >/dev/null 2>&1; do
+                echo "FerretDB not ready, waiting..."
+                sleep 2
+              done
+              echo "FerretDB reachable!"
+      {{- end }}
       containers:
         - name: hyperdx
           image: {{ include "clickstack.image" (dict "root" $ "image" .Values.hyperdx.image "name" "hyperdx") | quote }}

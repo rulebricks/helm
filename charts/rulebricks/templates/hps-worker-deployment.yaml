@@ -131,7 +131,10 @@ spec:
              coordinator is often still loading after the broker port opens;
              starting the worker then makes it crash-loop until Kafka is ready.
              JMX is disabled so the Kafka CLI does not try to bind the broker
-             JMX port. */}}
+             JMX port. timeout(1) guards nc: busybox nc's -w only bounds the
+             connect, so a connection that is accepted but never answered
+             (Kafka mid-startup) blocks the read forever and wedges this init
+             container. */}}
         - name: wait-for-kafka
           image: {{ include "rulebricks-chart.image" (dict "root" $ "image" .Values.global.images.busybox "name" "busybox") | quote }}
           command: ["sh", "-ec"]
@@ -139,7 +142,7 @@ spec:
             - |
               BOOT="{{ .Release.Name }}-kafka-kafka-bootstrap"
               echo "Waiting for Kafka bootstrap $BOOT:9092 ..."
-              until echo | nc -w 2 "$BOOT" 9092 2>/dev/null; do
+              until echo | timeout 5 nc -w 2 "$BOOT" 9092 >/dev/null 2>&1; do
                 echo "Kafka not ready, waiting..."
                 sleep 2
               done

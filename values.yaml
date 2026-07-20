@@ -19,7 +19,7 @@ global:
   # renders myacr.azurecr.io/rulebricks/clickhouse-server.
   # NOTE: a plain `helm install` propagates this to kube-prometheus-stack and to the
   # rulebricks/clickstack/supabase subcharts automatically, but cert-manager, traefik,
-  # keda, vector, external-dns and cluster-autoscaler each use their own image keys —
+  # keda, vector, external-dns and cluster-autoscaler each use their own image keys.
   # the CLI rewrites those for you; hand-installers must also set the per-chart image
   # registry/repo.
   imageRegistry: ""
@@ -41,12 +41,20 @@ global:
   #   keda.imagePullSecrets, traefik.deployment.imagePullSecrets,
   #   vector.image.pullSecrets, vector-agent.image.pullSecrets,
   #   strimzi-kafka-operator.image.imagePullSecrets,
+  #   external-secrets.global.imagePullSecrets (when installOperator is on),
   #   cluster-autoscaler.image.pullSecrets (list of secret-name strings)
   # For hand-installs, use [{name: <release>-regcred}] for the object-shaped
   # keys above and [<release>-regcred] for cluster-autoscaler.image.pullSecrets.
   # When imageRegistry points at your own registry, replace this with that registry's
   # pull secret (the license PAT only authenticates docker.io/rulebricks/*).
   imagePullSecrets: []
+  registry:
+    # BYO seam: name of a pre-created kubernetes.io/dockerconfigjson Secret to
+    # use for pulling rulebricks/* images. When set, the chart skips rendering
+    # <release>-regcred from global.licenseKey and every rulebricks-owned
+    # workload references this Secret instead. Remember to update the
+    # subchart imagePullSecrets keys listed above to the same name.
+    existingPullSecret: ""
   # Rulebricks product version used by app, HPS, HPS worker, and migration images.
   # CLI-generated values pin this to a semantic version such as "1.8.17".
   version: ""
@@ -78,7 +86,8 @@ global:
       # Preferred: IAM Roles for Service Accounts (IRSA).
       iamRoleArn: ""
       # Optional escape hatch for static AWS credentials. Secret keys expected:
-      # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY.
+      # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY. Injected into the ClickHouse
+      # workload (decision-log queries) and the DB backup upload job.
       existingSecret:
         name: ""
     azure:
@@ -327,6 +336,7 @@ global:
     # Key mappings within the referenced secret
     secretRefKeys:
       licenseKey: "LICENSE_KEY"
+      email: "EMAIL"
       smtpUser: "SMTP_USER"
       smtpPass: "SMTP_PASS"
       supabaseServiceKey: "SUPABASE_SERVICE_KEY"
@@ -334,6 +344,10 @@ global:
       supabaseAccessToken: "SUPABASE_ACCESS_TOKEN"
       ssoClientId: "SSO_CLIENT_ID"
       ssoClientSecret: "SSO_CLIENT_SECRET"
+      # Only read when global.externalAuth.enabled. NOTE: other keys the app
+      # consumes via envFrom (e.g. SUPABASE_ANON_KEY, REDIS_PASSWORD,
+      # KAFKA_SASL_*) are loaded verbatim and cannot be remapped.
+      jwtSecret: "JWT_SECRET"
   # =============================================================================
   # SSO Configuration (Optional)
   # Enables Single Sign-On via OIDC
@@ -864,6 +878,11 @@ clickhouse:
   auth:
     username: rulebricks
     password: ""
+    # BYO seam: point at an existing Secret (e.g. synced by External Secrets
+    # Operator) to stop the chart from managing <release>-clickhouse-credentials.
+    # When overriding, also set rulebricks.app.clickhouse.existingSecret (the app
+    # subchart reads its ClickHouse password independently) and, if ClickStack is
+    # enabled, clickstack.clickhouse.existingSecret.
     existingSecret: '{{ printf "%s-clickhouse-credentials" .Release.Name }}'
     existingSecretKey: admin-password
   # Persistence: required while clickstack.enabled (telemetry lives in local
@@ -1895,30 +1914,39 @@ kube-prometheus-stack:
       tag: "0.31.7"
 
 # =============================================================================
-# EXTERNAL SECRETS OPERATOR INTEGRATION (overlay-facing metadata)
-# These values are intentionally kept for kustomize/post-render workflows.
-# Note: This chart currently does not render ExternalSecret resources directly.
+# EXTERNAL SECRETS
+# This chart consumes pre-existing Kubernetes Secrets through the *.secretRef /
+# *.existingSecret seams (see .secrets.example and the README "Secrets" section)
+# and does NOT render SecretStore/ExternalSecret resources itself. Sync your
+# vault (AWS Secrets Manager, Azure Key Vault, GCP Secret Manager, HashiCorp
+# Vault, ...) into those Secrets with the External Secrets Operator - see
+# examples/external-secrets/ for per-provider copy-paste manifests.
 # =============================================================================
 externalSecrets:
-  # Enable External Secrets Operator integration in downstream overlays
-  enabled: false
-  # SecretStore or ClusterSecretStore reference
-  secretStoreRef:
-    name: ""
-    kind: "ClusterSecretStore" # or "SecretStore"
-  # Refresh interval for syncing secrets
-  refreshInterval: "1h"
-  # Remote key mappings - map local secret keys to remote paths
-  remoteRefs:
-    licenseKey: ""
-    jwtSecret: ""
-    dbPassword: ""
-    smtpUser: ""
-    smtpPass: ""
-    supabaseAnonKey: ""
-    supabaseServiceKey: ""
-  # Target secret name (defaults to <release>-external-secrets in overlays)
-  targetSecretName: ""
+  # Install a namespace-scoped External Secrets Operator alongside this release
+  # (images mirrored to docker.io/rulebricks/*; see the external-secrets block
+  # below). Leave false when ESO is already managed at cluster scope.
+  installOperator: false
+
+# Dependency values for the optional External Secrets Operator installation.
+external-secrets:
+  installCRDs: true
+  crds:
+    createClusterExternalSecret: false
+    createClusterSecretStore: false
+    createSecretStore: true
+    createClusterGenerator: false
+    createClusterPushSecret: false
+    createPushSecret: false
+  scopedRBAC: true
+  processClusterExternalSecret: false
+  processClusterPushSecret: false
+  processClusterStore: false
+  processClusterGenerator: false
+  processPushSecret: false
+  processSecretStore: true
+  global:
+    repository: docker.io/rulebricks/external-secrets
 
 # =============================================================================
 # STORAGE CLASS (AWS EBS gp3)

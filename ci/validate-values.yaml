@@ -15,11 +15,17 @@ global:
     # Required by the anon-key gate (schema + app-configmap template guard).
     # Structurally a JWT but signed with the CI-only secret above; NOT usable.
     anonKey: "ci-validate-anon-key"
+    # Kong and Studio reference the jwt Secret's serviceKey unconditionally;
+    # without it the rendered Secret lacks the key and those pods can't start.
+    serviceKey: "ci-validate-service-key"
 supabase:
   secret:
     db:
       # Required for the bundled Postgres (db-role-init sidecar). CI-only fake.
       password: "ci-validate-db-password"
+    dashboard:
+      # Kong references the dashboard Secret's password unconditionally.
+      password: "ci-validate-dashboard-password"
     realtime:
       secretKeyBase: "ci00000000000000000000000000000000000000000000000000000000000000"
       dbEncKey: "ci00000000000000"

@@ -22,10 +22,6 @@ dependencies:
   - name: rulebricks
     version: 0.1.1
     repository: file://charts/rulebricks
-  # Strimzi Kafka operator — upstream OCI chart from quay.io (replaced the frozen
-  # bitnamilegacy kafka subchart). The operator and Kafka broker images are
-  # re-pointed to docker.io/rulebricks/* via the strimzi-kafka-operator values
-  # (operator) and templates/kafka-strimzi.yaml (broker spec.kafka.image).
   - name: strimzi-kafka-operator
     version: 1.0.1
     repository: oci://quay.io/strimzi-helm
@@ -38,13 +34,6 @@ dependencies:
     version: 0.1.6
     repository: file://charts/supabase
     condition: supabase.enabled
-  # Tier-2 dependencies — upstream community charts (reverted from the DHI
-  # re-images). Every image these charts pull is re-pointed to
-  # docker.io/rulebricks/* through each chart's native image values; the CLI sets
-  # those defaults and applies global.imageRegistry (see values.yaml). NOTE: only
-  # kube-prometheus-stack honors a parent global.imageRegistry — the other six
-  # need their per-chart image keys set (the CLI does this; hand-installers must
-  # set them too). Versions confirmed against the upstream repos.
   - name: kube-prometheus-stack
     version: 87.3.0
     repository: https://prometheus-community.github.io/helm-charts
@@ -74,10 +63,10 @@ dependencies:
     version: 1.21.1
     repository: https://kubernetes-sigs.github.io/external-dns/
     condition: external-dns.enabled
-  # Kubernetes cluster-autoscaler — required on AWS EKS, where node pools have
-  # no built-in autoscaling (GKE and AKS scale node pools natively, so the CLI
-  # leaves this disabled there). Without it, KEDA worker scale-outs strand
-  # Pending pods and the burst nodegroup never leaves desired=0.
+  - name: external-secrets
+    version: 2.7.0
+    repository: https://charts.external-secrets.io
+    condition: externalSecrets.installOperator
   - name: cluster-autoscaler
     version: 9.53.0
     repository: https://kubernetes.github.io/autoscaler

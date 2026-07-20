@@ -104,10 +104,94 @@ global:
 | `backup.ttlSecondsAfterFinished`     | Seconds to retain completed backup Jobs and pod logs                      |
 | `backup.jobHistory.*`                | CronJob history limits for completed backup Jobs                          |
 | `migrations.ttlSecondsAfterFinished` | Seconds to retain completed migration Jobs and pod logs                   |
+| `externalSecrets.installOperator`    | Install the namespace-scoped External Secrets Operator dependency         |
 
 ---
 
 ### Configuration Choices
+
+<details>
+<summary><strong>Secrets</strong></summary>
+
+The chart consumes credentials from pre-existing Kubernetes Secrets through
+`*.secretRef` / `*.existingSecret` values and renders no vault-specific
+resources itself. This keeps the integration identical on AWS, Azure, and GCP,
+and compatible with whatever secrets platform you already run. When a seam is
+left empty, the chart falls back to creating the Secret from inline values.
+
+The canonical inventory of every Secret and key lives in
+[`.secrets.example`](.secrets.example). The seams:
+
+| Secret role                    | Values seam                                     | Keys                                            |
+| ------------------------------ | ----------------------------------------------- | ----------------------------------------------- |
+| Application (app, HPS, workers, SSO, managed migrations) | `global.secrets.secretRef` (+ `secretRefKeys`) | `LICENSE_KEY`, `EMAIL`, `SMTP_USER`, `SMTP_PASS`, `SUPABASE_*`, `OPENAI_API_KEY`, `JWT_SECRET`, `SSO_CLIENT_*`, `REDIS_PASSWORD`, `KAFKA_SASL_*` |
+| Browser anon key (runtime)     | `global.supabase.secretRef` (+ `secretRefKey`)  | `anonKey`                                       |
+| Supabase JWT                   | `supabase.secret.jwt.secretRef`                 | `secret`, `anonKey`, `serviceKey`               |
+| Postgres                       | `supabase.secret.db.secretRef` or `supabase.externalDatabase.secretRef` | `username`, `password`, `database` (+ `host`, `port` external) |
+| External DB bootstrap          | `supabase.externalDatabase.bootstrap.secretRef` | `master-username`, `master-password`, `service-password` |
+| Supabase dashboard             | `supabase.secret.dashboard.secretRef`           | `username`, `password`                          |
+| Supabase auth SMTP             | `supabase.secret.smtp.secretRef`                | `username`, `password`                          |
+| Supabase Realtime              | `supabase.secret.realtime.secretRef`            | `SECRET_KEY_BASE`, `DB_ENC_KEY`                 |
+| ClickHouse                     | `clickhouse.auth.existingSecret`                | `admin-password`                                |
+| FerretDB                       | `clickstack.ferretdb.auth.existingSecret`       | `password`                                      |
+| Image pull                     | `global.registry.existingPullSecret`            | `.dockerconfigjson` (defaults to a Secret built from `global.licenseKey`) |
+
+**Path A — sync from your secrets platform (recommended).** Use the
+[External Secrets Operator](https://external-secrets.io) to sync vault entries
+into the Secrets above. Copy-paste manifests with per-cloud identity wiring
+(IRSA / EKS Pod Identity, AKS Workload Identity, GKE Workload Identity) live in
+[`examples/external-secrets/`](examples/external-secrets/). ESO also supports
+HashiCorp Vault, 1Password, Doppler, and most other platforms with the same
+`ExternalSecret` shape. If ESO is not already managed at cluster scope, set
+`externalSecrets.installOperator: true` to install a namespace-scoped operator
+whose images pull from the mirrored `docker.io/rulebricks/*` registry.
+
+**Path B — Secrets Store CSI driver.** The managed add-ons (AKS
+`azureKeyvaultSecretsProvider`, EKS ASCP, GKE Secret Manager provider) also
+work, but they deliver secrets as mounted files: you must enable their
+sync-as-Kubernetes-Secret feature and keep at least one pod mounting the CSI
+volume for the sync to happen. ESO avoids both caveats, so prefer Path A unless
+your platform mandates CSI.
+
+**Path C — no vault.** Copy each relevant section of
+[`.secrets.example`](.secrets.example) into its own env file, fill in values,
+and create the Secrets directly:
+
+```bash
+kubectl create secret generic rulebricks-app -n rulebricks \
+  --from-env-file=app.env
+```
+
+Then point the seams at your Secret names in values:
+
+```yaml
+global:
+  secrets:
+    secretRef: rulebricks-app
+supabase:
+  secret:
+    jwt: { secretRef: rulebricks-supabase-jwt }
+    db: { secretRef: rulebricks-supabase-db }
+```
+
+Caveats: the chart-created FerretDB Secret stores its password under
+`ferretdb-password`, while the BYO seam defaults to `password`
+(`clickstack.ferretdb.auth.existingSecretKey` overrides it). Do not name a BYO
+ClickHouse Secret `<release>-clickhouse-credentials` — that exact name stays
+chart-managed and a synced Secret would fight Helm for ownership; when
+overriding `clickhouse.auth.existingSecret`, also set
+`rulebricks.app.clickhouse.existingSecret` and (with ClickStack)
+`clickstack.clickhouse.existingSecret` to the same name.
+
+**Migration from `externalSecrets.*` values (pre-2026 charts).** Older chart
+versions documented `externalSecrets.enabled` / `remoteRefs` /
+`targetSecretName` for overlay workflows, and one interim version rendered an
+Azure-only SecretStore/ExternalSecret from them. Those values are now ignored
+(only `installOperator` remains). Move any ExternalSecret definitions into
+manifests you apply yourself — see `examples/external-secrets/azure-key-vault.yaml`
+for the equivalent of the removed Azure template.
+
+</details>
 
 <details>
 <summary><strong>Monitoring and Remote Write</strong></summary>

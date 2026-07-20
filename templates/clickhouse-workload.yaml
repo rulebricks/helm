@@ -101,6 +101,23 @@ spec:
                 secretKeyRef:
                   name: {{ include "rulebricks.clickhouse.credentialSecret" . }}
                   key: {{ $ch.auth.existingSecretKey | default "admin-password" }}
+            {{- $storage := .Values.global.storage | default dict }}
+            {{- $s3Secret := dig "s3" "existingSecret" "name" "" $storage }}
+            {{- if and (eq ($storage.provider | default "s3") "s3") $s3Secret }}
+            {{- /* Static AWS credentials escape hatch: the decision-log named
+                 collection sets use_environment_credentials=1, which reads
+                 these env vars. Prefer IRSA/Pod Identity (leave unset). */}}
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3Secret }}
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $s3Secret }}
+                  key: AWS_SECRET_ACCESS_KEY
+            {{- end }}
             {{- if not $ch.persistence.enabled }}
             {{- /* Stateless mode runs the entrypoint's initdb flow on every fresh
                  data dir (pod reschedule loses the emptyDir). The entrypoint's

@@ -1,0 +1,161 @@
+# =============================================================================
+# Azure Key Vault -> Rulebricks via External Secrets Operator
+#
+# Client-applied manifests (kubectl apply -f) - the Rulebricks chart does NOT
+# render these. Prerequisites:
+#
+#   1. External Secrets Operator installed - either your own cluster-wide
+#      install, or set `externalSecrets.installOperator: true` in the Rulebricks
+#      values for a namespace-scoped operator with mirrored images.
+#   2. AKS Workload Identity enabled on the cluster, and a managed identity
+#      with the "Key Vault Secrets User" role on the vault plus a federated
+#      credential for the ServiceAccount below
+#      (system:serviceaccount:rulebricks:rulebricks-secrets-reader).
+#      The Rulebricks CLI's Azure Bicep (cluster-setup/azure) provisions the
+#      vault, identity, and role assignment - use its outputs for the
+#      placeholders below.
+#   3. Key Vault secret names may not contain underscores; store one vault
+#      entry per Kubernetes Secret key using dashed names and map them in the
+#      data[] blocks below, e.g.
+#        az keyvault secret set --vault-name <VAULT> \
+#          --name rulebricks-app-license-key --value '...'
+#
+# Then point the chart at the synced Secrets in your Rulebricks values:
+#
+#   global:
+#     secrets:
+#       secretRef: rulebricks-app
+#     supabase:
+#       secretRef: rulebricks-supabase-jwt   # browser anon key seam
+#   supabase:
+#     secret:
+#       jwt: { secretRef: rulebricks-supabase-jwt }
+#       db:  { secretRef: rulebricks-supabase-db }
+#   clickhouse:
+#     auth:
+#       existingSecret: rulebricks-clickhouse
+#   rulebricks:
+#     app:
+#       clickhouse:
+#         existingSecret: rulebricks-clickhouse
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rulebricks-secrets-reader
+  namespace: rulebricks
+  annotations:
+    azure.workload.identity/client-id: <MANAGED_IDENTITY_CLIENT_ID>
+    azure.workload.identity/tenant-id: <TENANT_ID>
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: rulebricks-azure-key-vault
+  namespace: rulebricks
+spec:
+  provider:
+    azurekv:
+      authType: WorkloadIdentity
+      vaultUrl: https://<VAULT_NAME>.vault.azure.net
+      serviceAccountRef:
+        name: rulebricks-secrets-reader
+---
+# Application secret (.secrets.example section 1) - always required.
+# Key Vault has flat string entries, so map each Kubernetes Secret key to its
+# vault entry explicitly. Drop the optional keys your deployment doesn't use.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: rulebricks-app
+  namespace: rulebricks
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: rulebricks-azure-key-vault
+    kind: SecretStore
+  target:
+    name: rulebricks-app
+    creationPolicy: Owner
+  data:
+    - secretKey: LICENSE_KEY
+      remoteRef: { key: rulebricks-app-license-key }
+    - secretKey: EMAIL
+      remoteRef: { key: rulebricks-app-email }
+    - secretKey: SMTP_USER
+      remoteRef: { key: rulebricks-app-smtp-user }
+    - secretKey: SMTP_PASS
+      remoteRef: { key: rulebricks-app-smtp-pass }
+    - secretKey: SUPABASE_ANON_KEY
+      remoteRef: { key: rulebricks-app-supabase-anon-key }
+    - secretKey: SUPABASE_SERVICE_KEY
+      remoteRef: { key: rulebricks-app-supabase-service-key }
+    - secretKey: SUPABASE_SECRET_KEY
+      remoteRef: { key: rulebricks-app-supabase-service-key }
+---
+# Supabase JWT (.secrets.example section 2) - self-hosted Supabase only.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: rulebricks-supabase-jwt
+  namespace: rulebricks
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: rulebricks-azure-key-vault
+    kind: SecretStore
+  target:
+    name: rulebricks-supabase-jwt
+    creationPolicy: Owner
+  data:
+    - secretKey: secret
+      remoteRef: { key: rulebricks-supabase-jwt-secret }
+    - secretKey: anonKey
+      remoteRef: { key: rulebricks-supabase-jwt-anon-key }
+    - secretKey: serviceKey
+      remoteRef: { key: rulebricks-supabase-jwt-service-key }
+---
+# Postgres credentials (.secrets.example section 3) - self-hosted Supabase only.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: rulebricks-supabase-db
+  namespace: rulebricks
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: rulebricks-azure-key-vault
+    kind: SecretStore
+  target:
+    name: rulebricks-supabase-db
+    creationPolicy: Owner
+  data:
+    - secretKey: username
+      remoteRef: { key: rulebricks-supabase-db-username }
+    - secretKey: password
+      remoteRef: { key: rulebricks-supabase-db-password }
+    - secretKey: database
+      remoteRef: { key: rulebricks-supabase-db-database }
+---
+# ClickHouse admin password (.secrets.example section 8).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: rulebricks-clickhouse
+  namespace: rulebricks
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: rulebricks-azure-key-vault
+    kind: SecretStore
+  target:
+    name: rulebricks-clickhouse
+    creationPolicy: Owner
+  data:
+    - secretKey: admin-password
+      remoteRef: { key: rulebricks-clickhouse-admin-password }
+# -----------------------------------------------------------------------------
+# Remaining optional Secrets (.secrets.example sections 4-7 and 9: db-bootstrap,
+# dashboard, smtp, realtime, ferretdb): duplicate any ExternalSecret above and
+# adjust metadata.name, target.name, and the data[] mappings per section.
+# -----------------------------------------------------------------------------

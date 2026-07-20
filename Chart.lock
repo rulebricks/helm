@@ -32,8 +32,11 @@ dependencies:
 - name: external-dns
   repository: https://kubernetes-sigs.github.io/external-dns/
   version: 1.21.1
+- name: external-secrets
+  repository: https://charts.external-secrets.io
+  version: 2.7.0
 - name: cluster-autoscaler
   repository: https://kubernetes.github.io/autoscaler
   version: 9.53.0
-digest: sha256:2b7c4f25770750b8d71b31d3b91874a7853d3c676e1ff1c8bb2eaee04e685d39
-generated: "2026-07-17T00:01:22.875951-07:00"
+digest: sha256:894b90b2362eee7b18d2daecfdfadb7b25d58e79eb26c3f3405f07c064f97d24
+generated: "2026-07-17T12:46:30.311964-07:00"

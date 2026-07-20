@@ -78,13 +78,10 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.secret.db.secretRef }}
-                  name: {{ .Values.secret.db.secretRef }}
-                  key: {{ .Values.secret.db.secretRefKey.password | default "password" }}
-                  {{- else }}
-                  name: {{ include "supabase.secret.db" . }}
-                  key: password
-                  {{- end }}
+                  # Resolved via the shared helper so externalDatabase.secretRef
+                  # takes precedence, matching every other Supabase component.
+                  name: {{ include "supabase.db.secretName" . }}
+                  key: {{ include "supabase.db.secretKey" (dict "root" . "field" "password" "default" "password") }}
             - name: SUPABASE_ANON_KEY
               valueFrom:
                 secretKeyRef:

@@ -21,6 +21,22 @@ Migration Strategy Options (migrations.strategy):
 {{- $emailTemplates := ($supabaseEmails.templates | default dict) -}}
 {{- if .Values.supabase.enabled -}}
 {{- $strategy := .Values.migrations.strategy | default "hook" }}
+{{- /* BYO database Secret resolution: externalDatabase.secretRef wins over
+     secret.db.secretRef (mirrors the supabase subchart's supabase.db.secretName
+     helper, re-derived here with parent-chart value paths). Empty when neither
+     seam is set, in which case the chart-managed <release>-supabase-db Secret
+     and inline values are used. */}}
+{{- $sbDb := .Values.supabase.secret.db | default dict }}
+{{- $extDb := .Values.supabase.externalDatabase | default dict }}
+{{- $dbSecretName := "" }}
+{{- $dbSecretKeys := dict }}
+{{- if and $extDb.enabled $extDb.secretRef }}
+  {{- $dbSecretName = $extDb.secretRef }}
+  {{- $dbSecretKeys = $extDb.secretRefKey | default dict }}
+{{- else if $sbDb.secretRef }}
+  {{- $dbSecretName = $sbDb.secretRef }}
+  {{- $dbSecretKeys = $sbDb.secretRefKey | default dict }}
+{{- end }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -76,7 +92,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       imagePullSecrets:
-        - name: {{ .Release.Name }}-regcred
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
       initContainers:
         - name: extract-assets
           # Use the configured migration image or fallback to app image
@@ -165,13 +181,28 @@ spec:
               {{- if .Values.supabase.db.enabled }}
               # Internal Supabase DB service
               value: "{{ .Release.Name }}-supabase-db"
-              {{- else }}
+              {{- else if .Values.migrations.externalDb.host }}
               # External PostgreSQL - use configured host
-              value: {{ .Values.migrations.externalDb.host | default (index .Values.supabase "auth" "environment" "DB_HOST" | default "") | quote }}
+              value: {{ .Values.migrations.externalDb.host | quote }}
+              {{- else if and $dbSecretName $dbSecretKeys.host }}
+              # External PostgreSQL - host sourced from the BYO database Secret
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $dbSecretName }}
+                  key: {{ $dbSecretKeys.host }}
+              {{- else }}
+              value: {{ index .Values.supabase "auth" "environment" "DB_HOST" | default "" | quote }}
               {{- end }}
             - name: DB_PORT
               {{- if .Values.supabase.db.enabled }}
               value: "5432"
+              {{- else if and $dbSecretName $dbSecretKeys.port }}
+              {{- /* Opt-in Secret port key wins: migrations.externalDb.port has a
+                   non-empty default ("5432") that would otherwise always shadow it. */}}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $dbSecretName }}
+                  key: {{ $dbSecretKeys.port }}
               {{- else }}
               value: {{ .Values.migrations.externalDb.port | default "5432" | quote }}
               {{- end }}
@@ -181,16 +212,33 @@ spec:
               # db-role-init sidecar syncs the shared secret password onto it (the
               # baked-in postgres role's password is never reconciled).
               value: {{ .Values.supabase.db.superuserName | default "supabase_admin" | quote }}
+              {{- else if $dbSecretName }}
+              # External managed Postgres: role sourced from the BYO database Secret.
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $dbSecretName }}
+                  key: {{ $dbSecretKeys.username | default "username" }}
               {{- else }}
               # External managed Postgres: the app/owner role (e.g. the RDS master).
               value: {{ .Values.supabase.secret.db.username | default "postgres" | quote }}
               {{- end }}
             - name: DB_NAME
+              {{- if and (not .Values.supabase.db.enabled) $dbSecretName }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $dbSecretName }}
+                  key: {{ $dbSecretKeys.database | default "database" }}
+              {{- else }}
               value: {{ .Values.supabase.secret.db.database | default "postgres" | quote }}
+              {{- end }}
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  {{- if .Values.supabase.db.enabled }}
+                  {{- if and .Values.supabase.db.enabled $dbSecretName }}
+                  # Bundled DB with a BYO database Secret (supabase.secret.db.secretRef)
+                  name: {{ $dbSecretName }}
+                  key: {{ $dbSecretKeys.password | default "password" }}
+                  {{- else if .Values.supabase.db.enabled }}
                   # Internal Supabase chart creates secret named: <release>-supabase-db
                   name: {{ .Release.Name }}-supabase-db
                   key: password
@@ -198,6 +246,10 @@ spec:
                   # External secret reference
                   name: {{ .Values.migrations.externalDb.existingSecret }}
                   key: {{ .Values.migrations.externalDb.existingSecretKey | default "password" }}
+                  {{- else if $dbSecretName }}
+                  # BYO database Secret (externalDatabase.secretRef / secret.db.secretRef)
+                  name: {{ $dbSecretName }}
+                  key: {{ $dbSecretKeys.password | default "password" }}
                   {{- else }}
                   # Fall back to supabase secret
                   name: {{ .Release.Name }}-supabase-db
@@ -285,7 +337,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       imagePullSecrets:
-        - name: {{ .Release.Name }}-regcred
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
       initContainers:
         - name: extract-assets
           # Use the configured migration image or fallback to app image

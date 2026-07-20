@@ -125,7 +125,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ include "rulebricks-chart.app.secretName" . | trim }}
-                  key: EMAIL
+                  key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "email" "default" "EMAIL") | trim }}
             # SMTP credentials (from secret)
             - name: SMTP_USER
               valueFrom:
@@ -143,6 +143,17 @@ spec:
                 secretKeyRef:
                   name: {{ include "rulebricks-chart.app.secretName" . | trim }}
                   key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "supabaseServiceKey" "default" "SUPABASE_SERVICE_KEY") | trim }}
+            {{- /* External Auth Token Passthrough JWT secret. Normally arrives
+                 via envFrom under the literal JWT_SECRET key; this explicit env
+                 (which wins over envFrom) applies the secretRefKeys.jwtSecret
+                 mapping for BYO Secrets using a different key name. */ -}}
+            {{- if and .Values.global .Values.global.externalAuth .Values.global.externalAuth.enabled .Values.global.secrets .Values.global.secrets.secretRef }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rulebricks-chart.app.secretName" . | trim }}
+                  key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "jwtSecret" "default" "JWT_SECRET") | trim }}
+            {{- end }}
             {{- /* Public anon key runtime seam: when global.supabase.secretRef
                  names an existing Secret, inject the browser-facing key from it
                  (key per global.supabase.secretRefKey.anonKey, same pattern as
@@ -217,11 +228,12 @@ spec:
             - name: REDIS_URL
               value: {{ include "rulebricks-chart.redis.connectionStringAuth" . | quote }}
             {{- end }}
+            {{- $chApp := .Values.app.clickhouse | default dict }}
             - name: CLICKHOUSE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ printf "%s-clickhouse-credentials" .Release.Name | trunc 63 | trimSuffix "-" }}
-                  key: admin-password
+                  name: {{ $chApp.existingSecret | default (printf "%s-clickhouse-credentials" .Release.Name | trunc 63 | trimSuffix "-") }}
+                  key: {{ $chApp.existingSecretKey | default "admin-password" }}
             {{- with .Values.app.logging.kafkaSasl }}
             {{- if .existingSecret }}
             # Optional external Kafka SASL credentials secret

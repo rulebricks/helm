@@ -139,6 +139,21 @@ spec:
                   value: "true"
                 - name: RCLONE_CONFIG_DEST_REGION
                   value: {{ $region | quote }}
+                {{- $s3Secret := dig "s3" "existingSecret" "name" "" $storage }}
+                {{- if $s3Secret }}
+                # Static AWS credentials escape hatch; rclone env_auth picks
+                # these up. Prefer IRSA/Pod Identity (leave the secret unset).
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $s3Secret }}
+                      key: AWS_ACCESS_KEY_ID
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $s3Secret }}
+                      key: AWS_SECRET_ACCESS_KEY
+                {{- end }}
                 {{- end }}
               command:
                 - /bin/sh

@@ -1,5 +1,5 @@
 # =============================================================================
-# images/manifest.yaml — A single source of truth for every docker.io/rulebricks/*
+# Single source of truth for every docker.io/rulebricks/* image.
 # image the chart pulls. Mirrors from DHI wherever possible.
 #
 # Entry schema (one per image):
@@ -27,7 +27,7 @@ images:
   - { name: kafka-exporter, kind: mirror, source: dhi.io/kafka-exporter, tag: "1.9.0-debian13", auth: dhi, digest: "" }
   - { name: opentelemetry-collector, kind: mirror, source: dhi.io/opentelemetry-collector, tag: "0.155.0-debian13-contrib", auth: dhi, digest: "" }
 
-  # --- Strimzi (Kafka operator + broker) — DHI 1.0.1 / Kafka 4.2.0 ---
+  # Strimzi operator and Kafka broker: DHI 1.0.1 / Kafka 4.2.0
   - { name: strimzi-operator, kind: mirror, source: dhi.io/strimzi-operator, tag: "1.0.1-debian13", auth: dhi, digest: "" }
   - { name: strimzi-kafka, kind: mirror, source: dhi.io/strimzi-kafka, tag: "1.0.1-debian13-kafka-4.2.0", auth: dhi, digest: "" }
   # Strimzi auxiliary images, referenced by the cluster-operator's STRIMZI_DEFAULT_*
@@ -64,6 +64,7 @@ images:
   - { name: cert-manager-acmesolver, kind: mirror, source: dhi.io/cert-manager-acmesolver, tag: "1.20.3-debian13", auth: dhi, digest: "" }
   - { name: vector, kind: mirror, source: dhi.io/vector, tag: "0.56.0-debian13", auth: dhi, digest: "" }
   - { name: external-dns, kind: mirror, source: dhi.io/external-dns, tag: "0.21.0-debian13", auth: dhi, digest: "" }
+  - { name: external-secrets, kind: mirror, source: ghcr.io/external-secrets/external-secrets, tag: "v2.7.0", auth: none, digest: "" }
   - { name: cluster-autoscaler, kind: mirror, source: dhi.io/kubernetes-cluster-autoscaler, tag: "1.34.3-debian13", auth: dhi, digest: "" }
 
   # --- Tier-2 dormant/optional sub-images (only pulled when a specific feature
@@ -98,13 +99,13 @@ images:
   - { name: valkey-admin, kind: mirror, source: docker.io/valkey/valkey-admin, tag: "1.0.2", auth: none, digest: "" }
   - { name: serverless-redis-http, kind: mirror, source: docker.io/hiett/serverless-redis-http, tag: "0.0.10", auth: none, digest: "" }
 
-  # --- ClickStack (observability) — no DHI equivalent ---
+  # ClickStack observability images with no DHI equivalent
   - { name: hyperdx, kind: mirror, source: docker.hyperdx.io/hyperdx/hyperdx, tag: "2.29.0", auth: none, digest: "" }
   - { name: clickstack-otel-collector, kind: mirror, source: docker.clickhouse.com/clickhouse/clickstack-otel-collector, tag: "2.29.0", auth: none, digest: "" }
   - { name: ferretdb, kind: mirror, source: ghcr.io/ferretdb/ferretdb, tag: "2.7.0", auth: none, digest: "" }
   - { name: postgres-documentdb, kind: mirror, source: ghcr.io/ferretdb/postgres-documentdb, tag: "17-0.107.0-ferretdb-2.7.0", auth: none, digest: "" }
 
-  # --- Supabase — customized upstream builds (no DHI equivalent) ---
+  # Supabase customized upstream builds with no DHI equivalent
   - { name: supabase-postgres, kind: mirror, source: docker.io/supabase/postgres, tag: "17.6.1.142", auth: none, digest: "" }
   - { name: supabase-studio, kind: mirror, source: docker.io/supabase/studio, tag: "2026.07.06-sha-66cf431", auth: none, digest: "" }
   - { name: supabase-gotrue, kind: mirror, source: docker.io/supabase/gotrue, tag: "v2.192.0", auth: none, digest: "" }
@@ -115,7 +116,7 @@ images:
   # chart-mounted declarative config (our kong deployment does the same).
   - { name: supabase-kong, kind: mirror, source: docker.io/kong/kong, tag: "3.9.3", auth: none, digest: "" }
   # curljq: helm-test hook image (bash+curl+jq). Built in-repo on the official
-  # Alpine base (the unlicensed kdevup/curljq mirror was dropped — no
+  # Alpine base. The unlicensed kdevup/curljq mirror was dropped because it had no
   # redistribution rights). DHI runtime images ship no shell and their -dev
   # variants fight apt installs, so plain Alpine is the pragmatic base here.
   - { name: curljq, kind: build, context: images/curljq, base: docker.io/library/alpine:3.22, tag: "1.0.0", auth: none, digest: "" }
