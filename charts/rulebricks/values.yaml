@@ -417,7 +417,7 @@ cache:
     image:
       registry: docker.io
       repository: rulebricks/redis-exporter
-      tag: "1.86.0-debian13"
+      tag: "1.87.0-debian13"
       pullPolicy: IfNotPresent
     service:
       port: 9121

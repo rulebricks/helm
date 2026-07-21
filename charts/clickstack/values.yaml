@@ -15,7 +15,7 @@ global:
   # Standalone-install fallback; the parent stack chart overrides this via its
   # own global.images (and global.imageDigests pins the digest).
   images:
-    busybox: { registry: docker.io, repository: rulebricks/busybox, tag: "1.37.0-debian13" }
+    busybox: { registry: docker.io, repository: rulebricks/busybox, tag: "1.38.0-alpine" }
 
 clickhouse:
   database: otel

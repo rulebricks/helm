@@ -85,7 +85,7 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   kafka:
-    version: {{ $k.version | default "4.2.0" | quote }}
+    version: {{ $k.version | default "4.2.1" | quote }}
     image: {{ include "rulebricks.image" (dict "root" $ "image" $k.image "name" "strimzi-kafka") | quote }}
     listeners:
       - name: plain

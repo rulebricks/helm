@@ -706,7 +706,7 @@ kong:
     registry: docker.io
     repository: rulebricks/supabase-kong
     pullPolicy: IfNotPresent
-    tag: "3.9.3"
+    tag: "3.9.3-debian13"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
