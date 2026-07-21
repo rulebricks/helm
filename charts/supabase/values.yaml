@@ -539,7 +539,7 @@ realtime:
     registry: docker.io
     repository: rulebricks/supabase-realtime
     pullPolicy: IfNotPresent
-    tag: "v2.112.4"
+    tag: "v2.117.0"
   imagePullSecrets: []
   nameOverride: ""
   fullnameOverride: ""
