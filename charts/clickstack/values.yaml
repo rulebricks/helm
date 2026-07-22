@@ -101,7 +101,7 @@ collector:
   image:
     registry: docker.io
     repository: rulebricks/clickstack-otel-collector
-    tag: "2.29.0"
+    tag: "2.31.0-r1"
     pullPolicy: IfNotPresent
   memoryLimitMiB: 800
   gateway:

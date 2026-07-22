@@ -373,7 +373,10 @@ cache:
     image:
       registry: docker.io
       repository: rulebricks/valkey-admin
-      tag: "1.0.2"
+      # Upstream image with a Debian security patch layer, refreshed runtime
+      # deps, and npm CLI tooling removed (images/valkey-admin in the infra
+      # repo); -rN increments on rebuilds.
+      tag: "1.0.2-r1"
       pullPolicy: IfNotPresent
     replicas: 1
     # "internal" renders only a ClusterIP service. Operators can use

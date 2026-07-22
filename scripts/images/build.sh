@@ -43,11 +43,12 @@ main() {
   require_manifest
   manifest_has "${name}" || die "no manifest entry named '${name}' in ${MANIFEST}"
 
-  local kind tag context base
+  local kind tag context base ref
   kind="$(manifest_field "${name}" kind)"
   tag="$(manifest_field "${name}" tag)"
   context="$(manifest_field "${name}" context)"
   base="$(manifest_field "${name}" base)"
+  ref="$(manifest_field "${name}" ref)"
 
   [ "${kind}" = "build" ] || die "entry '${name}' has kind='${kind}', expected 'build' (use ${kind}.sh)"
   [ -n "${tag}" ] || die "entry '${name}' is missing required field: tag"
@@ -65,6 +66,9 @@ main() {
   # 'base' (DHI base image) is optional; pass it as a build-arg so the Dockerfile
   # can do `ARG BASE_IMAGE` / `FROM ${BASE_IMAGE}` if it wants to.
   [ -n "${base}" ] && build_args+=(--build-arg "BASE_IMAGE=${base}")
+  # 'ref' (pinned upstream commit, source rebuilds only) -> UPSTREAM_REF;
+  # tag minus the -rN suffix -> UPSTREAM_VERSION (for images that stamp it).
+  [ -n "${ref}" ] && build_args+=(--build-arg "UPSTREAM_REF=${ref}" --build-arg "UPSTREAM_VERSION=${tag%-r[0-9]*}")
 
   echo "==> build ${name}: context=${context} -> ${target} (${PLATFORMS})"
   docker buildx build \

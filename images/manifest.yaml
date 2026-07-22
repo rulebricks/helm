@@ -12,6 +12,10 @@
 #            the docker.io/rulebricks/* TARGET is always logged in)
 #   target:  (optional) explicit repo path when entries share one repo under
 #            different tags (postgres15/16/17 -> rulebricks/postgres)
+#   ref:     (kind: build, optional) pinned upstream commit/tag for source
+#            rebuilds; injected as ARG UPSTREAM_REF by scripts/images/build.sh.
+#            Bumping upstream = update ref + tag here plus the chart values
+#            pin (see images/README.md for the per-archetype playbook)
 #   digest:  (written back by CI; never hand-edit)
 #
 # This file ships inside the published chart tarball and the
@@ -98,45 +102,41 @@ images:
   - { name: busybox, kind: mirror, source: dhi.io/busybox, tag: "1.38.0-alpine", auth: dhi, digest: "" }
   # pause: k8s infra image, no DHI equivalent -> official registry.k8s.io
   - { name: pause, kind: mirror, source: registry.k8s.io/pause, tag: "3.9", auth: none, digest: "" }
-  # node: the managed-supabase setup job needs a shell + apk (installs curl/CA
-  # certs, npm-installs the Supabase CLI at runtime); DHI node images ship no
-  # package manager -> official upstream alpine.
-  - { name: node24, kind: mirror, source: docker.io/library/node, tag: "24-alpine", auth: none, target: rulebricks/node, digest: "" }
+  # node24: setup job needs shell/apk/npm at runtime (no DHI fit); bundled npm
+  # refreshed. See images/node24/.
+  - { name: node24, kind: build, context: images/node24, base: docker.io/library/node:24-alpine, tag: "24-alpine-r1", auth: none, target: rulebricks/node, digest: "" }
   - { name: rclone, kind: mirror, source: docker.io/rclone/rclone, tag: "1.74.4", auth: none, digest: "" }
-  # Rebuilt from unmodified upstream source (tag v0.4.3) on a current Go
-  # toolchain with re-resolved modules and the hardened DHI alpine-base
-  # runtime; upstream's binary carries fixed Go stdlib/x-module CVEs that only
-  # a recompile clears. See images/kafka-proxy/.
-  - { name: kafka-proxy, kind: build, context: images/kafka-proxy, base: dhi.io/alpine-base:3.22, tag: "0.4.3-r1", auth: dhi, digest: "" }
-  - { name: valkey-admin, kind: mirror, source: docker.io/valkey/valkey-admin, tag: "1.0.2", auth: none, digest: "" }
-  # Rebuilt from unmodified upstream source (tag 0.0.10) on the hardened DHI
-  # Erlang/OTP runtime: upstream's last release is 2021 and its OTP-24 base
-  # carries the CISA KEV CVE-2025-32433. See images/serverless-redis-http/.
-  - { name: serverless-redis-http, kind: build, context: images/serverless-redis-http, base: dhi.io/erlang-otp:28-alpine3.23, tag: "0.0.10-r1", auth: dhi, digest: "" }
+  # Source rebuild on current Go toolchain. See images/kafka-proxy/.
+  - { name: kafka-proxy, kind: build, context: images/kafka-proxy, base: dhi.io/alpine-base:3.22, ref: "317f1d7aca20d80a341a11235d615b185857d9d6", tag: "0.4.3-r1", auth: dhi, digest: "" }
+  # Patch layer: OS upgrade + dep refresh + npm tooling removed. See images/valkey-admin/.
+  - { name: valkey-admin, kind: build, context: images/valkey-admin, base: docker.io/valkey/valkey-admin:1.0.2, tag: "1.0.2-r1", auth: none, digest: "" }
+  # Source rebuild on current Erlang/OTP (clears CISA KEV CVE-2025-32433). See images/serverless-redis-http/.
+  - { name: serverless-redis-http, kind: build, context: images/serverless-redis-http, base: dhi.io/erlang-otp:28-alpine3.23, ref: "794c5a372fa3997e08320250235f32e5a86338a3", tag: "0.0.10-r1", auth: dhi, digest: "" }
 
   # ClickStack observability images with no DHI equivalent
   - { name: hyperdx, kind: mirror, source: docker.hyperdx.io/hyperdx/hyperdx, tag: "2.31.0", auth: none, digest: "" }
-  - { name: clickstack-otel-collector, kind: mirror, source: docker.clickhouse.com/clickhouse/clickstack-otel-collector, tag: "2.31.0", auth: none, digest: "" }
-  - { name: ferretdb, kind: mirror, source: ghcr.io/ferretdb/ferretdb, tag: "2.7.0", auth: none, digest: "" }
-  # FerretDB's image with a Debian security patch layer (apt-get upgrade):
-  # upstream publishes only alongside FerretDB releases, so its base ages
-  # between pairs. Bump `base` + `tag` together when a new upstream pair
-  # ships. See images/postgres-documentdb/.
+  # Source rebuild, all Go binaries recompiled. See images/clickstack-otel-collector/.
+  - { name: clickstack-otel-collector, kind: build, context: images/clickstack-otel-collector, base: docker.io/library/alpine:3.23, ref: "4b1aefbae22ac02bffbdf7fca932f43095d3d8d6", tag: "2.31.0-r1", auth: none, digest: "" }
+  # Source rebuild on current Go toolchain. See images/ferretdb/.
+  - { name: ferretdb, kind: build, context: images/ferretdb, base: dhi.io/alpine-base:3.22, ref: "27653503a28b0d2f2a09d7105887edd3a8af1060", tag: "2.7.0-r1", auth: dhi, digest: "" }
+  # Patch layer: OS upgrade + gosu recompile. See images/postgres-documentdb/.
   - { name: postgres-documentdb, kind: build, context: images/postgres-documentdb, base: ghcr.io/ferretdb/postgres-documentdb:17-0.107.0-ferretdb-2.7.0, tag: "17-0.107.0-ferretdb-2.7.0-r1", auth: none, digest: "" }
 
   # Supabase customized upstream builds with no DHI equivalent
   - { name: supabase-postgres, kind: mirror, source: docker.io/supabase/postgres, tag: "17.6.1.142", auth: none, digest: "" }
-  - { name: supabase-studio, kind: mirror, source: docker.io/supabase/studio, tag: "2026.07.20-sha-74a0848", auth: none, digest: "" }
-  - { name: supabase-gotrue, kind: mirror, source: docker.io/supabase/gotrue, tag: "v2.193.1", auth: none, digest: "" }
+  # Patch layer: OS upgrade + unused package purge + npm/pnpm tooling removed. See images/supabase-studio/.
+  - { name: supabase-studio, kind: build, context: images/supabase-studio, base: docker.io/supabase/studio:2026.07.20-sha-74a0848, tag: "2026.07.20-sha-74a0848-r1", auth: none, digest: "" }
+  # Source rebuild on current Go toolchain. See images/supabase-gotrue/.
+  - { name: supabase-gotrue, kind: build, context: images/supabase-gotrue, base: docker.io/library/alpine:3, ref: "6b7b8e6033c988905fa56e5534b0112ad193aba3", tag: "v2.193.1-r1", auth: none, digest: "" }
   - { name: supabase-postgrest, kind: mirror, source: docker.io/postgrest/postgrest, tag: "v14.14", auth: none, digest: "" }
-  - { name: supabase-realtime, kind: mirror, source: docker.io/supabase/realtime, tag: "v2.117.0", auth: none, digest: "" }
-  - { name: supabase-postgres-meta, kind: mirror, source: docker.io/supabase/postgres-meta, tag: "v0.96.6", auth: none, digest: "" }
+  # Source rebuild (mix.lock frozen) on patched OTP + Debian 13. See images/supabase-realtime/.
+  - { name: supabase-realtime, kind: build, context: images/supabase-realtime, base: docker.io/library/debian:trixie-20260610-slim, ref: "e14e783c6ae423ee77ceb3b0dcdaf4eedca410f7", tag: "v2.117.0-r1", auth: none, digest: "" }
+  # Patch layer: OS upgrade + purge + fast-uri refresh + npm tooling removed. See images/supabase-postgres-meta/.
+  - { name: supabase-postgres-meta, kind: build, context: images/supabase-postgres-meta, base: docker.io/supabase/postgres-meta:v0.96.6, tag: "v0.96.6-r1", auth: none, digest: "" }
   # supabase/kong was deprecated; supabase self-hosted uses official kong with
   # chart-mounted declarative config (our kong deployment does the same). DHI now
   # carries kong 3.9.3, so mirror the hardened build (previously docker.io/kong/kong).
   - { name: supabase-kong, kind: mirror, source: dhi.io/kong, tag: "3.9.3-debian13", auth: dhi, digest: "" }
-  # curljq: helm-test hook image (bash+curl+jq). Built in-repo on the official
-  # Alpine base. The unlicensed kdevup/curljq mirror was dropped because it had no
-  # redistribution rights). DHI runtime images ship no shell and their -dev
-  # variants fight apt installs, so plain Alpine is the pragmatic base here.
-  - { name: curljq, kind: build, context: images/curljq, base: docker.io/library/alpine:3.22, tag: "1.0.0", auth: none, digest: "" }
+  # curljq: helm-test hook image (bash+curl+jq), replaces the unlicensed
+  # kdevup/curljq. See images/curljq/.
+  - { name: curljq, kind: build, context: images/curljq, base: docker.io/library/alpine:3.24, tag: "1.0.1", auth: none, digest: "" }

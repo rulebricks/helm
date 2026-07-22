@@ -29,7 +29,7 @@ global:
   # Shared leaf images (init/hook/test utilities) rendered through the image helper.
   images:
     postgres17: { registry: docker.io, repository: rulebricks/postgres, tag: "17-debian13" }
-    node24: { registry: docker.io, repository: rulebricks/node, tag: "24-alpine" }
+    node24: { registry: docker.io, repository: rulebricks/node, tag: "24-alpine-r1" }
     rclone: { registry: docker.io, repository: rulebricks/rclone, tag: "1.74.4" }
     busybox: { registry: docker.io, repository: rulebricks/busybox, tag: "1.38.0-alpine" }
     pause: { registry: docker.io, repository: rulebricks/pause, tag: "3.9" }
@@ -1686,7 +1686,7 @@ clickstack:
     image:
       registry: docker.io
       repository: rulebricks/clickstack-otel-collector
-      tag: "2.31.0"
+      tag: "2.31.0-r1"
     memoryLimitMiB: 800
     gateway:
       replicas: 1
@@ -1714,7 +1714,10 @@ clickstack:
     image:
       registry: docker.io
       repository: rulebricks/ferretdb
-      tag: "2.7.0"
+      # Rebuilt from unmodified upstream source on a current Go toolchain and
+      # hardened runtime (images/ferretdb in this repo); -rN increments on
+      # rebuilds.
+      tag: "2.7.0-r1"
     postgresImage:
       registry: docker.io
       repository: rulebricks/postgres-documentdb
