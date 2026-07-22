@@ -44,6 +44,13 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # The hardened bridge image runs as nonroot (uid 65532) but the app
+      # listens on port 80; allow unprivileged low-port binds for this pod.
+      # net.ipv4.ip_unprivileged_port_start is a Kubernetes-safe sysctl.
+      securityContext:
+        sysctls:
+          - name: net.ipv4.ip_unprivileged_port_start
+            value: "0"
       containers:
         - name: serverless-redis-http
           # pinned; upstream is unmaintained (last release 2021) - replace if possible

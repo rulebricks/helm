@@ -1460,9 +1460,10 @@ kafkaBridge:
   brokers: ""
   # Local port the proxy listens on; Vector points KAFKA_BOOTSTRAP_SERVERS here.
   localPort: 19092
-  # kafka-proxy image used for the AWS MSK IAM sidecar (self-mirrored to rulebricks/*;
-  # the CLI applies global.imageRegistry to the vector sidecar that runs it).
-  image: "docker.io/rulebricks/kafka-proxy:0.4.3"
+  # kafka-proxy image used for the AWS MSK IAM sidecar (rebuilt from unmodified
+  # upstream source on a hardened base and published to rulebricks/*; the CLI
+  # applies global.imageRegistry to the vector sidecar that runs it).
+  image: "docker.io/rulebricks/kafka-proxy:0.4.3-r1"
   # Workload identity used by the bridge (and shared with the HPS service account).
   # AWS: IRSA role ARN; GCP: GKE Workload Identity service account email.
   # The rulebricks.kafka.identityAnnotations helper maps these to the correct SA
@@ -1717,7 +1718,9 @@ clickstack:
     postgresImage:
       registry: docker.io
       repository: rulebricks/postgres-documentdb
-      tag: "17-0.107.0-ferretdb-2.7.0"
+      # FerretDB's image with a Debian security patch layer applied
+      # (images/postgres-documentdb in this repo); -rN increments on rebuilds.
+      tag: "17-0.107.0-ferretdb-2.7.0-r1"
     auth:
       username: hyperdx
       password: ""

@@ -103,20 +103,31 @@ images:
   # package manager -> official upstream alpine.
   - { name: node24, kind: mirror, source: docker.io/library/node, tag: "24-alpine", auth: none, target: rulebricks/node, digest: "" }
   - { name: rclone, kind: mirror, source: docker.io/rclone/rclone, tag: "1.74.4", auth: none, digest: "" }
-  - { name: kafka-proxy, kind: mirror, source: docker.io/grepplabs/kafka-proxy, tag: "0.4.3", auth: none, digest: "" }
+  # Rebuilt from unmodified upstream source (tag v0.4.3) on a current Go
+  # toolchain with re-resolved modules and the hardened DHI alpine-base
+  # runtime; upstream's binary carries fixed Go stdlib/x-module CVEs that only
+  # a recompile clears. See images/kafka-proxy/.
+  - { name: kafka-proxy, kind: build, context: images/kafka-proxy, base: dhi.io/alpine-base:3.22, tag: "0.4.3-r1", auth: dhi, digest: "" }
   - { name: valkey-admin, kind: mirror, source: docker.io/valkey/valkey-admin, tag: "1.0.2", auth: none, digest: "" }
-  - { name: serverless-redis-http, kind: mirror, source: docker.io/hiett/serverless-redis-http, tag: "0.0.10", auth: none, digest: "" }
+  # Rebuilt from unmodified upstream source (tag 0.0.10) on the hardened DHI
+  # Erlang/OTP runtime: upstream's last release is 2021 and its OTP-24 base
+  # carries the CISA KEV CVE-2025-32433. See images/serverless-redis-http/.
+  - { name: serverless-redis-http, kind: build, context: images/serverless-redis-http, base: dhi.io/erlang-otp:28-alpine3.23, tag: "0.0.10-r1", auth: dhi, digest: "" }
 
   # ClickStack observability images with no DHI equivalent
   - { name: hyperdx, kind: mirror, source: docker.hyperdx.io/hyperdx/hyperdx, tag: "2.31.0", auth: none, digest: "" }
   - { name: clickstack-otel-collector, kind: mirror, source: docker.clickhouse.com/clickhouse/clickstack-otel-collector, tag: "2.31.0", auth: none, digest: "" }
   - { name: ferretdb, kind: mirror, source: ghcr.io/ferretdb/ferretdb, tag: "2.7.0", auth: none, digest: "" }
-  - { name: postgres-documentdb, kind: mirror, source: ghcr.io/ferretdb/postgres-documentdb, tag: "17-0.107.0-ferretdb-2.7.0", auth: none, digest: "" }
+  # FerretDB's image with a Debian security patch layer (apt-get upgrade):
+  # upstream publishes only alongside FerretDB releases, so its base ages
+  # between pairs. Bump `base` + `tag` together when a new upstream pair
+  # ships. See images/postgres-documentdb/.
+  - { name: postgres-documentdb, kind: build, context: images/postgres-documentdb, base: ghcr.io/ferretdb/postgres-documentdb:17-0.107.0-ferretdb-2.7.0, tag: "17-0.107.0-ferretdb-2.7.0-r1", auth: none, digest: "" }
 
   # Supabase customized upstream builds with no DHI equivalent
   - { name: supabase-postgres, kind: mirror, source: docker.io/supabase/postgres, tag: "17.6.1.142", auth: none, digest: "" }
-  - { name: supabase-studio, kind: mirror, source: docker.io/supabase/studio, tag: "2026.07.06-sha-66cf431", auth: none, digest: "" }
-  - { name: supabase-gotrue, kind: mirror, source: docker.io/supabase/gotrue, tag: "v2.192.0", auth: none, digest: "" }
+  - { name: supabase-studio, kind: mirror, source: docker.io/supabase/studio, tag: "2026.07.20-sha-74a0848", auth: none, digest: "" }
+  - { name: supabase-gotrue, kind: mirror, source: docker.io/supabase/gotrue, tag: "v2.193.1", auth: none, digest: "" }
   - { name: supabase-postgrest, kind: mirror, source: docker.io/postgrest/postgrest, tag: "v14.14", auth: none, digest: "" }
   - { name: supabase-realtime, kind: mirror, source: docker.io/supabase/realtime, tag: "v2.117.0", auth: none, digest: "" }
   - { name: supabase-postgres-meta, kind: mirror, source: docker.io/supabase/postgres-meta, tag: "v0.96.6", auth: none, digest: "" }

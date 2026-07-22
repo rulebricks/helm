@@ -356,13 +356,15 @@ redis:
       existingSecretTokenKey: "redis-token"
 
 # Serverless Redis-compatible HTTP bridge (hiett/serverless-redis-http),
-# mirrored to docker.io/rulebricks/serverless-redis-http. Pinned; upstream is
-# unmaintained (last release 2021).
+# rebuilt from unmodified upstream source (release 0.0.10) on the hardened
+# DHI Erlang/OTP runtime and published as docker.io/rulebricks/
+# serverless-redis-http (upstream is unmaintained; its 2021 image base
+# carried the CISA KEV-listed CVE-2025-32433).
 serverlessRedisHttp:
   image:
     registry: docker.io
     repository: rulebricks/serverless-redis-http
-    tag: "0.0.10"
+    tag: "0.0.10-r1"
 
 cache:
   valkeyAdmin:
