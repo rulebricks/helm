@@ -14,8 +14,17 @@
 #            different tags (postgres15/16/17 -> rulebricks/postgres)
 #   ref:     (kind: build, optional) pinned upstream commit/tag for source
 #            rebuilds; injected as ARG UPSTREAM_REF by scripts/images/build.sh.
-#            Bumping upstream = update ref + tag here plus the chart values
-#            pin (see images/README.md for the per-archetype playbook)
+#            Bumping upstream = update ref + tag here, then run
+#            scripts/images/sync-chart-pins.sh (see images/README.md)
+#   upstream: (kind: build, source rebuilds) github.com/<owner>/<repo> of the
+#            software being rebuilt, optionally '#<tagPrefix>' for monorepo
+#            release tags; lets report tooling flag new upstream releases
+#   args:    (kind: build, optional) space-separated KEY=VALUE build args for
+#            version-adjacent pins that mirror upstream's own pins at the
+#            release tag; check on every upstream bump
+#   chartRefs: space-separated <file>:<yaml.path> chart values locations that
+#            pin this image's tag — where the image is consumed, and what
+#            scripts/images/sync-chart-pins.sh keeps in sync with `tag`
 #   digest:  (written back by CI; never hand-edit)
 #
 # This file ships inside the published chart tarball and the
@@ -26,117 +35,117 @@
 
 images:
   # --- Hardened infra (Docker Hardened Images, Community) ---
-  - { name: clickhouse-server, kind: mirror, source: dhi.io/clickhouse-server, tag: "26.6.1-debian13", auth: dhi, digest: "" }
-  - { name: valkey, kind: mirror, source: dhi.io/valkey, tag: "9.1.0-debian13", auth: dhi, digest: "" }
-  - { name: redis-exporter, kind: mirror, source: dhi.io/redis-exporter, tag: "1.87.0-debian13", auth: dhi, digest: "" }
-  - { name: kafka-exporter, kind: mirror, source: dhi.io/kafka-exporter, tag: "1.9.0-debian13", auth: dhi, digest: "" }
-  - { name: opentelemetry-collector, kind: mirror, source: dhi.io/opentelemetry-collector, tag: "0.156.0-debian13-contrib", auth: dhi, digest: "" }
+  - { name: clickhouse-server, kind: mirror, source: dhi.io/clickhouse-server, tag: "26.6.1-debian13", auth: dhi, chartRefs: "values.yaml:clickhouse.image.tag", digest: "" }
+  - { name: valkey, kind: mirror, source: dhi.io/valkey, tag: "9.1.0-debian13", auth: dhi, chartRefs: "charts/rulebricks/values.yaml:redis.image.tag", digest: "" }
+  - { name: redis-exporter, kind: mirror, source: dhi.io/redis-exporter, tag: "1.87.0-debian13", auth: dhi, chartRefs: "charts/rulebricks/values.yaml:cache.redisExporter.image.tag", digest: "" }
+  - { name: kafka-exporter, kind: mirror, source: dhi.io/kafka-exporter, tag: "1.9.0-debian13", auth: dhi, chartRefs: "charts/rulebricks/values.yaml:kafkaExporter.image.tag", digest: "" }
+  - { name: opentelemetry-collector, kind: mirror, source: dhi.io/opentelemetry-collector, tag: "0.156.0-debian13-contrib", auth: dhi, chartRefs: "values.yaml:global.tracing.collector.image.tag", digest: "" }
 
   # Strimzi operator and Kafka broker: DHI 1.1.0 / Kafka 4.2.1
-  - { name: strimzi-operator, kind: mirror, source: dhi.io/strimzi-operator, tag: "1.1.0-debian13", auth: dhi, digest: "" }
-  - { name: strimzi-kafka, kind: mirror, source: dhi.io/strimzi-kafka, tag: "1.1.0-debian13-kafka-4.2.1", auth: dhi, digest: "" }
+  - { name: strimzi-operator, kind: mirror, source: dhi.io/strimzi-operator, tag: "1.1.0-debian13", auth: dhi, chartRefs: "values.yaml:strimzi-kafka-operator.defaultImageTag values.yaml:strimzi-kafka-operator.image.tag", digest: "" }
+  - { name: strimzi-kafka, kind: mirror, source: dhi.io/strimzi-kafka, tag: "1.1.0-debian13-kafka-4.2.1", auth: dhi, chartRefs: "values.yaml:kafka.image.tag values.yaml:strimzi-kafka-operator.kafkaExporter.image.tag values.yaml:strimzi-kafka-operator.cruiseControl.image.tag", digest: "" }
   # Strimzi auxiliary images, referenced by the cluster-operator's STRIMZI_DEFAULT_*
   # env defaults (dormant unless a KafkaBridge / KafkaConnect-build CR is created);
   # pinned so no Strimzi feature toggle ever references an unmirrored image.
-  - { name: strimzi-kafka-bridge, kind: mirror, source: dhi.io/strimzi-kafka-bridge, tag: "1.0.0-debian13", auth: dhi, digest: "" }
+  - { name: strimzi-kafka-bridge, kind: mirror, source: dhi.io/strimzi-kafka-bridge, tag: "1.0.0-debian13", auth: dhi, chartRefs: "values.yaml:strimzi-kafka-operator.kafkaBridge.image.tag", digest: "" }
   # Connect-build tools: no DHI equivalent (re-checked 2026-07) -> official
   # quay.io/strimzi, version matches operator 1.1.0
-  - { name: kaniko-executor, kind: mirror, source: quay.io/strimzi/kaniko-executor, tag: "1.1.0", auth: none, digest: "" }
-  - { name: buildah, kind: mirror, source: quay.io/strimzi/buildah, tag: "1.1.0", auth: none, digest: "" }
-  - { name: maven-builder, kind: mirror, source: quay.io/strimzi/maven-builder, tag: "1.1.0", auth: none, digest: "" }
+  - { name: kaniko-executor, kind: mirror, source: quay.io/strimzi/kaniko-executor, tag: "1.1.0", auth: none, chartRefs: "values.yaml:strimzi-kafka-operator.kanikoExecutor.image.tag", digest: "" }
+  - { name: buildah, kind: mirror, source: quay.io/strimzi/buildah, tag: "1.1.0", auth: none, chartRefs: "values.yaml:strimzi-kafka-operator.buildah.image.tag", digest: "" }
+  - { name: maven-builder, kind: mirror, source: quay.io/strimzi/maven-builder, tag: "1.1.0", auth: none, chartRefs: "values.yaml:strimzi-kafka-operator.mavenBuilder.image.tag", digest: "" }
 
   # --- Tier-2: kube-prometheus-stack sub-images ---
-  - { name: prometheus, kind: mirror, source: dhi.io/prometheus, tag: "3.13.1-debian13", auth: dhi, digest: "" }
-  - { name: grafana, kind: mirror, source: dhi.io/grafana, tag: "13.1.0-debian13", auth: dhi, digest: "" }
-  - { name: node-exporter, kind: mirror, source: dhi.io/node-exporter, tag: "1.12.1-debian13", auth: dhi, digest: "" }
-  - { name: kube-state-metrics, kind: mirror, source: dhi.io/kube-state-metrics, tag: "2.19.1-debian13", auth: dhi, digest: "" }
-  - { name: prometheus-config-reloader, kind: mirror, source: dhi.io/prometheus-config-reloader, tag: "0.92.1-debian13", auth: dhi, digest: "" }
-  - { name: kube-webhook-certgen, kind: mirror, source: dhi.io/kube-webhook-certgen, tag: "1.8.4-debian13", auth: dhi, digest: "" }
-  - { name: k8s-sidecar, kind: mirror, source: dhi.io/k8s-sidecar, tag: "2.8.1-debian13", auth: dhi, digest: "" }
+  - { name: prometheus, kind: mirror, source: dhi.io/prometheus, tag: "3.13.1-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.prometheus.prometheusSpec.image.tag", digest: "" }
+  - { name: grafana, kind: mirror, source: dhi.io/grafana, tag: "13.1.0-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.grafana.image.tag", digest: "" }
+  - { name: node-exporter, kind: mirror, source: dhi.io/node-exporter, tag: "1.12.1-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.prometheus-node-exporter.image.tag", digest: "" }
+  - { name: kube-state-metrics, kind: mirror, source: dhi.io/kube-state-metrics, tag: "2.19.1-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.kube-state-metrics.image.tag", digest: "" }
+  - { name: prometheus-config-reloader, kind: mirror, source: dhi.io/prometheus-config-reloader, tag: "0.92.1-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.prometheusOperator.prometheusConfigReloader.image.tag", digest: "" }
+  - { name: kube-webhook-certgen, kind: mirror, source: dhi.io/kube-webhook-certgen, tag: "1.8.4-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.prometheusOperator.admissionWebhooks.patch.image.tag", digest: "" }
+  - { name: k8s-sidecar, kind: mirror, source: dhi.io/k8s-sidecar, tag: "2.8.1-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.grafana.sidecar.image.tag", digest: "" }
   # prometheus-operator + alertmanager: DHI now carries 0.92.1 / 0.33.1
   # (previously quay-sourced while DHI lacked these versions).
-  - { name: prometheus-operator, kind: mirror, source: dhi.io/prometheus-operator, tag: "0.92.1-debian13", auth: dhi, digest: "" }
-  - { name: alertmanager, kind: mirror, source: dhi.io/alertmanager, tag: "0.33.1-debian13", auth: dhi, digest: "" }
+  - { name: prometheus-operator, kind: mirror, source: dhi.io/prometheus-operator, tag: "0.92.1-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.prometheusOperator.image.tag", digest: "" }
+  - { name: alertmanager, kind: mirror, source: dhi.io/alertmanager, tag: "0.33.1-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.alertmanager.alertmanagerSpec.image.tag", digest: "" }
 
   # --- Tier-2: traefik / keda / cert-manager / vector / external-dns /
   #     cluster-autoscaler (DHI) ---
-  - { name: traefik, kind: mirror, source: dhi.io/traefik, tag: "3.7.6-debian13", auth: dhi, digest: "" }
-  - { name: keda, kind: mirror, source: dhi.io/keda, tag: "2.20.1-debian13", auth: dhi, digest: "" }
-  - { name: keda-metrics-apiserver, kind: mirror, source: dhi.io/keda-metrics-apiserver, tag: "2.20.1-debian13", auth: dhi, digest: "" }
-  - { name: keda-admission-webhooks, kind: mirror, source: dhi.io/keda-admission-webhooks, tag: "2.20.1-debian13", auth: dhi, digest: "" }
-  - { name: cert-manager-controller, kind: mirror, source: dhi.io/cert-manager-controller, tag: "1.21.0-debian13", auth: dhi, digest: "" }
-  - { name: cert-manager-webhook, kind: mirror, source: dhi.io/cert-manager-webhook, tag: "1.21.0-debian13", auth: dhi, digest: "" }
-  - { name: cert-manager-cainjector, kind: mirror, source: dhi.io/cert-manager-cainjector, tag: "1.21.0-debian13", auth: dhi, digest: "" }
-  - { name: cert-manager-startupapicheck, kind: mirror, source: dhi.io/cert-manager-startupapicheck, tag: "1.21.0-debian13", auth: dhi, digest: "" }
-  - { name: cert-manager-acmesolver, kind: mirror, source: dhi.io/cert-manager-acmesolver, tag: "1.21.0-debian13", auth: dhi, digest: "" }
-  - { name: vector, kind: mirror, source: dhi.io/vector, tag: "0.57.0-debian13", auth: dhi, digest: "" }
-  - { name: external-dns, kind: mirror, source: dhi.io/external-dns, tag: "0.21.0-debian13", auth: dhi, digest: "" }
+  - { name: traefik, kind: mirror, source: dhi.io/traefik, tag: "3.7.6-debian13", auth: dhi, chartRefs: "values.yaml:traefik.image.tag", digest: "" }
+  - { name: keda, kind: mirror, source: dhi.io/keda, tag: "2.20.1-debian13", auth: dhi, chartRefs: "values.yaml:keda.image.keda.tag", digest: "" }
+  - { name: keda-metrics-apiserver, kind: mirror, source: dhi.io/keda-metrics-apiserver, tag: "2.20.1-debian13", auth: dhi, chartRefs: "values.yaml:keda.image.metricsApiServer.tag", digest: "" }
+  - { name: keda-admission-webhooks, kind: mirror, source: dhi.io/keda-admission-webhooks, tag: "2.20.1-debian13", auth: dhi, chartRefs: "values.yaml:keda.image.webhooks.tag", digest: "" }
+  - { name: cert-manager-controller, kind: mirror, source: dhi.io/cert-manager-controller, tag: "1.21.0-debian13", auth: dhi, chartRefs: "values.yaml:cert-manager.image.tag", digest: "" }
+  - { name: cert-manager-webhook, kind: mirror, source: dhi.io/cert-manager-webhook, tag: "1.21.0-debian13", auth: dhi, chartRefs: "values.yaml:cert-manager.webhook.image.tag", digest: "" }
+  - { name: cert-manager-cainjector, kind: mirror, source: dhi.io/cert-manager-cainjector, tag: "1.21.0-debian13", auth: dhi, chartRefs: "values.yaml:cert-manager.cainjector.image.tag", digest: "" }
+  - { name: cert-manager-startupapicheck, kind: mirror, source: dhi.io/cert-manager-startupapicheck, tag: "1.21.0-debian13", auth: dhi, chartRefs: "values.yaml:cert-manager.startupapicheck.image.tag", digest: "" }
+  - { name: cert-manager-acmesolver, kind: mirror, source: dhi.io/cert-manager-acmesolver, tag: "1.21.0-debian13", auth: dhi, chartRefs: "values.yaml:cert-manager.acmesolver.image.tag", digest: "" }
+  - { name: vector, kind: mirror, source: dhi.io/vector, tag: "0.57.0-debian13", auth: dhi, chartRefs: "values.yaml:vector.image.tag values.yaml:vector-agent.image.tag", digest: "" }
+  - { name: external-dns, kind: mirror, source: dhi.io/external-dns, tag: "0.21.0-debian13", auth: dhi, chartRefs: "values.yaml:external-dns.image.tag", digest: "" }
   # external-secrets: DHI now carries it (previously ghcr-sourced while DHI lacked it).
-  - { name: external-secrets, kind: mirror, source: dhi.io/external-secrets, tag: "2.8.0-debian13", auth: dhi, digest: "" }
+  - { name: external-secrets, kind: mirror, source: dhi.io/external-secrets, tag: "2.8.0-debian13", auth: dhi, chartRefs: "values.yaml:external-secrets.image.tag values.yaml:external-secrets.webhook.image.tag values.yaml:external-secrets.certController.image.tag", digest: "" }
   # cluster-autoscaler: CA minor must match the cluster's k8s minor (clusters run
   # 1.34); DHI also has 1.35.1-debian13 for when clusters move to k8s 1.35.
-  - { name: cluster-autoscaler, kind: mirror, source: dhi.io/kubernetes-cluster-autoscaler, tag: "1.35.1-debian13", auth: dhi, digest: "" }
+  - { name: cluster-autoscaler, kind: mirror, source: dhi.io/kubernetes-cluster-autoscaler, tag: "1.35.1-debian13", auth: dhi, chartRefs: "values.yaml:cluster-autoscaler.image.tag", digest: "" }
 
   # --- Tier-2 dormant/optional sub-images (only pulled when a specific feature
   #     toggle is on: thanos, admission webhooks, grafana renderer/tests, CRD jobs,
   #     vector HAProxy LB, node-exporter perms). Pinned so nothing ever escapes
   #     rulebricks/* regardless of which features a customer enables. ---
-  - { name: thanos, kind: mirror, source: dhi.io/thanos, tag: "0.42.2-debian13", auth: dhi, digest: "" }
-  - { name: kube-rbac-proxy, kind: mirror, source: dhi.io/kube-rbac-proxy, tag: "0.22.1-debian13", auth: dhi, digest: "" }
-  - { name: prometheus-operator-admission-webhook, kind: mirror, source: dhi.io/prometheus-operator-admission-webhook, tag: "0.92.1-debian13", auth: dhi, digest: "" }
-  - { name: kubectl, kind: mirror, source: dhi.io/kubectl, tag: "1.36.2-debian13", auth: dhi, digest: "" }
-  - { name: bats, kind: mirror, source: dhi.io/bats, tag: "1.13.0-debian13", auth: dhi, digest: "" }
+  - { name: thanos, kind: mirror, source: dhi.io/thanos, tag: "0.42.2-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.prometheusOperator.thanosImage.tag values.yaml:kube-prometheus-stack.thanosRuler.thanosRulerSpec.image.tag", digest: "" }
+  - { name: kube-rbac-proxy, kind: mirror, source: dhi.io/kube-rbac-proxy, tag: "0.22.1-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.kube-state-metrics.kubeRBACProxy.image.tag values.yaml:kube-prometheus-stack.prometheus-node-exporter.kubeRBACProxy.image.tag", digest: "" }
+  - { name: prometheus-operator-admission-webhook, kind: mirror, source: dhi.io/prometheus-operator-admission-webhook, tag: "0.92.1-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.prometheusOperator.admissionWebhooks.deployment.image.tag", digest: "" }
+  - { name: kubectl, kind: mirror, source: dhi.io/kubectl, tag: "1.36.2-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.crds.upgradeJob.image.kubectl.tag", digest: "" }
+  - { name: bats, kind: mirror, source: dhi.io/bats, tag: "1.13.0-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.grafana.testFramework.image.tag", digest: "" }
   # curl: DHI publishes 8.21.x in the alpine flavor only (debian13 tops out at 8.14.1).
-  - { name: curl, kind: mirror, source: dhi.io/curl, tag: "8.21.0-alpine", auth: dhi, digest: "" }
-  - { name: grafana-image-renderer, kind: mirror, source: dhi.io/grafana-image-renderer, tag: "5.10.1-debian13", auth: dhi, digest: "" }
-  - { name: haproxy, kind: mirror, source: dhi.io/haproxy, tag: "3.4.2-debian13", auth: dhi, digest: "" }
+  - { name: curl, kind: mirror, source: dhi.io/curl, tag: "8.21.0-alpine", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.grafana.downloadDashboardsImage.tag values.yaml:vector.initContainers[0].image values.yaml:vector-agent.initContainers[0].image", digest: "" }
+  - { name: grafana-image-renderer, kind: mirror, source: dhi.io/grafana-image-renderer, tag: "5.10.1-debian13", auth: dhi, chartRefs: "values.yaml:kube-prometheus-stack.grafana.imageRenderer.image.tag", digest: "" }
+  - { name: haproxy, kind: mirror, source: dhi.io/haproxy, tag: "3.4.2-debian13", auth: dhi, chartRefs: "values.yaml:vector.haproxy.image.tag", digest: "" }
   # windows-exporter: Windows-only (never scheduled on a Linux stack); no DHI -> official upstream
-  - { name: windows-exporter, kind: mirror, source: ghcr.io/prometheus-community/windows-exporter, tag: "0.31.7", auth: none, digest: "" }
+  - { name: windows-exporter, kind: mirror, source: ghcr.io/prometheus-community/windows-exporter, tag: "0.31.7", auth: none, chartRefs: "values.yaml:kube-prometheus-stack.prometheus-windows-exporter.image.tag", digest: "" }
 
   # --- Leaf utilities (init / hook / test / sidecar) ---
   # postgres15/16 kept for already-released chart versions; new charts use postgres17.
   - { name: postgres15, kind: mirror, source: dhi.io/postgres, tag: "15-debian13", auth: dhi, target: rulebricks/postgres, digest: "" }
   - { name: postgres16, kind: mirror, source: dhi.io/postgres, tag: "16-debian13", auth: dhi, target: rulebricks/postgres, digest: "" }
-  - { name: postgres17, kind: mirror, source: dhi.io/postgres, tag: "17-debian13", auth: dhi, target: rulebricks/postgres, digest: "" }
+  - { name: postgres17, kind: mirror, source: dhi.io/postgres, tag: "17-debian13", auth: dhi, target: rulebricks/postgres, chartRefs: "values.yaml:global.images.postgres17.tag", digest: "" }
   # busybox: DHI publishes 1.38.x in the alpine flavor only (debian13 tops out at 1.37.0).
-  - { name: busybox, kind: mirror, source: dhi.io/busybox, tag: "1.38.0-alpine", auth: dhi, digest: "" }
+  - { name: busybox, kind: mirror, source: dhi.io/busybox, tag: "1.38.0-alpine", auth: dhi, chartRefs: "values.yaml:global.images.busybox.tag values.yaml:kube-prometheus-stack.grafana.initChownData.image.tag values.yaml:kube-prometheus-stack.prometheus-node-exporter.permissionInitContainer.image.tag values.yaml:kube-prometheus-stack.crds.upgradeJob.image.busybox.tag charts/clickstack/values.yaml:global.images.busybox.tag", digest: "" }
   # pause: k8s infra image, no DHI equivalent -> official registry.k8s.io
-  - { name: pause, kind: mirror, source: registry.k8s.io/pause, tag: "3.9", auth: none, digest: "" }
+  - { name: pause, kind: mirror, source: registry.k8s.io/pause, tag: "3.9", auth: none, chartRefs: "values.yaml:global.images.pause.tag", digest: "" }
   # node24: setup job needs shell/apk/npm at runtime (no DHI fit); bundled npm
   # refreshed. See images/node24/.
-  - { name: node24, kind: build, context: images/node24, base: docker.io/library/node:24-alpine, tag: "24-alpine-r1", auth: none, target: rulebricks/node, digest: "" }
-  - { name: rclone, kind: mirror, source: docker.io/rclone/rclone, tag: "1.74.4", auth: none, digest: "" }
+  - { name: node24, kind: build, context: images/node24, base: docker.io/library/node:24-alpine, tag: "24-alpine-r1", auth: none, target: rulebricks/node, chartRefs: "values.yaml:global.images.node24.tag", digest: "" }
+  - { name: rclone, kind: mirror, source: docker.io/rclone/rclone, tag: "1.74.4", auth: none, chartRefs: "values.yaml:global.images.rclone.tag", digest: "" }
   # Source rebuild on current Go toolchain. See images/kafka-proxy/.
-  - { name: kafka-proxy, kind: build, context: images/kafka-proxy, base: dhi.io/alpine-base:3.22, ref: "317f1d7aca20d80a341a11235d615b185857d9d6", tag: "0.4.3-r1", auth: dhi, digest: "" }
+  - { name: kafka-proxy, kind: build, context: images/kafka-proxy, base: dhi.io/alpine-base:3.22, ref: "317f1d7aca20d80a341a11235d615b185857d9d6", upstream: "github.com/grepplabs/kafka-proxy", tag: "0.4.3-r1", auth: dhi, chartRefs: "values.yaml:kafkaBridge.image", digest: "" }
   # Patch layer: OS upgrade + dep refresh + npm tooling removed. See images/valkey-admin/.
-  - { name: valkey-admin, kind: build, context: images/valkey-admin, base: docker.io/valkey/valkey-admin:1.0.2, tag: "1.0.2-r1", auth: none, digest: "" }
+  - { name: valkey-admin, kind: build, context: images/valkey-admin, base: docker.io/valkey/valkey-admin:1.0.2, tag: "1.0.2-r1", auth: none, chartRefs: "charts/rulebricks/values.yaml:cache.valkeyAdmin.image.tag", digest: "" }
   # Source rebuild on current Erlang/OTP (clears CISA KEV CVE-2025-32433). See images/serverless-redis-http/.
-  - { name: serverless-redis-http, kind: build, context: images/serverless-redis-http, base: dhi.io/erlang-otp:28-alpine3.23, ref: "794c5a372fa3997e08320250235f32e5a86338a3", tag: "0.0.10-r1", auth: dhi, digest: "" }
+  - { name: serverless-redis-http, kind: build, context: images/serverless-redis-http, base: dhi.io/erlang-otp:28-alpine3.23, ref: "794c5a372fa3997e08320250235f32e5a86338a3", upstream: "github.com/hiett/serverless-redis-http", tag: "0.0.10-r1", auth: dhi, chartRefs: "charts/rulebricks/values.yaml:serverlessRedisHttp.image.tag", digest: "" }
 
   # ClickStack observability images with no DHI equivalent
-  - { name: hyperdx, kind: mirror, source: docker.hyperdx.io/hyperdx/hyperdx, tag: "2.31.0", auth: none, digest: "" }
+  - { name: hyperdx, kind: mirror, source: docker.hyperdx.io/hyperdx/hyperdx, tag: "2.31.0", auth: none, chartRefs: "values.yaml:clickstack.hyperdx.image.tag charts/clickstack/values.yaml:hyperdx.image.tag", digest: "" }
   # Source rebuild, all Go binaries recompiled. See images/clickstack-otel-collector/.
-  - { name: clickstack-otel-collector, kind: build, context: images/clickstack-otel-collector, base: docker.io/library/alpine:3.23, ref: "4b1aefbae22ac02bffbdf7fca932f43095d3d8d6", tag: "2.31.0-r1", auth: none, digest: "" }
+  - { name: clickstack-otel-collector, kind: build, context: images/clickstack-otel-collector, base: docker.io/library/alpine:3.23, ref: "4b1aefbae22ac02bffbdf7fca932f43095d3d8d6", upstream: "github.com/hyperdxio/hyperdx#@hyperdx/otel-collector@", tag: "2.31.0-r1", auth: none, args: "OTEL_COLLECTOR_VERSION=0.155.0 OTEL_COLLECTOR_CORE_VERSION=1.61.0 GOMPLATE_VERSION=v4.3.3", chartRefs: "values.yaml:clickstack.collector.image.tag charts/clickstack/values.yaml:collector.image.tag", digest: "" }
   # Source rebuild on current Go toolchain. See images/ferretdb/.
-  - { name: ferretdb, kind: build, context: images/ferretdb, base: dhi.io/alpine-base:3.22, ref: "27653503a28b0d2f2a09d7105887edd3a8af1060", tag: "2.7.0-r1", auth: dhi, digest: "" }
+  - { name: ferretdb, kind: build, context: images/ferretdb, base: dhi.io/alpine-base:3.22, ref: "27653503a28b0d2f2a09d7105887edd3a8af1060", upstream: "github.com/FerretDB/FerretDB", tag: "2.7.0-r1", auth: dhi, chartRefs: "values.yaml:clickstack.ferretdb.image.tag charts/clickstack/values.yaml:ferretdb.image.tag", digest: "" }
   # Patch layer: OS upgrade + gosu recompile. See images/postgres-documentdb/.
-  - { name: postgres-documentdb, kind: build, context: images/postgres-documentdb, base: ghcr.io/ferretdb/postgres-documentdb:17-0.107.0-ferretdb-2.7.0, tag: "17-0.107.0-ferretdb-2.7.0-r1", auth: none, digest: "" }
+  - { name: postgres-documentdb, kind: build, context: images/postgres-documentdb, base: ghcr.io/ferretdb/postgres-documentdb:17-0.107.0-ferretdb-2.7.0, tag: "17-0.107.0-ferretdb-2.7.0-r1", auth: none, args: "GOSU_VERSION=1.19", chartRefs: "values.yaml:clickstack.ferretdb.postgresImage.tag charts/clickstack/values.yaml:ferretdb.postgresImage.tag", digest: "" }
 
   # Supabase customized upstream builds with no DHI equivalent
-  - { name: supabase-postgres, kind: mirror, source: docker.io/supabase/postgres, tag: "17.6.1.142", auth: none, digest: "" }
+  - { name: supabase-postgres, kind: mirror, source: docker.io/supabase/postgres, tag: "17.6.1.142", auth: none, chartRefs: "charts/supabase/values.yaml:db.image.tag", digest: "" }
   # Patch layer: OS upgrade + unused package purge + npm/pnpm tooling removed. See images/supabase-studio/.
-  - { name: supabase-studio, kind: build, context: images/supabase-studio, base: docker.io/supabase/studio:2026.07.20-sha-74a0848, tag: "2026.07.20-sha-74a0848-r1", auth: none, digest: "" }
+  - { name: supabase-studio, kind: build, context: images/supabase-studio, base: docker.io/supabase/studio:2026.07.20-sha-74a0848, tag: "2026.07.20-sha-74a0848-r1", auth: none, chartRefs: "charts/supabase/values.yaml:studio.image.tag", digest: "" }
   # Source rebuild on current Go toolchain. See images/supabase-gotrue/.
-  - { name: supabase-gotrue, kind: build, context: images/supabase-gotrue, base: docker.io/library/alpine:3, ref: "6b7b8e6033c988905fa56e5534b0112ad193aba3", tag: "v2.193.1-r1", auth: none, digest: "" }
-  - { name: supabase-postgrest, kind: mirror, source: docker.io/postgrest/postgrest, tag: "v14.14", auth: none, digest: "" }
+  - { name: supabase-gotrue, kind: build, context: images/supabase-gotrue, base: docker.io/library/alpine:3, ref: "6b7b8e6033c988905fa56e5534b0112ad193aba3", upstream: "github.com/supabase/auth", tag: "v2.193.1-r1", auth: none, chartRefs: "charts/supabase/values.yaml:auth.image.tag", digest: "" }
+  - { name: supabase-postgrest, kind: mirror, source: docker.io/postgrest/postgrest, tag: "v14.14", auth: none, chartRefs: "charts/supabase/values.yaml:rest.image.tag", digest: "" }
   # Source rebuild (mix.lock frozen) on patched OTP + Debian 13. See images/supabase-realtime/.
-  - { name: supabase-realtime, kind: build, context: images/supabase-realtime, base: docker.io/library/debian:trixie-20260610-slim, ref: "e14e783c6ae423ee77ceb3b0dcdaf4eedca410f7", tag: "v2.117.0-r1", auth: none, digest: "" }
+  - { name: supabase-realtime, kind: build, context: images/supabase-realtime, base: docker.io/library/debian:trixie-20260610-slim, ref: "e14e783c6ae423ee77ceb3b0dcdaf4eedca410f7", upstream: "github.com/supabase/realtime", tag: "v2.117.0-r1", auth: none, args: "ELIXIR_VERSION=1.18 OTP_VERSION=27.3.4.13 DEBIAN_VERSION=trixie-20260610 PG_DELTA_COMMIT=d706336a6772318e92db419eda5a5ea51123510e BUN_VERSION=1.3.14", chartRefs: "charts/supabase/values.yaml:realtime.image.tag", digest: "" }
   # Patch layer: OS upgrade + purge + fast-uri refresh + npm tooling removed. See images/supabase-postgres-meta/.
-  - { name: supabase-postgres-meta, kind: build, context: images/supabase-postgres-meta, base: docker.io/supabase/postgres-meta:v0.96.6, tag: "v0.96.6-r1", auth: none, digest: "" }
+  - { name: supabase-postgres-meta, kind: build, context: images/supabase-postgres-meta, base: docker.io/supabase/postgres-meta:v0.96.6, tag: "v0.96.6-r1", auth: none, chartRefs: "charts/supabase/values.yaml:meta.image.tag", digest: "" }
   # supabase/kong was deprecated; supabase self-hosted uses official kong with
   # chart-mounted declarative config (our kong deployment does the same). DHI now
   # carries kong 3.9.3, so mirror the hardened build (previously docker.io/kong/kong).
-  - { name: supabase-kong, kind: mirror, source: dhi.io/kong, tag: "3.9.3-debian13", auth: dhi, digest: "" }
+  - { name: supabase-kong, kind: mirror, source: dhi.io/kong, tag: "3.9.3-debian13", auth: dhi, chartRefs: "charts/supabase/values.yaml:kong.image.tag", digest: "" }
   # curljq: helm-test hook image (bash+curl+jq), replaces the unlicensed
   # kdevup/curljq. See images/curljq/.
-  - { name: curljq, kind: build, context: images/curljq, base: docker.io/library/alpine:3.24, tag: "1.0.1", auth: none, digest: "" }
+  - { name: curljq, kind: build, context: images/curljq, base: docker.io/library/alpine:3.24, tag: "1.0.1", auth: none, chartRefs: "charts/supabase/values.yaml:test.image.tag", digest: "" }

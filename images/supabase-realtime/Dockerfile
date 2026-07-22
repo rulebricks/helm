@@ -4,21 +4,21 @@
 # (clears the OTP SSH/SSL CVEs and bookworm's no-fix curl/gnutls tail).
 # awscli/curl are not installed: run.sh only uses them in AWS-ECS-only paths
 # the chart never enables.
-# Upstream pins live in images/manifest.yaml (base/ref), injected as build
-# args by scripts/images/build.sh. Build-only pins (OTP_VERSION /
-# PG_DELTA_COMMIT / BUN_VERSION, mirroring upstream's pins at the release
-# tag) live below — check them on every bump. Bumps: images/README.md.
+# All pins live in images/manifest.yaml (base/ref plus the version-adjacent
+# args: ELIXIR/OTP/DEBIAN versions, PG_DELTA_COMMIT, BUN_VERSION — these
+# mirror upstream's pins at the release tag), injected as build args by
+# scripts/images/build.sh. Bumps: images/README.md.
 
-ARG ELIXIR_VERSION=1.18
-ARG OTP_VERSION=27.3.4.13
-ARG DEBIAN_VERSION=trixie-20260610
+ARG ELIXIR_VERSION
+ARG OTP_VERSION
+ARG DEBIAN_VERSION
 ARG BUILDER_IMAGE="docker.io/hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}-slim"
 ARG BASE_IMAGE
 
 # pg-delta CLI, mirrors upstream's pgdelta-builder stage.
 FROM ${BASE_IMAGE} AS pgdelta-builder
-ARG PG_DELTA_COMMIT=d706336a6772318e92db419eda5a5ea51123510e
-ARG BUN_VERSION=1.3.14
+ARG PG_DELTA_COMMIT
+ARG BUN_VERSION
 
 RUN set -eux; \
     apt-get update -y; \

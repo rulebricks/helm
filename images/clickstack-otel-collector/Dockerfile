@@ -4,10 +4,10 @@
 # OpAMP supervisor, gomplate, goose/migrate) recompiled on a current toolchain
 # (clears fixed Go stdlib/module CVEs). Configs/entrypoint/layout mirror
 # upstream's Dockerfile exactly.
-# Upstream pins live in images/manifest.yaml (base/ref), injected as build
-# args by scripts/images/build.sh. Build-only pins (OTEL_COLLECTOR_VERSION /
-# OTEL_COLLECTOR_CORE_VERSION, from upstream's .env at the release tag) live
-# below — check them on every bump. Bumps: images/README.md.
+# All pins live in images/manifest.yaml (base/ref plus the version-adjacent
+# args: OTEL_COLLECTOR_VERSION / OTEL_COLLECTOR_CORE_VERSION from upstream's
+# .env at the release tag, GOMPLATE_VERSION), injected as build args by
+# scripts/images/build.sh. Bumps: images/README.md.
 
 ARG BASE_IMAGE
 ARG BUILDER_IMAGE=docker.io/library/golang:1.26-alpine
@@ -24,8 +24,8 @@ RUN tar -xzf /tmp/src.tar.gz --strip-components=1 && rm /tmp/src.tar.gz
 # Custom collector via upstream's own OCB builder-config.
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMAGE} AS collector-builder
 ARG TARGETARCH
-ARG OTEL_COLLECTOR_VERSION=0.155.0
-ARG OTEL_COLLECTOR_CORE_VERSION=1.61.0
+ARG OTEL_COLLECTOR_VERSION
+ARG OTEL_COLLECTOR_CORE_VERSION
 
 RUN go install go.opentelemetry.io/collector/cmd/builder@v${OTEL_COLLECTOR_VERSION}
 
@@ -41,7 +41,7 @@ RUN sed -i "s/__OTEL_COLLECTOR_VERSION__/${OTEL_COLLECTOR_VERSION}/g; s/__OTEL_C
 # OpAMP supervisor from the matching contrib release.
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMAGE} AS supervisor-builder
 ARG TARGETARCH
-ARG OTEL_COLLECTOR_VERSION=0.155.0
+ARG OTEL_COLLECTOR_VERSION
 
 WORKDIR /contrib
 ADD https://github.com/open-telemetry/opentelemetry-collector-contrib/archive/refs/tags/v${OTEL_COLLECTOR_VERSION}.tar.gz /tmp/contrib.tar.gz
@@ -55,7 +55,7 @@ RUN tar -xzf /tmp/contrib.tar.gz --strip-components=1 && rm /tmp/contrib.tar.gz 
 # its release source with flagged modules re-resolved; goose @latest is current.
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMAGE} AS tools-builder
 ARG TARGETARCH
-ARG GOMPLATE_VERSION=v4.3.3
+ARG GOMPLATE_VERSION
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go install -trimpath -ldflags="-s -w" \
       github.com/pressly/goose/v3/cmd/goose@latest && \
     mkdir -p /out && \

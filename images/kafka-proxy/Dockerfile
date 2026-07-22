@@ -10,6 +10,7 @@ ARG BUILDER_IMAGE=docker.io/library/golang:1.25-alpine
 FROM ${BUILDER_IMAGE} AS builder
 
 ARG UPSTREAM_REF
+ARG UPSTREAM_VERSION
 
 WORKDIR /build
 ADD https://github.com/grepplabs/kafka-proxy/archive/${UPSTREAM_REF}.tar.gz /build/src.tar.gz
@@ -20,7 +21,7 @@ ENV CGO_ENABLED=0
 RUN rm -rf vendor && \
     go get golang.org/x/crypto@latest golang.org/x/net@latest golang.org/x/oauth2@latest google.golang.org/grpc@latest && \
     go mod tidy && \
-    go build -o build/kafka-proxy -ldflags "-X github.com/grepplabs/kafka-proxy/config.Version=0.4.3 -w -s" .
+    go build -o build/kafka-proxy -ldflags "-X github.com/grepplabs/kafka-proxy/config.Version=${UPSTREAM_VERSION#v} -w -s" .
 
 FROM ${BASE_IMAGE}
 

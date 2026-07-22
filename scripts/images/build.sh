@@ -69,6 +69,12 @@ main() {
   # 'ref' (pinned upstream commit, source rebuilds only) -> UPSTREAM_REF;
   # tag minus the -rN suffix -> UPSTREAM_VERSION (for images that stamp it).
   [ -n "${ref}" ] && build_args+=(--build-arg "UPSTREAM_REF=${ref}" --build-arg "UPSTREAM_VERSION=${tag%-r[0-9]*}")
+  # 'args' (optional): space-separated KEY=VALUE version-adjacent build pins.
+  local extra_args kv
+  extra_args="$(manifest_field "${name}" args)"
+  for kv in ${extra_args}; do
+    build_args+=(--build-arg "${kv}")
+  done
 
   echo "==> build ${name}: context=${context} -> ${target} (${PLATFORMS})"
   docker buildx build \

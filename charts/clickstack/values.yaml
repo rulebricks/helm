@@ -45,7 +45,7 @@ hyperdx:
   image:
     registry: docker.io
     repository: rulebricks/hyperdx
-    tag: "2.29.0"
+    tag: "2.31.0"
     pullPolicy: IfNotPresent
   ports:
     app: 8080
@@ -187,12 +187,12 @@ ferretdb:
   image:
     registry: docker.io
     repository: rulebricks/ferretdb
-    tag: "2.7.0"
+    tag: "2.7.0-r1"
     pullPolicy: IfNotPresent
   postgresImage:
     registry: docker.io
     repository: rulebricks/postgres-documentdb
-    tag: "17-0.107.0-ferretdb-2.7.0"
+    tag: "17-0.107.0-ferretdb-2.7.0-r1"
     pullPolicy: IfNotPresent
   auth:
     username: hyperdx
