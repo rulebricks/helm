@@ -23,6 +23,9 @@ metadata:
 data:
   # Prefixed decision-log topic Vector subscribes to (matches HPS's producer).
   KAFKA_LOG_TOPIC: {{ $logTopic | quote }}
+  # Prefixed consumer group, namespaced like the topics so co-tenant deployments
+  # on a shared Kafka cluster join distinct groups and rebalance independently.
+  KAFKA_CONSUMER_GROUP: {{ printf "%svector-consumers" (include "rulebricks.kafka.topicPrefix" .) | quote }}
   {{- if $bridge }}
   # Token-auth Kafka (MSK IAM / GCP OAUTHBEARER): Vector talks plaintext to the
   # local kafka-proxy sidecar, which authenticates upstream via workload identity.

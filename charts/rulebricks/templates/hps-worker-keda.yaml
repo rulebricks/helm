@@ -65,7 +65,8 @@ spec:
         {{- $kafkaBrokers = (include "rulebricks-chart.kafka.bootstrapServers" .) }}
       {{- end }}
       bootstrapServers: {{ $kafkaBrokers }}
-      consumerGroup: generic-workers
+      # Must match the group the workers actually join (they apply the same prefix).
+      consumerGroup: {{ include "rulebricks-chart.kafka.topicPrefix" . }}generic-workers
       # Must match the topic HPS actually produces/consumes (HPS applies the prefix).
       topic: {{ include "rulebricks-chart.kafka.topicPrefix" . }}solution
       # Lag is in MESSAGES; with chunked bulk dispatch each message is a

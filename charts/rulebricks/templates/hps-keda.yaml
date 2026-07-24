@@ -75,7 +75,8 @@ spec:
           {{- $kafkaBrokers = (include "rulebricks-chart.kafka.bootstrapServers" .) }}
         {{- end }}
         bootstrapServers: {{ $kafkaBrokers }}
-        consumerGroup: hps-response-consumer
+        # Must match the group HPS actually joins (HPS applies the same prefix).
+        consumerGroup: {{ include "rulebricks-chart.kafka.topicPrefix" . }}hps-response-consumer
         topic: {{ include "rulebricks-chart.kafka.topicPrefix" . }}solution-response
         lagThreshold: "{{ .Values.hps.keda.lagThreshold | default 300 }}"
         offsetResetPolicy: latest

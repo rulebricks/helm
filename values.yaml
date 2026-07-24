@@ -1355,6 +1355,11 @@ vector:
         configMapKeyRef:
           name: vector-kafka-env
           key: KAFKA_LOG_TOPIC
+    - name: KAFKA_CONSUMER_GROUP
+      valueFrom:
+        configMapKeyRef:
+          name: vector-kafka-env
+          key: KAFKA_CONSUMER_GROUP
     # SASL credentials (inline PLAIN/SCRAM). Optional so in-cluster/token-auth deploys
     # work without the secret existing. existingSecret users can override these entries.
     - name: KAFKA_SASL_USERNAME
@@ -1379,7 +1384,10 @@ vector:
         # KAFKA_LOG_TOPIC carries the namespace prefix (e.g. com.rulebricks.logs).
         topics:
           - "${KAFKA_LOG_TOPIC:-logs}"
-        group_id: vector-consumers
+        # KAFKA_CONSUMER_GROUP carries the same prefix (e.g.
+        # com.rulebricks.vector-consumers) so co-tenant deployments on a shared
+        # Kafka cluster don't rebalance each other.
+        group_id: "${KAFKA_CONSUMER_GROUP:-vector-consumers}"
         auto_offset_reset: latest
         # TLS + SASL are driven by env from vector-kafka-env. Disabled by default
         # (in-cluster Kafka and the bridge path both use plaintext).

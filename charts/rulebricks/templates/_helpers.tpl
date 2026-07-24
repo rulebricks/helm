@@ -361,11 +361,14 @@ Strimzi creates a service named: <release>-kafka-kafka-bootstrap
 
 {{/*
 Kafka topic prefix
-Namespaces all Kafka topic names (e.g. "com.rulebricks.solution") so they don't
-collide on a shared/managed Kafka cluster. HPS applies this prefix to its own
-topics; the chart applies it to systems that must match HPS (KEDA lag triggers,
-the Vector consumer). An explicit empty string disables prefixing; when the key
-is absent entirely we fall back to the default.
+Namespaces all Kafka topic names (e.g. "com.rulebricks.solution") AND consumer
+group IDs (e.g. "com.rulebricks.generic-workers") so they don't collide on a
+shared/managed Kafka cluster - group rebalances are group-wide, so co-tenant
+deployments must join distinct groups, not just distinct topics. HPS applies
+this prefix to its own topics and groups; the chart applies it to systems that
+must match HPS (KEDA lag triggers, the Vector consumer). An explicit empty
+string disables prefixing; when the key is absent entirely we fall back to the
+default.
 */}}
 {{- define "rulebricks-chart.kafka.topicPrefix" -}}
 {{- if and .Values.app .Values.app.logging (hasKey .Values.app.logging "kafkaTopicPrefix") -}}
