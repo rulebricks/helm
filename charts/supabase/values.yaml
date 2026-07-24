@@ -82,6 +82,16 @@ externalDatabase:
   enabled: false
   host: ""
   port: 5432
+  # Optional: PEM CA bundle for the managed instance (e.g. the AWS RDS
+  # regional bundle). Required for Studio's Table/SQL editor against servers
+  # that force TLS (RDS Postgres 15+ defaults rds.force_ssl=1): Studio sends
+  # postgres-meta a per-request connection string that cannot carry sslmode,
+  # so meta only encrypts those connections when PG_META_DB_SSL_ROOT_CERT is
+  # set - which the chart wires from this value (see templates/db-ca-secret.yaml).
+  # Use a REGIONAL bundle, not the ~170KiB global one: the value is injected as
+  # a single env var and Linux caps one env entry at 128KiB (exec fails with
+  # "argument list too long" past it).
+  sslRootCert: ""
   # Optional: source host/port/username/password/database from one existing secret.
   # When unset, the chart keeps using secret.db.
   secretRef: ""

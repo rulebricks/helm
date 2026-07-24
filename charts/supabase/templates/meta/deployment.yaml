@@ -69,6 +69,21 @@ spec:
               value: $(DB_PASSWORD)
             - name: PG_META_DB_SSL_MODE
               value: $(DB_SSL)
+            {{- /*
+              Studio's Table/SQL editor sends meta per-request connection strings
+              that cannot carry sslmode; meta only encrypts those when
+              PG_META_DB_SSL_ROOT_CERT is set (it becomes DEFAULT_POOL_CONFIG.ssl).
+              Without it, force-TLS servers (RDS Postgres 15+) reject Studio's
+              queries with pg_hba "no encryption". Meta's own env-configured pool
+              is unaffected either way.
+            */}}
+            {{- if and .Values.externalDatabase .Values.externalDatabase.enabled .Values.externalDatabase.sslRootCert }}
+            - name: PG_META_DB_SSL_ROOT_CERT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase.fullname" . }}-db-ca
+                  key: ca.pem
+            {{- end }}
           {{- with .Values.meta.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}

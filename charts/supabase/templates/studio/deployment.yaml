@@ -38,9 +38,11 @@ spec:
           image: {{ include "supabase.image" (dict "root" $ "image" .Values.studio.image "name" "supabase-studio") | quote }}
           imagePullPolicy: {{ .Values.studio.image.pullPolicy }}
           env:
+            {{- /* Chart-managed names below; skipped here so user-supplied
+                   studio.environment entries can never duplicate them. */}}
+            {{- $studioSkipKeys := list "SUPABASE_PUBLIC_URL" "DB_HOST" "DB_PORT" "POSTGRES_HOST" "POSTGRES_PORT" "POSTGRES_DB" }}
             {{- range $key, $value := .Values.studio.environment }}
-            {{- /* Skip SUPABASE_PUBLIC_URL - it's set dynamically below */ -}}
-            {{- if ne $key "SUPABASE_PUBLIC_URL" }}
+            {{- if not (has $key $studioSkipKeys) }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
@@ -82,6 +84,28 @@ spec:
                   # takes precedence, matching every other Supabase component.
                   name: {{ include "supabase.db.secretName" . }}
                   key: {{ include "supabase.db.secretKey" (dict "root" . "field" "password" "default" "password") }}
+            {{- /*
+              Studio builds its default-project connection string as
+              postgresql://<user>:<POSTGRES_PASSWORD>@<POSTGRES_HOST>:<POSTGRES_PORT>/<POSTGRES_DB>
+              and falls back to the upstream docker-compose host "db" when unset.
+              The db ExternalName alias makes that fallback resolve, but a TLS
+              server certificate can never match the alias name, so hostname
+              verification breaks against managed databases. Point Studio at the
+              REAL resolved host (secret-ref aware, same source as every other
+              component) so the connection string it hands postgres-meta is
+              verifiable end to end.
+            */}}
+            {{- include "supabase.db.hostEnv" . | nindent 12 }}
+            {{- include "supabase.db.portEnv" . | nindent 12 }}
+            - name: POSTGRES_HOST
+              value: $(DB_HOST)
+            - name: POSTGRES_PORT
+              value: $(DB_PORT)
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "supabase.db.secretName" . }}
+                  key: {{ include "supabase.db.secretKey" (dict "root" . "field" "database" "default" "database") }}
             - name: SUPABASE_ANON_KEY
               valueFrom:
                 secretKeyRef:

@@ -959,6 +959,7 @@
             "enabled": { "type": "boolean" },
             "host": { "type": "string" },
             "port": { "type": ["integer", "string"] },
+            "sslRootCert": { "type": "string" },
             "secretRef": { "type": "string" },
             "secretRefKey": {
               "type": "object",
