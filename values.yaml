@@ -1328,6 +1328,13 @@ vector:
   # TLS, and SASL (PLAIN/SCRAM). Token mechanisms (MSK IAM / GCP OAUTHBEARER) are handled
   # by the kafka-proxy bridge sidecar and Vector connects to it over local plaintext.
   env:
+    # Vector 0.57 disabled env-var interpolation in config files by default
+    # (vector.dev 0.57 upgrade guide). The kafka source below is driven entirely
+    # by ${KAFKA_*} placeholders, so restore the pre-0.57 behavior. The
+    # "dangerously" caveat (env vars readable via config) is moot here: every
+    # interpolated variable already lives in this pod's environment.
+    - name: VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION
+      value: "true"
     - name: SSL_CERT_FILE
       value: /etc/ssl/certs/ca-certificates.crt
     - name: KAFKA_BOOTSTRAP_SERVERS

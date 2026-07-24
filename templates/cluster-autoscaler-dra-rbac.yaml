@@ -1,0 +1,32 @@
+{{- if (index .Values "cluster-autoscaler").enabled }}
+{{- /* cluster-autoscaler >= 1.32 starts informers for the DRA API group
+       (resource.k8s.io) regardless of whether dynamic resource allocation is
+       enabled. Without list/watch RBAC those informers never sync: the pod
+       runs but its reflectors log Forbidden forever and the scale-up loop
+       stalls, stranding Pending pods. The bundled cluster-autoscaler chart
+       (9.53.0) does not grant these yet, so the stack supplements its
+       ClusterRole. Read-only; drop once the subchart ships its own rules. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-cluster-autoscaler-dra
+rules:
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["resourceclaims", "resourceclaimtemplates", "resourceslices", "deviceclasses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-cluster-autoscaler-dra
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-cluster-autoscaler-dra
+subjects:
+  - kind: ServiceAccount
+    # Fixed name from cluster-autoscaler.rbac.serviceAccount.name (values.yaml):
+    # the workload-identity binding depends on it being stable across releases.
+    name: {{ (index .Values "cluster-autoscaler").rbac.serviceAccount.name | default "cluster-autoscaler" }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
