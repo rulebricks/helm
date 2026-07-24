@@ -12,7 +12,7 @@ Resources to deploy custom configurations of Rulebricks and its dependencies via
 
 ## Prerequisites
 
-- Kubernetes 1.19+
+- Kubernetes 1.3+
 - Helm 3.2.0+
 - PV provisioner support (e.g., AWS EBS CSI driver)
 - A domain name you control
