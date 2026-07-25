@@ -212,6 +212,17 @@ spec:
               # db-role-init sidecar syncs the shared secret password onto it (the
               # baked-in postgres role's password is never reconciled).
               value: {{ .Values.supabase.db.superuserName | default "supabase_admin" | quote }}
+              {{- else if and .Values.migrations.externalDb.existingSecret .Values.migrations.externalDb.existingSecretUserKey }}
+              # Master/app-role username from the SAME Secret as DB_PASSWORD
+              # below. The migrate hook authenticates with the MASTER credential,
+              # and only on AWS RDS is the master literally named "postgres":
+              # Azure Flexible Server / Cloud SQL admins have custom names, so
+              # pairing the db-Secret's username with the master-password fails
+              # authentication there.
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.migrations.externalDb.existingSecret }}
+                  key: {{ .Values.migrations.externalDb.existingSecretUserKey }}
               {{- else if $dbSecretName }}
               # External managed Postgres: role sourced from the BYO database Secret.
               valueFrom:

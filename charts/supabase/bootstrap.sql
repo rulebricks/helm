@@ -58,6 +58,20 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- postgres: GoTrue's upstream migrations grant table privileges to a role
+-- literally named "postgres" (e.g. 20240612123726_enable_rls_update_grants
+-- does GRANT SELECT ... TO postgres WITH GRANT OPTION). On AWS RDS it is the
+-- master user, so it always exists; Azure Flexible Server and GCP Cloud SQL
+-- name their admin differently and create no "postgres" role at all, so
+-- GoTrue crashloops on 42704 'role "postgres" does not exist'. Create it as
+-- a NOLOGIN grant target when missing - nothing authenticates as it (the
+-- migration hook connects as the master, see migrations.externalDb).
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'postgres') THEN
+    CREATE ROLE postgres NOLOGIN;
+  END IF;
+END $$;
+
 -- authenticator: the login role PostgREST connects as
 DO $$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator') THEN
