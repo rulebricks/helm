@@ -375,9 +375,15 @@ global:
     #   response_type: code
     #   grant_types: authorization_code, refresh_token
     #   authentication_method: http body
-    #   Redirect URI's:
-    #     1. https://<your-domain>/api/sso-proxy/callback
-    #     2. <your-supabase-url>/auth/v1/callback
+    #   Redirect URI's (register the one that matches your provider type):
+    #     NATIVE providers (azure, google, okta, keycloak) - GoTrue handles the
+    #     OAuth exchange, so the IdP must allow the Supabase callback:
+    #       https://supabase.<your-domain>/auth/v1/callback
+    #     CUSTOM providers (ory, other) - the app's built-in OIDC proxy is the
+    #     callback target:
+    #       https://<your-domain>/api/sso-proxy/callback
+    #   Registering the wrong one breaks the login flow with a redirect_uri
+    #   mismatch at the IdP.
     clientId: ""
     clientSecret: ""
   # =============================================================================

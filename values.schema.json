@@ -2172,6 +2172,45 @@
       }
     },
     {
+      "title": "SSO URL Validation",
+      "description": "Every SSO provider except Google needs global.sso.url (the IdP authority, e.g. https://login.microsoftonline.com/<tenant-id> for Entra). Without it GoTrue omits GOTRUE_EXTERNAL_<PROVIDER>_URL and enterprise single-tenant logins fail.",
+      "if": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "sso": {
+                "type": "object",
+                "properties": {
+                  "enabled": { "const": true },
+                  "provider": { "not": { "const": "google" } }
+                },
+                "required": ["enabled", "provider"]
+              }
+            },
+            "required": ["sso"]
+          }
+        },
+        "required": ["global"]
+      },
+      "then": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "sso": {
+                "type": "object",
+                "required": ["url"],
+                "properties": {
+                  "url": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "title": "Decision Log Query Storage Validation",
       "description": "Decision log query requires shared object storage to be configured.",
       "if": {

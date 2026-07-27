@@ -25,16 +25,20 @@ spec:
         {{- with .Values.app.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- /* Pod annotations (global + component) */ -}}
-      {{- if or (and .Values.global .Values.global.podAnnotations) .Values.app.podAnnotations }}
       annotations:
+        {{- /* Roll pods whenever the app config/secret changes: both are
+             consumed via envFrom, which Kubernetes does NOT hot-reload, so
+             without these a config-only upgrade (switching SMTP hosts,
+             enabling SSO, ...) leaves running pods on stale settings until a
+             manual restart. */}}
+        checksum/app-config: {{ include (print $.Template.BasePath "/app-configmap.yaml") . | sha256sum }}
+        checksum/app-secret: {{ include (print $.Template.BasePath "/app-secret.yaml") . | sha256sum }}
         {{- if and .Values.global .Values.global.podAnnotations }}
         {{- toYaml .Values.global.podAnnotations | nindent 8 }}
         {{- end }}
         {{- with .Values.app.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- end }}
     spec:
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}

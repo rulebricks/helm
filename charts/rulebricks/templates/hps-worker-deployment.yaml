@@ -54,6 +54,12 @@ spec:
         {{- with .Values.hps.workers.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      annotations:
+        {{- /* Workers share the app ConfigMap/Secret via envFrom, which is
+             not hot-reloaded; roll pods when either changes (see
+             app-deployment.yaml). */}}
+        checksum/app-config: {{ include (print $.Template.BasePath "/app-configmap.yaml") . | sha256sum }}
+        checksum/app-secret: {{ include (print $.Template.BasePath "/app-secret.yaml") . | sha256sum }}
     spec:
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}

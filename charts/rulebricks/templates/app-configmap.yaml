@@ -50,6 +50,13 @@ data:
   NEXT_PUBLIC_EMAIL: {{ .Values.global.email | default .Values.app.email | default "" | quote }}
   NEXT_PUBLIC_PROTOCOL: "https"
   NEXT_PUBLIC_DOMAIN_NAME: {{ $domain | quote }}
+  {{- /* The app image bakes __NEXT_PUBLIC_APP_URL__ placeholders at build
+       time and its entrypoint substitutes them from this env var. Newer app
+       releases build auth redirect URLs (e.g. the admin-invite accept link)
+       from it, so without it invite emails carry a literal
+       __NEXT_PUBLIC_APP_URL__ and are unusable. */}}
+  APP_URL: {{ printf "%s://%s" $protocol $domain | quote }}
+  NEXT_PUBLIC_APP_URL: {{ printf "%s://%s" $protocol $domain | quote }}
   NEXT_PUBLIC_SUPABASE_URL: {{ $supabaseUrl | quote }}
   NEXT_PUBLIC_SUPABASE_PUBLIC_KEY: {{ $supabaseAnonKey | quote }}
   SELF_HOSTED: "1"

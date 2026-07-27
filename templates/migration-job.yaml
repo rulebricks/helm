@@ -139,9 +139,13 @@ spec:
                   applied_at TIMESTAMP DEFAULT NOW()
                 );"
 
-              # Function to check if migration is applied
+              # Function to check if migration is applied. Pure-shell match:
+              # the hardened postgres image ships no grep, and a missing grep
+              # makes a piped check fail OPEN (is_applied always false), which
+              # silently re-runs every migration on every deploy.
               is_applied() {
-                psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -t -c "SELECT 1 FROM schema_migrations WHERE version = '$1';" | grep -q 1
+                applied=$(psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -t -A -c "SELECT 1 FROM schema_migrations WHERE version = '$1';")
+                [ "$applied" = "1" ]
               }
 
               # Iterate over migration files
@@ -168,6 +172,27 @@ spec:
               else
                 echo "No migrations found in /assets/migrations"
               fi
+
+              # Provider-parity grants: on managed databases whose master is
+              # not literally "postgres" (Azure Flexible Server, Cloud SQL),
+              # bootstrap.sql creates postgres as a bare NOLOGIN grant target
+              # (GoTrue's upstream migrations reference that name). But the
+              # app's RLS helper functions are SECURITY DEFINER OWNED BY
+              # postgres and resolve auth.uid()/auth.users, so the role needs
+              # the auth-schema access it inherently has on RDS (master) and
+              # in-cluster (superuser); without it every RLS policy evaluation
+              # fails with 42501 "permission denied for schema auth".
+              # Idempotent, and a no-op where postgres already owns auth.
+              echo "Ensuring postgres role can resolve auth schema (RLS helpers)..."
+              psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -c "
+                DO \$\$ BEGIN
+                  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'postgres')
+                     AND EXISTS (SELECT FROM pg_namespace WHERE nspname = 'auth') THEN
+                    GRANT USAGE ON SCHEMA auth TO postgres;
+                    GRANT SELECT ON ALL TABLES IN SCHEMA auth TO postgres;
+                    GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO postgres;
+                  END IF;
+                END \$\$;"
 
               # PostgREST caches the DB schema at connect time and only refreshes
               # on NOTIFY...
