@@ -124,20 +124,120 @@ azure.workload.identity/use: "true"
 {{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
 {{- $region := include "rulebricks.storage.region" (list . "decisionLogs") -}}
 {{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
-{{- printf "https://%s.s3.%s.amazonaws.com/%s/year=*/month=*/day=*/hour=*/*.gz" $bucket $region $path -}}
+{{- /* {gz,zst} alternation: Vector writes zstd (.ndjson.zst) since the zstd
+     switch; pre-existing gzip archives keep matching. ClickHouse auto-detects
+     compression per file from the extension. */ -}}
+{{- printf "https://%s.s3.%s.amazonaws.com/%s/year=*/month=*/day=*/hour=*/*.{gz,zst}" $bucket $region $path -}}
 {{- end -}}
 
 {{- define "rulebricks.storage.azureUrl" -}}
 {{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
 {{- $container := include "rulebricks.storage.azureContainer" (list . "decisionLogs") -}}
 {{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
-{{- printf "https://%s.blob.core.windows.net/%s/%s/year=*/month=*/day=*/hour=*/*.gz" $bucket $container $path -}}
+{{- printf "https://%s.blob.core.windows.net/%s/%s/year=*/month=*/day=*/hour=*/*.{gz,zst}" $bucket $container $path -}}
 {{- end -}}
 
 {{- define "rulebricks.storage.gcsUrl" -}}
 {{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
 {{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
-{{- printf "https://storage.googleapis.com/%s/%s/year=*/month=*/day=*/hour=*/*.gz" $bucket $path -}}
+{{- printf "https://storage.googleapis.com/%s/%s/year=*/month=*/day=*/hour=*/*.{gz,zst}" $bucket $path -}}
+{{- end -}}
+
+{{- /* Compacted decision-log tier: the compaction CronJob rewrites closed hours
+     of raw NDJSON into one sorted Parquet object per hour, placed BESIDE the
+     raw files it replaces (same hour= prefix, *.parquet extension), so the raw
+     and parquet globs are disjoint by extension under identical IAM. */ -}}
+{{- define "rulebricks.storage.s3ParquetUrl" -}}
+{{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
+{{- $region := include "rulebricks.storage.region" (list . "decisionLogs") -}}
+{{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
+{{- printf "https://%s.s3.%s.amazonaws.com/%s/year=*/month=*/day=*/hour=*/*.parquet" $bucket $region $path -}}
+{{- end -}}
+
+{{- define "rulebricks.storage.gcsParquetUrl" -}}
+{{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
+{{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
+{{- printf "https://storage.googleapis.com/%s/%s/year=*/month=*/day=*/hour=*/*.parquet" $bucket $path -}}
+{{- end -}}
+
+{{- /* Concrete (non-glob) base URLs for the compaction CronJob, which appends
+     /year=Y/month=M/day=D/hour=H/... itself when reading a single hour and
+     writing its compacted.parquet. */ -}}
+{{- define "rulebricks.storage.s3BaseUrl" -}}
+{{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
+{{- $region := include "rulebricks.storage.region" (list . "decisionLogs") -}}
+{{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
+{{- printf "https://%s.s3.%s.amazonaws.com/%s" $bucket $region $path -}}
+{{- end -}}
+
+{{- define "rulebricks.storage.gcsBaseUrl" -}}
+{{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
+{{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
+{{- printf "https://storage.googleapis.com/%s/%s" $bucket $path -}}
+{{- end -}}
+
+{{- /* rclone env for the decision-log compaction CronJob's discover/cleanup
+     containers. Mirrors db-backup-cronjob.yaml's tri-cloud auth blocks (keep
+     the two in sync) but targets the decisionLogs prefix. RB_TARGET is the
+     rclone remote path: container/path on azure-blob, bucket/path elsewhere. */ -}}
+{{- define "rulebricks.compaction.rcloneEnv" -}}
+{{- $storage := .Values.global.storage | default dict -}}
+{{- $provider := $storage.provider | default "s3" -}}
+{{- $azure := $storage.azure | default dict -}}
+{{- $authMode := $azure.authMode | default "workload-identity" -}}
+{{- $bucket := include "rulebricks.storage.bucket" (list . "decisionLogs") -}}
+{{- $region := include "rulebricks.storage.region" (list . "decisionLogs") -}}
+{{- $container := include "rulebricks.storage.azureContainer" (list . "decisionLogs") -}}
+{{- $path := include "rulebricks.storage.path" (list . "decisionLogs") -}}
+- name: RB_TARGET
+  value: {{ ternary (printf "%s/%s" $container $path) (printf "%s/%s" $bucket $path) (eq $provider "azure-blob") | quote }}
+{{- if eq $provider "azure-blob" }}
+- name: RCLONE_CONFIG_DEST_TYPE
+  value: "azureblob"
+- name: RCLONE_CONFIG_DEST_ACCOUNT
+  value: {{ $bucket | quote }}
+{{- if eq $authMode "connection-string" }}
+- name: RCLONE_CONFIG_DEST_CONNECTION_STRING
+  valueFrom:
+    secretKeyRef:
+      name: {{ required "global.storage.azure.connectionStringSecretRef.name is required for connection-string auth" $azure.connectionStringSecretRef.name }}
+      key: {{ required "global.storage.azure.connectionStringSecretRef.key is required for connection-string auth" $azure.connectionStringSecretRef.key }}
+{{- else }}
+- name: RCLONE_CONFIG_DEST_ENV_AUTH
+  value: "true"
+{{- end }}
+{{- else if eq $provider "gcs" }}
+- name: RCLONE_CONFIG_DEST_TYPE
+  value: "google cloud storage"
+- name: RCLONE_CONFIG_DEST_ENV_AUTH
+  value: "true"
+- name: RCLONE_CONFIG_DEST_BUCKET_POLICY_ONLY
+  value: "true"
+{{- else }}
+- name: RCLONE_CONFIG_DEST_TYPE
+  value: "s3"
+- name: RCLONE_CONFIG_DEST_PROVIDER
+  value: "AWS"
+- name: RCLONE_CONFIG_DEST_ENV_AUTH
+  value: "true"
+- name: RCLONE_CONFIG_DEST_REGION
+  value: {{ $region | quote }}
+{{- $s3Secret := dig "s3" "existingSecret" "name" "" $storage }}
+{{- if $s3Secret }}
+# Static AWS credentials escape hatch; rclone env_auth picks
+# these up. Prefer IRSA/Pod Identity (leave the secret unset).
+- name: AWS_ACCESS_KEY_ID
+  valueFrom:
+    secretKeyRef:
+      name: {{ $s3Secret }}
+      key: AWS_ACCESS_KEY_ID
+- name: AWS_SECRET_ACCESS_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ $s3Secret }}
+      key: AWS_SECRET_ACCESS_KEY
+{{- end }}
+{{- end }}
 {{- end -}}
 
 {{- define "rulebricks.storage.cloudDestination" -}}

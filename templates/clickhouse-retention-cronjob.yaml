@@ -1,0 +1,120 @@
+{{- if and .Values.clickhouse.enabled .Values.global.clickstack.enabled }}
+{{- $ch := .Values.clickhouse }}
+{{- /* Disk-pressure eviction for the decision_logs_recent hot tier (see
+     _defaults.tpl decisionLogsViewSql). The hot tier is a CACHE over the
+     durable object-storage archive, deliberately bounded by DISK PRESSURE
+     rather than a time TTL: while free space on the ClickHouse volume is
+     below 35%, drop the oldest daily partition and re-check. Reading actual
+     disk state from system.disks (instead of deriving a byte budget from
+     persistence.size) needs no unit math and automatically accounts for the
+     otel telemetry sharing the volume. The 35% floor exists because MergeTree
+     merges need free space roughly equal to the parts being merged; the
+     table-level min_free_disk_ratio_to_perform_insert=0.2 backstop stops
+     ingest before the volume fills even if this CronJob is broken. Only
+     decision_logs_recent partitions are ever dropped - a decision-log flood
+     can never evict otel telemetry - and the decision_logs view's dynamic
+     boundary means the archive transparently serves any evicted range.
+
+     The hardened clickhouse-server image has no shell, so this runs busybox
+     (already mirrored for other init/hook duties) against the ClickHouse HTTP
+     interface. POST is required: ClickHouse treats GET as readonly and
+     rejects ALTER. */}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-retention" (include "rulebricks.clickhouse.fullname" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 240
+      template:
+        metadata:
+          labels:
+            {{- include "rulebricks.clickhouse.selectorLabels" . | nindent 12 }}
+            rulebricks.com/workload-group: infrastructure
+            {{- with .Values.global.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: {{ include "rulebricks-chart.registrySecretName" . }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+          containers:
+            - name: retention
+              image: {{ include "rulebricks.image" (dict "root" . "image" .Values.global.images.busybox "name" "busybox") | quote }}
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: CLICKHOUSE_HOST
+                  value: {{ include "rulebricks.clickhouse.fullname" . | quote }}
+                - name: CLICKHOUSE_USER
+                  value: {{ $ch.auth.username | default "rulebricks" | quote }}
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "rulebricks.clickhouse.credentialSecret" . }}
+                      key: {{ $ch.auth.existingSecretKey | default "admin-password" }}
+              resources:
+                requests:
+                  cpu: "10m"
+                  memory: "32Mi"
+                limits:
+                  cpu: "100m"
+                  memory: "64Mi"
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  q() {
+                    wget -q -O - \
+                      --header "X-ClickHouse-User: ${CLICKHOUSE_USER}" \
+                      --header "X-ClickHouse-Key: ${CLICKHOUSE_PASSWORD}" \
+                      --post-data "$1" \
+                      "http://${CLICKHOUSE_HOST}:8123/"
+                  }
+                  i=0
+                  while [ "$i" -lt 32 ]; do
+                    free_ok=$(q "SELECT free_space >= 0.35 * total_space FROM system.disks WHERE name = 'default' FORMAT TSVRaw")
+                    if [ "$free_ok" = "1" ]; then
+                      echo "disk healthy (>=35% free); nothing to do"
+                      exit 0
+                    fi
+                    if [ "$free_ok" != "0" ]; then
+                      echo "unexpected system.disks response '${free_ok}'" >&2
+                      exit 1
+                    fi
+                    # partition_id for toYYYYMMDD partitioning is the YYYYMMDD string,
+                    # so lexicographic min = chronologically oldest. min() over an
+                    # empty set returns '' for String, which reads as "nothing left".
+                    oldest=$(q "SELECT min(partition_id) FROM system.parts WHERE database = 'rulebricks' AND table = 'decision_logs_recent' AND active FORMAT TSVRaw")
+                    if [ -z "$oldest" ]; then
+                      echo "free space low but hot tier is empty; nothing to evict"
+                      exit 0
+                    fi
+                    today=$(date -u +%Y%m%d)
+                    if [ "$oldest" -ge "$today" ] 2>/dev/null; then
+                      echo "only the active partition remains; leaving it (ingest is bounded by min_free_disk_ratio_to_perform_insert)"
+                      exit 0
+                    fi
+                    echo "free space low; dropping decision_logs_recent partition ${oldest}"
+                    q "ALTER TABLE rulebricks.decision_logs_recent DROP PARTITION ID '${oldest}'"
+                    i=$((i + 1))
+                  done
+                  echo "eviction cap reached this run; continuing next schedule"
+{{- end }}

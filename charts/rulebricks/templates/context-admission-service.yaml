@@ -1,0 +1,29 @@
+{{- /*
+Context admission runs inside the normal HPS server, but its readiness depends
+only on Postgres. The primary HPS Service excludes pods until the unrelated
+solution-response consumer owns partitions. This dedicated Service publishes
+those otherwise-not-ready addresses so Context batch admission and capability
+checks remain available during an RPC gather-plane rebalance; the Context route
+itself returns 503 when its Postgres readiness check fails.
+*/ -}}
+{{- if eq (include "rulebricks-chart.contexts.enabled" .) "true" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rulebricks-chart.context-admission.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: context-admission
+spec:
+  type: ClusterIP
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+      protocol: TCP
+{{- end }}

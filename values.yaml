@@ -874,7 +874,10 @@ strimzi-kafka-operator:
 # Rulebricks always deploys ClickHouse for native decision-log query support.
 # Decision logs remain object-storage-backed via a view. When clickstack.enabled
 # is true (the default), ClickHouse also statefully stores operational telemetry
-# in local MergeTree tables.
+# AND a decision_logs_recent MergeTree hot tier (a disk-pressure-bounded cache
+# that accelerates decision-log queries; the object-storage archive stays the
+# durable system of record - see templates/_defaults.tpl and
+# templates/clickhouse-retention-cronjob.yaml).
 clickhouse:
   enabled: true
   # ClickHouse server (single node; no keeper/replication)
@@ -897,11 +900,13 @@ clickhouse:
     # enabled, clickstack.clickhouse.existingSecret.
     existingSecret: '{{ printf "%s-clickhouse-credentials" .Release.Name }}'
     existingSecretKey: admin-password
-  # Persistence: required while clickstack.enabled (telemetry lives in local
-  # MergeTree tables). With ClickStack disabled, set enabled: false to run
-  # ClickHouse stateless - rendered as a Deployment (no StatefulSet, no PVC):
-  # decision logs stay in object storage and the query views are re-seeded
-  # automatically on pod start via /docker-entrypoint-initdb.d
+  # Persistence: required while clickstack.enabled (telemetry + the
+  # decision_logs_recent hot tier live in local MergeTree tables). Statefulness
+  # is DERIVED: with ClickStack disabled the chart always renders ClickHouse
+  # stateless - a Deployment with emptyDir (no StatefulSet, no PVC) - regardless
+  # of this flag; decision logs stay in object storage and the query views are
+  # re-seeded automatically on pod start via /docker-entrypoint-initdb.d.
+  # Setting enabled: false while ClickStack is on fails the render.
   persistence:
     enabled: true
     size: 100Gi
@@ -1445,8 +1450,12 @@ vector:
       #   bucket: "your-bucket"
       #   region: "us-east-1"
       #   key_prefix: "decision-logs/year=%Y/month=%m/day=%d/hour=%H/"
-      #   filename_extension: "ndjson"
-      #   compression: gzip
+      #   # Extension MUST end in .zst (or .gz): ClickHouse's named collection
+      #   # globs *.{gz,zst} and auto-detects compression from the extension.
+      #   # A bare "ndjson" extension uploads fine but is invisible to the app.
+      #   # (azure_blob has no filename_extension; it writes .log.zst itself.)
+      #   filename_extension: "ndjson.zst"
+      #   compression: zstd
       #   encoding:
       #     codec: json
       #   framing:

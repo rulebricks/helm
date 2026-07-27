@@ -1,0 +1,238 @@
+{{- if .Values.clickhouse.enabled }}
+{{- $ch := .Values.clickhouse }}
+{{- $storage := .Values.global.storage | default dict }}
+{{- $provider := $storage.provider | default "s3" }}
+{{- $path := include "rulebricks.storage.path" (list . "decisionLogs") }}
+{{- $rcloneImage := include "rulebricks.image" (dict "root" . "image" .Values.global.images.rclone "name" "rclone") }}
+{{- $busyboxImage := include "rulebricks.image" (dict "root" . "image" .Values.global.images.busybox "name" "busybox") }}
+{{- /* Per-provider SQL source/destination templates for one hour of archive.
+     __HOUR__ is substituted by the compact container with the hive path
+     segment (year=Y/month=M/day=D/hour=H). Named-collection key overrides at
+     the call site keep credentials/format/structure from the collection while
+     narrowing the read to one hour and pointing the write at that hour's
+     compacted.parquet. gcs() shares the s3 settings family, so
+     s3_truncate_on_insert covers both. */}}
+{{- $srcTmpl := "" }}{{- $dstTmpl := "" }}{{- $truncSetting := "s3_truncate_on_insert" }}
+{{- if eq $provider "azure-blob" }}
+{{- $srcTmpl = printf "azureBlobStorage(decision_logs_azure, blob_path='%s/__HOUR__/*.{gz,zst}')" $path }}
+{{- $dstTmpl = printf "azureBlobStorage(decision_logs_parquet_azure, blob_path='%s/__HOUR__/compacted.parquet')" $path }}
+{{- $truncSetting = "azure_truncate_on_insert" }}
+{{- else if eq $provider "gcs" }}
+{{- $base := include "rulebricks.storage.gcsBaseUrl" . }}
+{{- $srcTmpl = printf "gcs(decision_logs_gcs, url='%s/__HOUR__/*.{gz,zst}')" $base }}
+{{- $dstTmpl = printf "gcs(decision_logs_parquet_gcs, url='%s/__HOUR__/compacted.parquet')" $base }}
+{{- else }}
+{{- $base := include "rulebricks.storage.s3BaseUrl" . }}
+{{- $srcTmpl = printf "s3(decision_logs_s3, url='%s/__HOUR__/*.{gz,zst}')" $base }}
+{{- $dstTmpl = printf "s3(decision_logs_parquet_s3, url='%s/__HOUR__/compacted.parquet')" $base }}
+{{- end }}
+{{- /* Decision-log archive compaction: rewrite closed HOURS of raw NDJSON into
+     one sorted Parquet object per hour, then delete that hour's raw files.
+     Parquet gives the archive column pruning and row-group min/max timestamp
+     stats, so historical queries stop paying full decompress-and-parse; the
+     raw tail shrinks to the 2 days the age floor leaves uncompacted.
+
+     Hour granularity is load-bearing: the ORDER BY in the rewrite is the one
+     non-streaming stage, and a day-sized sort would blow the per-query memory
+     cap or spill tens of GB onto the ClickHouse volume. One hour bounds the
+     sort, the spill, the Parquet object size, and the retry unit; even
+     unsorted, hour-sized objects keep row-group stats within one hour.
+
+     Stage layout mirrors db-backup-cronjob.yaml (rclone, tri-cloud auth) and
+     clickhouse-retention-cronjob.yaml (busybox+wget SQL over HTTP; the
+     hardened clickhouse image has no shell):
+       1. discover (rclone):  list hour prefixes that still hold raw files
+       2. compact (busybox):  per hour, INSERT Parquet + verify count > 0
+       3. cleanup (rclone):   delete raw files ONLY for verified hours
+     Deleting after verify means an hour lives in exactly one tier; a run
+     dying between write and delete double-counts that hour transiently until
+     the next idempotent (truncate-on-insert) run converges.
+
+     Runs under the ClickHouse ServiceAccount: the CLI's workload-identity
+     step binds it to the same storage principal Vector writes with, which is
+     what already authorizes the server's archive reads - and rclone here
+     rides the same identity. */}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-compaction" (include "rulebricks.clickhouse.fullname" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      # 48 hours/run x a few minutes per hour rewrite, with slack.
+      activeDeadlineSeconds: 14400
+      template:
+        metadata:
+          labels:
+            {{- include "rulebricks.clickhouse.selectorLabels" . | nindent 12 }}
+            rulebricks.com/workload-group: infrastructure
+            {{- include "rulebricks.storage.podLabels" . | nindent 12 }}
+            {{- with .Values.global.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        spec:
+          restartPolicy: Never
+          {{- if $ch.serviceAccount.create }}
+          serviceAccountName: {{ include "rulebricks.clickhouse.fullname" . }}
+          {{- end }}
+          imagePullSecrets:
+            - name: {{ include "rulebricks-chart.registrySecretName" . }}
+          volumes:
+            - name: work
+              emptyDir: {}
+          initContainers:
+            - name: discover
+              image: {{ $rcloneImage | quote }}
+              imagePullPolicy: IfNotPresent
+              env:
+                {{- include "rulebricks.compaction.rcloneEnv" . | nindent 16 }}
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "256Mi"
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  # Hour prefixes that still hold raw NDJSON. Lexicographic
+                  # sort of zero-padded hive segments = chronological order.
+                  rclone lsf "dest:${RB_TARGET}/" -R --files-only --max-depth 5 \
+                    --include "*.gz" --include "*.zst" \
+                    | sed 's|/[^/]*$||' | sort -u > /work/hours-all.txt
+                  echo "raw hour prefixes: $(wc -l < /work/hours-all.txt)"
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+            - name: compact
+              image: {{ $busyboxImage | quote }}
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                runAsNonRoot: true
+                runAsUser: 65532
+                runAsGroup: 65532
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: CLICKHOUSE_HOST
+                  value: {{ include "rulebricks.clickhouse.fullname" . | quote }}
+                - name: CLICKHOUSE_USER
+                  value: {{ $ch.auth.username | default "rulebricks" | quote }}
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "rulebricks.clickhouse.credentialSecret" . }}
+                      key: {{ $ch.auth.existingSecretKey | default "admin-password" }}
+                - name: CH_COLUMNS
+                  value: {{ include "rulebricks.clickhouse.decisionLogSelectColumns" . | quote }}
+                - name: CH_SRC_TMPL
+                  value: {{ $srcTmpl | quote }}
+                - name: CH_DST_TMPL
+                  value: {{ $dstTmpl | quote }}
+                - name: CH_TRUNCATE_SETTING
+                  value: {{ $truncSetting | quote }}
+              resources:
+                requests:
+                  cpu: "10m"
+                  memory: "32Mi"
+                limits:
+                  cpu: "100m"
+                  memory: "64Mi"
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  q() {
+                    wget -T 3600 -q -O - \
+                      --header "X-ClickHouse-User: ${CLICKHOUSE_USER}" \
+                      --header "X-ClickHouse-Key: ${CLICKHOUSE_PASSWORD}" \
+                      --post-data "$1" \
+                      "http://${CLICKHOUSE_HOST}:8123/?${2:-}"
+                  }
+                  # Only hours closed for >= 48h are compacted: Vector flushes
+                  # every 5 minutes and retries far shorter than that, so a
+                  # candidate hour can no longer gain raw files.
+                  cutoff=$(q "SELECT formatDateTime(now('UTC') - INTERVAL 48 HOUR, '%Y%m%d%H') FORMAT TSVRaw")
+                  : > /work/delete.txt
+                  n=0
+                  while IFS= read -r hour; do
+                    if [ "$n" -ge 48 ]; then
+                      echo "backlog cap (48 hours/run) reached; the rest compacts on later runs"
+                      break
+                    fi
+                    hnum=$(printf '%s' "$hour" | tr -cd '0-9')
+                    [ -n "$hnum" ] || continue
+                    [ "$hnum" -lt "$cutoff" ] || continue
+                    src=$(printf '%s' "$CH_SRC_TMPL" | sed "s|__HOUR__|$hour|")
+                    dst=$(printf '%s' "$CH_DST_TMPL" | sed "s|__HOUR__|$hour|")
+                    echo "compacting ${hour}"
+                    # truncate-on-insert makes re-runs overwrite (idempotent).
+                    # max_threads=2 so a rewrite cannot starve interactive
+                    # queries on the 4-core server; external sort bounds the
+                    # ORDER BY at ~1GiB memory, spilling a few bounded GB for
+                    # outsized hours instead of hitting the query memory cap.
+                    q "INSERT INTO FUNCTION ${dst} SELECT ${CH_COLUMNS} FROM ${src} ORDER BY timestamp" \
+                      "${CH_TRUNCATE_SETTING}=1&max_execution_time=3600&max_threads=2&max_insert_threads=1&max_bytes_before_external_sort=1073741824"
+                    # Verify from Parquet metadata (cheap footer read). Only
+                    # verified hours are eligible for raw deletion; a zero or
+                    # unreadable count leaves the raw files in place.
+                    rows=$(q "SELECT count() FROM ${dst} FORMAT TSVRaw" "" || echo 0)
+                    if [ "${rows:-0}" -gt 0 ] 2>/dev/null; then
+                      echo "verified ${hour}: ${rows} rows in parquet"
+                      echo "$hour" >> /work/delete.txt
+                    else
+                      echo "NOT deleting raw files for ${hour}: parquet count was '${rows}'"
+                    fi
+                    n=$((n + 1))
+                  done < /work/hours-all.txt
+                  echo "hours verified for raw cleanup: $(wc -l < /work/delete.txt)"
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+          containers:
+            - name: cleanup
+              image: {{ $rcloneImage | quote }}
+              imagePullPolicy: IfNotPresent
+              env:
+                {{- include "rulebricks.compaction.rcloneEnv" . | nindent 16 }}
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "256Mi"
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  if [ ! -s /work/delete.txt ]; then
+                    echo "no verified hours; nothing to delete"
+                    exit 0
+                  fi
+                  while IFS= read -r hour; do
+                    echo "deleting raw files for ${hour}"
+                    # Include filters keep compacted.parquet (same directory)
+                    # untouched: only the replaced raw NDJSON goes.
+                    rclone delete "dest:${RB_TARGET}/${hour}/" \
+                      --include "*.gz" --include "*.zst"
+                  done < /work/delete.txt
+                  echo "cleanup complete"
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+{{- end }}

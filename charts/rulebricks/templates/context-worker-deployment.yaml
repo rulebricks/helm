@@ -1,0 +1,161 @@
+{{- if eq (include "rulebricks-chart.contexts.enabled" .) "true" }}
+{{- $contexts := .Values.hps.contexts -}}
+{{- $worker := $contexts.workers -}}
+{{- $port := ($worker.service | default dict).port | default 3000 -}}
+{{- $brokers := .Values.app.logging.kafkaBrokers | default (include "rulebricks-chart.kafka.bootstrapServers" .) -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rulebricks-chart.context-worker.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: context-worker
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ include "rulebricks-chart.context-worker.fullname" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ $port }}
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rulebricks-chart.context-worker.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: context-worker
+spec:
+  replicas: {{ $worker.replicas | default 4 }}
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: "25%"
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "rulebricks-chart.context-worker.fullname" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "rulebricks-chart.context-worker.fullname" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: context-worker
+        {{- if not (hasKey ($worker.podLabels | default dict) "rulebricks.com/workload-group") }}
+        rulebricks.com/workload-group: application
+        {{- end }}
+        {{- with .Values.global.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with $worker.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if or .Values.global.podAnnotations $worker.podAnnotations }}
+      annotations:
+        {{- with .Values.global.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with $worker.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "rulebricks-chart.hps-worker.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 90
+      imagePullSecrets:
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
+      {{- $pcEnabled := true }}
+      {{- if and .Values.global.priorityClasses (hasKey .Values.global.priorityClasses "enabled") }}
+        {{- $pcEnabled = .Values.global.priorityClasses.enabled }}
+      {{- end }}
+      {{- $burstPC := $worker.priorityClassName | default (ternary (printf "%s-burst" .Release.Name) "" $pcEnabled) }}
+      {{- with $burstPC }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- $nodeSelector := $worker.nodeSelector | default dict }}
+      {{- if and (not $nodeSelector) .Values.global.scheduling }}
+        {{- $nodeSelector = .Values.global.scheduling.nodeSelector | default dict }}
+      {{- end }}
+      {{- with $nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- $tolerations := $worker.tolerations | default list }}
+      {{- if and (not $tolerations) .Values.global.scheduling }}
+        {{- $tolerations = .Values.global.scheduling.tolerations | default list }}
+      {{- end }}
+      {{- $tolerations = append $tolerations (dict "key" "rulebricks.com/pool" "operator" "Equal" "value" "burst" "effect" "NoSchedule") }}
+      tolerations:
+        {{- toYaml $tolerations | nindent 8 }}
+      {{- $affinity := $worker.affinity | default dict }}
+      {{- if and (not $affinity) .Values.global.scheduling }}
+        {{- $affinity = .Values.global.scheduling.affinity | default dict }}
+      {{- end }}
+      {{- if not $affinity }}
+        {{- $affinity = dict "podAntiAffinity" (dict "preferredDuringSchedulingIgnoredDuringExecution" (list (dict "weight" 100 "podAffinityTerm" (dict "labelSelector" (dict "matchExpressions" (list (dict "key" "rulebricks.com/workload-group" "operator" "In" "values" (list "infrastructure")))) "topologyKey" "kubernetes.io/hostname")))) }}
+      {{- end }}
+      {{- if not (hasKey $affinity "nodeAffinity") }}
+        {{- $burstAffinity := dict "preferredDuringSchedulingIgnoredDuringExecution" (list (dict "weight" 100 "preference" (dict "matchExpressions" (list (dict "key" "rulebricks.com/pool" "operator" "In" "values" (list "burst")))))) }}
+        {{- $affinity = merge (dict "nodeAffinity" $burstAffinity) $affinity }}
+      {{- end }}
+      affinity:
+        {{- toYaml $affinity | nindent 8 }}
+      initContainers:
+        - name: wait-for-kafka
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" .Values.global.images.busybox "name" "busybox") | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-ec"]
+          env:
+            - name: KAFKA_BOOTSTRAP
+              value: {{ $brokers | quote }}
+          args:
+            - |
+              broker="${KAFKA_BOOTSTRAP%%,*}"
+              host="${broker%:*}"
+              port="${broker##*:}"
+              if [ "$host" = "$port" ]; then port=9092; fi
+              host="${host#\[}"; host="${host%\]}"
+              echo "Waiting for Kafka bootstrap ${host}:${port} ..."
+              until echo | nc -w 2 "$host" "$port" 2>/dev/null; do
+                sleep 2
+              done
+      containers:
+        - name: context-worker
+          image: {{ include "rulebricks-chart.context-worker.image" . | quote }}
+          imagePullPolicy: {{ .Values.hps.image.pullPolicy }}
+          {{- with $worker.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $worker.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $port }}
+              protocol: TCP
+          resources:
+            {{- toYaml $worker.resources | nindent 12 }}
+          livenessProbe:
+            {{- toYaml $worker.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml $worker.readinessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml $worker.startupProbe | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "rulebricks-chart.app.configmap" . }}
+          env:
+            {{- include "rulebricks-chart.contexts.databaseEnv" . | nindent 12 }}
+            {{- include "rulebricks-chart.contexts.env" (dict "root" . "role" "worker") | nindent 12 }}
+            {{- include "rulebricks-chart.kafka.credentialsEnv" . | nindent 12 }}
+            {{- include "rulebricks-chart.tracing.env" (dict "root" . "serviceName" "rulebricks-context-worker") | nindent 12 }}
+{{- end }}

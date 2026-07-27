@@ -77,7 +77,9 @@ data:
 {{ include "rulebricks.clickhouse.queryLimitsXml" $cctx | indent 4 }}
   11-named-collection-access.xml: |
 {{ include "rulebricks.clickhouse.userAccessXml" $cctx | indent 4 }}
-{{- if not .Values.clickhouse.persistence.enabled }}
+{{- /* Statefulness is derived the same way as in clickhouse-workload.yaml:
+       stateful only while ClickStack is enabled. Keep the two in sync. */}}
+{{- if not (and .Values.clickhouse.persistence.enabled .Values.global.clickstack.enabled) }}
 ---
 {{- /* Stateless mode only: mounted at /docker-entrypoint-initdb.d so the image
        entrypoint re-seeds the decision-log views whenever a pod starts with a

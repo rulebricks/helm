@@ -33,6 +33,20 @@ timestamp, api_key, user_id, environment, ip, method, url, status, rule_name, ru
       <use_environment_credentials>1</use_environment_credentials>
       <structure>{{ include "rulebricks.clickhouse.decisionLogStructure" . }}</structure>
     </decision_logs_s3>
+    {{- /* Compacted tier: the compaction CronJob rewrites closed hours of raw
+           NDJSON into sorted per-hour Parquet objects in the same prefix (see
+           clickhouse-retention/compaction CronJobs). Parquet gives the archive
+           branch column pruning and row-group min/max timestamp stats, so
+           time-bounded queries stop paying full decompress-and-parse. Reads
+           tolerate an empty/no-match glob (s3_throw_on_zero_files_match
+           defaults to 0), so this collection is safe before the first
+           compaction run. */}}
+    <decision_logs_parquet_s3>
+      <url>{{ include "rulebricks.storage.s3ParquetUrl" . }}</url>
+      <format>Parquet</format>
+      <use_environment_credentials>1</use_environment_credentials>
+      <structure>{{ include "rulebricks.clickhouse.decisionLogStructure" . }}</structure>
+    </decision_logs_parquet_s3>
     {{- else if eq $provider "azure-blob" }}
     {{- /* azureBlobStorage named collections take storage_account_url + container
            + blob_path (NOT a single `url` like s3); a `url` key is rejected with
@@ -43,16 +57,30 @@ timestamp, api_key, user_id, environment, ip, method, url, status, rule_name, ru
     <decision_logs_azure>
       <storage_account_url>{{ printf "https://%s.blob.core.windows.net" $account }}</storage_account_url>
       <container>{{ $container }}</container>
-      <blob_path>{{ printf "%s/year=*/month=*/day=*/hour=*/*.gz" $path }}</blob_path>
+      <blob_path>{{ printf "%s/year=*/month=*/day=*/hour=*/*.{gz,zst}" $path }}</blob_path>
       <format>JSONEachRow</format>
       <structure>{{ include "rulebricks.clickhouse.decisionLogStructure" . }}</structure>
     </decision_logs_azure>
+    {{- /* See decision_logs_parquet_s3 above for the compacted-tier rationale. */}}
+    <decision_logs_parquet_azure>
+      <storage_account_url>{{ printf "https://%s.blob.core.windows.net" $account }}</storage_account_url>
+      <container>{{ $container }}</container>
+      <blob_path>{{ printf "%s/year=*/month=*/day=*/hour=*/*.parquet" $path }}</blob_path>
+      <format>Parquet</format>
+      <structure>{{ include "rulebricks.clickhouse.decisionLogStructure" . }}</structure>
+    </decision_logs_parquet_azure>
     {{- else if eq $provider "gcs" }}
     <decision_logs_gcs>
       <url>{{ include "rulebricks.storage.gcsUrl" . }}</url>
       <format>JSONEachRow</format>
       <structure>{{ include "rulebricks.clickhouse.decisionLogStructure" . }}</structure>
     </decision_logs_gcs>
+    {{- /* See decision_logs_parquet_s3 above for the compacted-tier rationale. */}}
+    <decision_logs_parquet_gcs>
+      <url>{{ include "rulebricks.storage.gcsParquetUrl" . }}</url>
+      <format>Parquet</format>
+      <structure>{{ include "rulebricks.clickhouse.decisionLogStructure" . }}</structure>
+    </decision_logs_parquet_gcs>
     {{- end }}
   </named_collections>
 </clickhouse>
@@ -131,6 +159,7 @@ init flow unless a .sh file is present, so this MUST be a shell script, not raw
 SQL (a prior .sql version was silently never executed -> "Database rulebricks
 does not exist"). It creates:
   - decision_logs_archive: object-storage external view (durable archive)
+  - decision_logs_recent: local MergeTree hot tier (ClickStack mode only)
   - decision_logs: compatibility view used by the app
 Keep the rendered output on a SINGLE line: the subchart serializes initdb values
 as a single-quoted YAML scalar, which folds newlines to spaces and would
@@ -144,21 +173,57 @@ otherwise corrupt a multi-line script.
        view step crashloops. Deriving from timestamp always resolves (timestamp is in
        the named-collection structure), survives an empty bucket, and keeps the
        decision_logs view stable. Keep on a SINGLE line. */ -}}
+{{- /* Hot tier (ClickStack mode only): decision_logs_recent is a size-bounded
+       CACHE, never the system of record - Vector always writes the durable
+       archive to object storage and best-effort dual-writes here.
+       - Daily partitions (toYYYYMMDD) so the retention CronJob has fine-grained
+         eviction units; it drops the oldest partition while disk free space is
+         low (see clickhouse-retention-cronjob.yaml). There is deliberately NO
+         time TTL: eviction is disk-pressure-driven, so the hot window sizes
+         itself to actual traffic instead of a guessed retention number.
+       - min_free_disk_ratio_to_perform_insert (MergeTree setting, ClickHouse
+         >= 24.10) is the backstop if the CronJob dies: inserts into this table
+         fail before the volume fills, protecting the otel database and the
+         query path on the same PVC.
+       - tokenbf_v1 skip indexes accelerate the app's bare-term DDQL search
+         (request/response/decision LIKE '%needle%') for whole-token needles
+         (IDs, emails, slugs); ngrambf_v1 would cover arbitrary substrings but
+         costs far more storage.
+       - The decision_logs view splits hot/cold on a DYNAMIC boundary read from
+         system.parts metadata: the archive branch serves everything OLDER than
+         the oldest hot partition. Dropping a partition therefore never punches
+         a hole - the archive transparently covers the evicted range - and a
+         fresh/empty hot table routes everything to the archive (minOrNull is
+         required: plain min() over an empty set returns 0, not NULL, which
+         would silently exclude the whole archive). Whole-day granularity is
+         correct because whole daily partitions are the eviction unit. */ -}}
 {{- define "rulebricks.clickhouse.decisionLogsViewSql" -}}
 {{- $provider := .Values.global.storage.provider | default "s3" -}}
 {{- $source := "s3(decision_logs_s3)" -}}
+{{- $parquetSource := "s3(decision_logs_parquet_s3)" -}}
 {{- if eq $provider "azure-blob" -}}
 {{- $source = "azureBlobStorage(decision_logs_azure)" -}}
+{{- $parquetSource = "azureBlobStorage(decision_logs_parquet_azure)" -}}
 {{- else if eq $provider "gcs" -}}
 {{- $source = "gcs(decision_logs_gcs)" -}}
+{{- $parquetSource = "gcs(decision_logs_parquet_gcs)" -}}
 {{- end -}}
+{{- $clickstack := dig "clickstack" dict (.Values.global | default dict) -}}
+{{- $accelerated := $clickstack.enabled | default false -}}
 {{- $columns := include "rulebricks.clickhouse.decisionLogSelectColumns" . -}}
 {{- $otelDb := .Values.otelDatabase | default "otel" -}}
 {{- /* Reads through these views REQUIRE use_hive_partitioning=0, set in the
        default profile (queryLimitsXml above). A view-level SETTINGS clause does
        NOT reach the underlying s3() storage read, so the profile is the only
        place that works. See queryLimitsXml for the full rationale. */ -}}
-CREATE DATABASE IF NOT EXISTS rulebricks; CREATE DATABASE IF NOT EXISTS {{ $otelDb }}; CREATE OR REPLACE VIEW rulebricks.decision_logs_archive AS SELECT {{ $columns }}, toYear(timestamp) AS year, toMonth(timestamp) AS month, toDayOfMonth(timestamp) AS day, toHour(timestamp) AS hour FROM {{ $source }}; CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive;
+{{- /* The archive is TWO object-storage tiers behind one view: raw NDJSON
+       (the tail Vector is still writing) UNION ALL compacted per-hour Parquet
+       (rewritten by the compaction CronJob). An hour lives in exactly one tier
+       - the CronJob deletes an hour's raw files only after its Parquet object
+       verifies - except for a transient window if a compaction run dies
+       between write and delete, in which case that one hour double-counts
+       until the next (idempotent, truncate-on-insert) run converges. */ -}}
+CREATE DATABASE IF NOT EXISTS rulebricks; CREATE DATABASE IF NOT EXISTS {{ $otelDb }}; CREATE OR REPLACE VIEW rulebricks.decision_logs_archive AS SELECT {{ $columns }}, toYear(timestamp) AS year, toMonth(timestamp) AS month, toDayOfMonth(timestamp) AS day, toHour(timestamp) AS hour FROM {{ $source }} UNION ALL SELECT {{ $columns }}, toYear(timestamp) AS year, toMonth(timestamp) AS month, toDayOfMonth(timestamp) AS day, toHour(timestamp) AS hour FROM {{ $parquetSource }};{{- if $accelerated }} CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent ({{ include "rulebricks.clickhouse.decisionLogLocalStructure" . }}, year UInt16 MATERIALIZED toYear(timestamp), month UInt8 MATERIALIZED toMonth(timestamp), day UInt8 MATERIALIZED toDayOfMonth(timestamp), hour UInt8 MATERIALIZED toHour(timestamp), INDEX idx_request_tokens request TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4, INDEX idx_response_tokens response TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4, INDEX idx_decision_tokens decision TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4) ENGINE = MergeTree PARTITION BY toYYYYMMDD(timestamp) ORDER BY (api_key, timestamp, status) SETTINGS min_free_disk_ratio_to_perform_insert = 0.2; CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent UNION ALL SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive WHERE toYYYYMMDD(timestamp) < (SELECT ifNull(minOrNull(toUInt32(partition)), toUInt32(29990101)) FROM system.parts WHERE database = 'rulebricks' AND table = 'decision_logs_recent' AND active);{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive;{{- end }}
 {{- end -}}
 
 {{- /* Legacy shell wrapper, retained for the Bitnami-style initdb path and the CLI's

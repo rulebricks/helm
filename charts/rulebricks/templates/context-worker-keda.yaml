@@ -1,0 +1,81 @@
+{{- if and (eq (include "rulebricks-chart.contexts.enabled" .) "true") .Values.hps.contexts.workers.keda.enabled }}
+{{- $contexts := .Values.hps.contexts -}}
+{{- $keda := $contexts.workers.keda -}}
+{{- $partitions := int ($contexts.partitions | default 1) -}}
+{{- $maxReplicas := int ($keda.maxReplicaCount | default 1) -}}
+{{- if gt $maxReplicas $partitions }}
+{{- fail (printf "hps.contexts.workers.keda.maxReplicaCount (%d) must be <= hps.contexts.partitions (%d)" $maxReplicas $partitions) }}
+{{- end }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "rulebricks-chart.context-worker.fullname" . }}-scaler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: context-worker-scaler
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "rulebricks-chart.context-worker.fullname" . }}
+  minReplicaCount: {{ $keda.minReplicaCount | default ($contexts.workers.replicas | default 4) }}
+  maxReplicaCount: {{ $maxReplicas }}
+  pollingInterval: {{ $keda.pollingInterval | default 5 }}
+  cooldownPeriod: {{ $keda.cooldownPeriod | default 300 }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          selectPolicy: Max
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 15
+            - type: Pods
+              value: 8
+              periodSeconds: 15
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          selectPolicy: Max
+          policies:
+            - type: Percent
+              value: 25
+              periodSeconds: 60
+  triggers:
+    {{- if not (include "rulebricks-chart.kafka.gatedTokenAuth" .) }}
+    - type: kafka
+      metadata:
+        {{- $externalKafka := false }}
+        {{- $brokers := include "rulebricks-chart.kafka.bootstrapServers" . }}
+        {{- if .Values.app.logging.kafkaBrokers }}
+          {{- $externalKafka = true }}
+          {{- $brokers = .Values.app.logging.kafkaBrokers }}
+        {{- end }}
+        bootstrapServers: {{ $brokers | quote }}
+        consumerGroup: {{ $contexts.consumerGroup | default "context-workers" | quote }}
+        topic: {{ include "rulebricks-chart.contexts.topic" . | quote }}
+        lagThreshold: {{ $keda.lagThreshold | default 100 | quote }}
+        offsetResetPolicy: earliest
+        allowIdleConsumers: "false"
+      {{- if and $externalKafka (include "rulebricks-chart.kafka.awsIamAuth" .) }}
+        {{- $sasl := (((.Values.app).logging).kafkaSasl) | default dict }}
+        tls: enable
+        sasl: oauthbearer
+        saslTokenProvider: aws_msk_iam
+        awsRegion: {{ required "app.logging.kafkaSasl.region is required when kafkaSasl.mechanism is aws-iam" $sasl.region }}
+      authenticationRef:
+        name: {{ include "rulebricks-chart.kafka.triggerAuthName" . }}
+      {{- else if include "rulebricks-chart.kafka.kedaSaslMode" . }}
+        tls: {{ include "rulebricks-chart.kafka.kedaTlsMode" . }}
+        sasl: {{ include "rulebricks-chart.kafka.kedaSaslMode" . }}
+      authenticationRef:
+        name: {{ include "rulebricks-chart.kafka.triggerAuthName" . }}
+      {{- end }}
+    {{- end }}
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: {{ $keda.cpuThreshold | default 50 | quote }}
+{{- end }}

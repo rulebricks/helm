@@ -1,0 +1,64 @@
+{{- /*
+Cross-chart Context invariants. JSON Schema validates shape/required fields;
+these comparisons need access to both the rulebricks subchart values and the
+parent Kafka topic list, so they are enforced at render time as well as by CLI.
+*/ -}}
+{{- $rulebricks := .Values.rulebricks | default dict -}}
+{{- $hps := $rulebricks.hps | default dict -}}
+{{- $contexts := $hps.contexts | default dict -}}
+{{- if and $contexts.enabled $hps.enabled }}
+  {{- $logging := ($rulebricks.app | default dict).logging | default dict -}}
+  {{- if and (not .Values.kafka.enabled) (not ($logging.kafkaBrokers | default "")) }}
+    {{- fail "rulebricks.hps.contexts.enabled requires embedded Kafka or rulebricks.app.logging.kafkaBrokers" }}
+  {{- end }}
+  {{- $partitions := int (required "rulebricks.hps.contexts.partitions is required" $contexts.partitions) -}}
+  {{- $workerKeda := (($contexts.workers | default dict).keda) | default dict -}}
+  {{- $maxReplicas := int (required "rulebricks.hps.contexts.workers.keda.maxReplicaCount is required" $workerKeda.maxReplicaCount) -}}
+  {{- if gt $maxReplicas $partitions }}
+    {{- fail (printf "rulebricks.hps.contexts.workers.keda.maxReplicaCount (%d) must be <= rulebricks.hps.contexts.partitions (%d)" $maxReplicas $partitions) }}
+  {{- end }}
+  {{- $retention := $contexts.retention | default dict -}}
+  {{- $retentionMs := int64 (required "rulebricks.hps.contexts.retention.milliseconds is required" $retention.milliseconds) -}}
+  {{- $outageMs := mul (int64 (required "rulebricks.hps.contexts.retention.outageWindowSeconds is required" $retention.outageWindowSeconds)) 1000 -}}
+  {{- if lt $retentionMs $outageMs }}
+    {{- fail "rulebricks.hps.contexts.retention.milliseconds must cover retention.outageWindowSeconds" }}
+  {{- end }}
+  {{- $reconciliation := $contexts.reconciliation | default dict -}}
+  {{- if ge (int64 $reconciliation.heartbeatIntervalMilliseconds) (int64 $reconciliation.leaseDurationMilliseconds) }}
+    {{- fail "rulebricks.hps.contexts.reconciliation.heartbeatIntervalMilliseconds must be less than leaseDurationMilliseconds" }}
+  {{- end }}
+  {{- $database := $contexts.database | default dict -}}
+  {{- $_ := required "rulebricks.hps.contexts.database.urlKey is required" $database.urlKey -}}
+  {{- if not ($database.existingSecret | default "") }}
+    {{- $dbSecret := (((.Values.supabase | default dict).secret | default dict).db) | default dict -}}
+    {{- if not ($dbSecret.password | default "") }}
+      {{- fail "Context processing requires rulebricks.hps.contexts.database.existingSecret, or inline supabase.secret.db.password so the chart can create <release>-context-database" }}
+    {{- end }}
+  {{- end }}
+
+  {{- /* Embedded Strimzi and bridge-provisioned external Kafka are chart-managed. */ -}}
+  {{- if or .Values.kafka.enabled ((.Values.kafkaBridge | default dict).enabled | default false) }}
+    {{- $topicName := printf "%s%s" (include "rulebricks.kafka.topicPrefix" .) ($contexts.topic | default "context-work") -}}
+    {{- $found := false -}}
+    {{- range $topic := .Values.kafka.topics }}
+      {{- if eq $topic.name $topicName }}
+        {{- $found = true -}}
+        {{- if ne (int $topic.partitions) $partitions }}
+          {{- fail (printf "Kafka topic %s partitions (%d) must equal rulebricks.hps.contexts.partitions (%d)" $topicName (int $topic.partitions) $partitions) }}
+        {{- end }}
+        {{- if ne (int64 (index $topic.config "retention.ms")) (int64 $retention.milliseconds) }}
+          {{- fail (printf "Kafka topic %s retention.ms must equal rulebricks.hps.contexts.retention.milliseconds" $topicName) }}
+        {{- end }}
+        {{- if ne (int64 (index $topic.config "retention.bytes")) (int64 $retention.bytesPerPartition) }}
+          {{- fail (printf "Kafka topic %s retention.bytes must equal rulebricks.hps.contexts.retention.bytesPerPartition" $topicName) }}
+        {{- end }}
+        {{- if ne (int64 (index $topic.config "max.message.bytes")) (int64 $retention.maxMessageBytes) }}
+          {{- fail (printf "Kafka topic %s max.message.bytes must equal rulebricks.hps.contexts.retention.maxMessageBytes" $topicName) }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+    {{- if not $found }}
+      {{- fail (printf "kafka.topics must include Context work topic %s" $topicName) }}
+    {{- end }}
+  {{- end }}
+{{- end }}
