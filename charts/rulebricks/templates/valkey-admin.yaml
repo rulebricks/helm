@@ -269,8 +269,9 @@ metadata:
     {{- with $ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-    {{- if eq (include "rulebricks-chart.tlsEnabled" .) "true" }}
-    cert-manager.io/cluster-issuer: {{ .Release.Name }}-letsencrypt
+    {{- /* Skipped for bring-your-own certificates (secret created out-of-band). */}}
+    {{- if and (eq (include "rulebricks-chart.tlsEnabled" .) "true") (not .Values.global.tlsCertificatesProvided) }}
+    {{- include "rulebricks.tls.issuerAnnotations" . | nindent 4 }}
     {{- end }}
     {{- if and .Values.global .Values.global.externalDnsEnabled }}
     external-dns.alpha.kubernetes.io/hostname: {{ $ingress.hostname | default (printf "valkey.%s" .Values.global.domain) }}

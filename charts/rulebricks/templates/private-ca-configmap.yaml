@@ -1,0 +1,18 @@
+{{- /*
+Corporate root CA bundle for privately-issued TLS certificates. Mounted into
+the components that call this deployment's own HTTPS endpoints (app, HPS,
+HPS workers) and referenced via NODE_EXTRA_CA_CERTS, which is ADDITIVE to
+Node's default trust store - public endpoints (IdPs, cloud APIs) keep
+verifying. CA certificates are public material, hence a ConfigMap.
+*/ -}}
+{{- if .Values.global.tlsPrivateCaBundle }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-private-ca
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+data:
+  ca.crt: |
+{{ .Values.global.tlsPrivateCaBundle | indent 4 }}
+{{- end }}

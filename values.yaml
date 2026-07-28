@@ -69,6 +69,30 @@ global:
   # Enable TLS/HTTPS - requires DNS records to be configured first
   # Set to `true` when using external-dns OR after manually creating DNS records
   tlsEnabled: false
+  # Bring-your-own certificates: TLS secrets are created out-of-band (by the
+  # Rulebricks CLI from operator-provided PEM files, or manually) under the
+  # names each ingress already expects. Disables all in-chart issuance - no
+  # cert-manager.io annotations are emitted, so even a cluster-wide
+  # cert-manager leaves these ingresses alone. Pair with
+  # cert-manager.enabled=false. Only meaningful while tlsEnabled is true.
+  tlsCertificatesProvided: false
+  # Existing cert-manager issuer: point issuance at an issuer the cluster's
+  # platform team already runs (cert-manager's native Venafi issuer, Venafi's
+  # VenafiClusterIssuer, Vault, a private ACME CA, ...) instead of this
+  # chart's Let's Encrypt ClusterIssuer. Pair with cert-manager.enabled=false
+  # - the customer's cert-manager installation owns the CRDs, and a second
+  # controller instance would fight it. kind/group default to
+  # ClusterIssuer/cert-manager.io when only name is set.
+  tlsIssuerRef:
+    name: ""
+    kind: "ClusterIssuer"
+    group: "cert-manager.io"
+  # Corporate root CA bundle (PEM) for privately-issued certificates. When
+  # set, it is mounted into the components that call this deployment's own
+  # HTTPS endpoints (app, HPS, HPS workers) via NODE_EXTRA_CA_CERTS -
+  # additive to the default trust store, so public endpoints keep working.
+  # CA certificates are public material; a ConfigMap is appropriate.
+  tlsPrivateCaBundle: ""
   # Enable external-dns integration for automatic DNS record management
   # Works with either: the external-dns subchart below, OR an existing cluster-wide external-dns
   externalDnsEnabled: false

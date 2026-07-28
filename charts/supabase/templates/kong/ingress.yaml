@@ -14,8 +14,11 @@ metadata:
   labels:
     {{- include "supabase.labels" . | nindent 4 }}
   annotations:
-    {{- if .Values.global.tlsEnabled }}
-    cert-manager.io/cluster-issuer: {{ .Release.Name }}-letsencrypt
+    {{- /* Skipped for bring-your-own certificates: the TLS secret is created
+         out-of-band, and the annotation would otherwise invite any
+         cluster-wide cert-manager to fight over it. */}}
+    {{- if and .Values.global.tlsEnabled (not .Values.global.tlsCertificatesProvided) }}
+    {{- include "rulebricks.tls.issuerAnnotations" . | nindent 4 }}
     {{- end }}
     {{- if and .Values.global .Values.global.externalDnsEnabled }}
     external-dns.alpha.kubernetes.io/hostname: {{ printf "supabase.%s" .Values.global.domain }}

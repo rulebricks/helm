@@ -60,6 +60,9 @@ spec:
              app-deployment.yaml). */}}
         checksum/app-config: {{ include (print $.Template.BasePath "/app-configmap.yaml") . | sha256sum }}
         checksum/app-secret: {{ include (print $.Template.BasePath "/app-secret.yaml") . | sha256sum }}
+        {{- if .Values.global.tlsPrivateCaBundle }}
+        checksum/private-ca: {{ .Values.global.tlsPrivateCaBundle | sha256sum }}
+        {{- end }}
     spec:
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}
@@ -234,10 +237,28 @@ spec:
                   key: {{ .existingSecretPasswordKey | default "KAFKA_SASL_PASSWORD" }}
             {{- end }}
             {{- end }}
+            {{- /* Corporate root CA for privately-issued ingress certificates
+                 (additive to Node's default trust store). */ -}}
+            {{- if .Values.global.tlsPrivateCaBundle }}
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/rulebricks/ca/ca.crt
+            {{- end }}
             {{- /* OpenTelemetry tracing env (no-op unless global.tracing.enabled) */ -}}
             {{- include "rulebricks-chart.tracing.env" (dict "root" . "serviceName" "rulebricks-hps-worker") | nindent 12 }}
             {{- /* Extra environment variables */ -}}
             {{- with .Values.hps.workers.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- if .Values.global.tlsPrivateCaBundle }}
+          volumeMounts:
+            - name: private-ca
+              mountPath: /etc/rulebricks/ca
+              readOnly: true
+          {{- end }}
+      {{- if .Values.global.tlsPrivateCaBundle }}
+      volumes:
+        - name: private-ca
+          configMap:
+            name: {{ .Release.Name }}-private-ca
+      {{- end }}
 {{- end }}

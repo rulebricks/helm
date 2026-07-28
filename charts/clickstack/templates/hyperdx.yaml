@@ -367,8 +367,9 @@ metadata:
     {{- include "clickstack.labels" . | nindent 4 }}
     app.kubernetes.io/component: hyperdx
   annotations:
-    {{- if $tlsEnabled }}
-    cert-manager.io/cluster-issuer: {{ .Release.Name }}-letsencrypt
+    {{- /* Skipped for bring-your-own certificates (secret created out-of-band). */}}
+    {{- if and $tlsEnabled (not .Values.global.tlsCertificatesProvided) }}
+    {{- include "rulebricks.tls.issuerAnnotations" . | nindent 4 }}
     {{- end }}
     {{- if and .Values.global .Values.global.externalDnsEnabled }}
     external-dns.alpha.kubernetes.io/hostname: {{ $hostname }}

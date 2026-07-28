@@ -1,4 +1,8 @@
-{{- if and (index .Values "cert-manager" "enabled") .Values.global.tlsEnabled }}
+{{- /* The chart's own Let's Encrypt issuer. Not rendered when an existing
+     issuer is referenced (global.tlsIssuerRef) or certificates are provided
+     out-of-band. */}}
+{{- $issuerRef := .Values.global.tlsIssuerRef | default dict }}
+{{- if and (index .Values "cert-manager" "enabled") .Values.global.tlsEnabled (not $issuerRef.name) (not .Values.global.tlsCertificatesProvided) }}
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -17,6 +21,10 @@ spec:
     solvers:
     - http01:
         ingress:
-          class: traefik
+          # ingressClassName (not the older `class:` field): `class` emits only
+          # the legacy kubernetes.io/ingress.class annotation, which Traefik v3
+          # does not honor - solver ingresses must carry spec.ingressClassName
+          # to be routed deterministically.
+          ingressClassName: traefik
 {{- end }}
 

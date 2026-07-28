@@ -33,6 +33,9 @@ spec:
              manual restart. */}}
         checksum/app-config: {{ include (print $.Template.BasePath "/app-configmap.yaml") . | sha256sum }}
         checksum/app-secret: {{ include (print $.Template.BasePath "/app-secret.yaml") . | sha256sum }}
+        {{- if .Values.global.tlsPrivateCaBundle }}
+        checksum/private-ca: {{ .Values.global.tlsPrivateCaBundle | sha256sum }}
+        {{- end }}
         {{- if and .Values.global .Values.global.podAnnotations }}
         {{- toYaml .Values.global.podAnnotations | nindent 8 }}
         {{- end }}
@@ -253,6 +256,14 @@ spec:
                   key: {{ .existingSecretPasswordKey | default "KAFKA_SASL_PASSWORD" }}
             {{- end }}
             {{- end }}
+            {{- /* Corporate root CA for privately-issued ingress certificates:
+                 the app fetches https://supabase.<domain> internally, which
+                 fails TLS verification on a private root without this.
+                 NODE_EXTRA_CA_CERTS is additive to the default trust store. */ -}}
+            {{- if .Values.global.tlsPrivateCaBundle }}
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/rulebricks/ca/ca.crt
+            {{- end }}
             {{- /* OpenTelemetry tracing env (no-op unless global.tracing.enabled) */ -}}
             {{- include "rulebricks-chart.tracing.env" (dict "root" . "serviceName" "rulebricks-app") | nindent 12 }}
             {{- /* Extra environment variables from values */ -}}
@@ -270,3 +281,15 @@ spec:
             {{- with .Values.app.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- if .Values.global.tlsPrivateCaBundle }}
+          volumeMounts:
+            - name: private-ca
+              mountPath: /etc/rulebricks/ca
+              readOnly: true
+          {{- end }}
+      {{- if .Values.global.tlsPrivateCaBundle }}
+      volumes:
+        - name: private-ca
+          configMap:
+            name: {{ .Release.Name }}-private-ca
+      {{- end }}

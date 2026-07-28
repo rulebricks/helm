@@ -1,4 +1,27 @@
 {{/*
+cert-manager issuer annotations for ingress-shim. Emits the generic
+issuer-name/kind/group triple when global.tlsIssuerRef names an existing
+issuer (Venafi, Vault, private ACME - anything the cluster's platform team
+runs), otherwise this chart's Let's Encrypt ClusterIssuer. Template names are
+chart-global, so subcharts (supabase kong/studio, clickstack hyperdx,
+rulebricks valkey-admin) call this too. Callers gate on tlsEnabled and
+NOT tlsCertificatesProvided.
+*/}}
+{{- define "rulebricks.tls.issuerAnnotations" -}}
+{{- $issuer := .Values.global.tlsIssuerRef | default dict -}}
+{{- if $issuer.name -}}
+{{- /* ingress-shim's name key is "cert-manager.io/issuer" (NOT issuer-name,
+     which it silently ignores); kind/group modify it for ClusterIssuer and
+     external-issuer CRDs alike. Verified live against cert-manager v1.21. */ -}}
+cert-manager.io/issuer: {{ $issuer.name }}
+cert-manager.io/issuer-kind: {{ $issuer.kind | default "ClusterIssuer" }}
+cert-manager.io/issuer-group: {{ $issuer.group | default "cert-manager.io" }}
+{{- else -}}
+cert-manager.io/cluster-issuer: {{ .Release.Name }}-letsencrypt
+{{- end -}}
+{{- end -}}
+
+{{/*
 Shared object storage helpers.
 These helpers keep bucket auth and path naming consistent across Vector,
 ClickHouse, and future storage-backed jobs.

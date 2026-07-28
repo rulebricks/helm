@@ -1,4 +1,10 @@
-{{- if and (index .Values "cert-manager" "enabled") .Values.global.tlsEnabled }}
+{{- /* The apex-domain certificate. Rendered whenever SOMETHING can issue it:
+     this chart's cert-manager + Let's Encrypt issuer, or an existing issuer
+     referenced via global.tlsIssuerRef (whose cert-manager installation the
+     cluster already runs, so cert-manager.enabled is false then). Never
+     rendered for bring-your-own certificates. */}}
+{{- $issuerRef := .Values.global.tlsIssuerRef | default dict }}
+{{- if and .Values.global.tlsEnabled (not .Values.global.tlsCertificatesProvided) (or (index .Values "cert-manager" "enabled") $issuerRef.name) }}
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -11,8 +17,14 @@ metadata:
 spec:
   secretName: {{ .Release.Name }}-tls-secret
   issuerRef:
+    {{- if $issuerRef.name }}
+    name: {{ $issuerRef.name }}
+    kind: {{ $issuerRef.kind | default "ClusterIssuer" }}
+    group: {{ $issuerRef.group | default "cert-manager.io" }}
+    {{- else }}
     name: {{ .Release.Name }}-letsencrypt
     kind: ClusterIssuer
+    {{- end }}
   dnsNames:
     - {{ .Values.global.domain }}
   commonName: {{ .Values.global.domain }}
