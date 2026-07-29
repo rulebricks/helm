@@ -1,0 +1,21 @@
+{{- if .Values.clickhouse.enabled }}
+{{- /* The application lives in a subchart and cannot read the parent's
+       ClickHouse and storage values directly. This small parent ConfigMap is
+       therefore the derived-value bridge. Its release-revision suffix changes
+       the app Deployment's envFrom reference on every Helm upgrade, ensuring
+       changed settings restart the process that consumes them. */ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-app-ch-%d" .Release.Name .Release.Revision | trunc 63 | trimSuffix "-" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+data:
+  CLICKHOUSE_DECISION_LOGS_MODE: {{ ternary "table" "archive" .Values.clickhouse.persistence.enabled | quote }}
+  CLICKHOUSE_DECISION_LOGS_TABLE: "decision_logs"
+  # The app substitutes validated UTC day values before using this provider
+  # path for bounded archive/trace fallback queries.
+  CLICKHOUSE_DECISION_LOGS_ARCHIVE_PROVIDER: {{ .Values.global.storage.provider | default "s3" | quote }}
+  CLICKHOUSE_DECISION_LOGS_ARCHIVE_PATH_TEMPLATE: {{ include "rulebricks.storage.decisionLogDayPathTemplate" . | quote }}
+{{- end }}

@@ -274,6 +274,11 @@ spec:
             # Load all non-sensitive config from ConfigMap
             - configMapRef:
                 name: {{ include "rulebricks-chart.app.configmap" . }}
+            # Parent-chart bridge for the persistence-derived decision-log mode.
+            # Optional keeps the rulebricks subchart usable on its own.
+            - configMapRef:
+                name: {{ printf "%s-app-ch-%d" .Release.Name .Release.Revision | trunc 63 | trimSuffix "-" }}
+                optional: true
             # Load all secrets (this provides remaining sensitive values)
             - secretRef:
                 name: {{ include "rulebricks-chart.app.secretName" . | trim }}

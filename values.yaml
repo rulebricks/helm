@@ -900,12 +900,9 @@ strimzi-kafka-operator:
       tag: "1.1.0"
 
 # Rulebricks always deploys ClickHouse for native decision-log query support.
-# Decision logs remain object-storage-backed via a view. When clickstack.enabled
-# is true (the default), ClickHouse also statefully stores operational telemetry
-# AND a decision_logs_recent MergeTree hot tier (a disk-pressure-bounded cache
-# that accelerates decision-log queries; the object-storage archive stays the
-# durable system of record - see templates/_defaults.tpl and
-# templates/clickhouse-retention-cronjob.yaml).
+# With persistence enabled, rulebricks.decision_logs is a direct MergeTree table
+# and the raw object-storage view remains available for trace fallback/import.
+# Without persistence, decision_logs is the object-storage-backed view itself.
 clickhouse:
   enabled: true
   # ClickHouse server (single node; no keeper/replication)
@@ -928,13 +925,23 @@ clickhouse:
     # enabled, clickstack.clickhouse.existingSecret.
     existingSecret: '{{ printf "%s-clickhouse-credentials" .Release.Name }}'
     existingSecretKey: admin-password
-  # Persistence: required while clickstack.enabled (telemetry + the
-  # decision_logs_recent hot tier live in local MergeTree tables). Statefulness
-  # is DERIVED: with ClickStack disabled the chart always renders ClickHouse
-  # stateless - a Deployment with emptyDir (no StatefulSet, no PVC) - regardless
-  # of this flag; decision logs stay in object storage and the query views are
-  # re-seeded automatically on pod start via /docker-entrypoint-initdb.d.
-  # Setting enabled: false while ClickStack is on fails the render.
+  # Persistent decision-log table retention. ClickHouse applies this TTL during
+  # normal merges; changing the value updates the existing table on upgrade.
+  # Stateless mode ignores this setting because object-store lifecycle policy
+  # owns archive retention.
+  decisionLogs:
+    retentionDays: 30
+  # Persistence is the statefulness switch. enabled=true renders a StatefulSet
+  # and stores the direct decision_logs table on a PVC even when ClickStack is
+  # disabled. enabled=false renders a Deployment with emptyDir and serves the
+  # object-storage archive view. ClickStack telemetry also requires local state,
+  # so enabled=false while global.clickstack.enabled=true fails the render.
+  #
+  # PVC sizing: 100Gi is a baseline, not a universal 30-day guarantee. Budget
+  # for retained compressed decision-log volume plus ClickStack telemetry (when
+  # enabled), then leave at least 35% free for MergeTree merges and the
+  # disk-pressure safety valve. As a starting point, divide estimated retained
+  # data by 0.65 and round up to the next storage tier.
   persistence:
     enabled: true
     size: 100Gi
@@ -943,16 +950,19 @@ clickhouse:
       cpu: "1000m"
       memory: "4Gi"
     limits:
-      # Decision-log queries read gzipped NDJSON straight from object storage and
-      # aggregate in memory, so they are CPU- and memory-hungry. The previous
-      # 1 CPU / 2Gi ceiling caused MEMORY_LIMIT_EXCEEDED (server cap ~1.8Gi) and
-      # TIMEOUT_EXCEEDED from CPU throttling. Give the single replica real
-      # headroom (server memory cap becomes ~5.4Gi at 0.9 x 6Gi).
+      # Persistent-mode list queries use the local MergeTree table; stateless
+      # and explicit archive fallbacks still parse compressed NDJSON. Keep enough
+      # headroom for those bounded reads and for background MergeTree merges.
       cpu: "4"
       memory: "12Gi"
   serviceAccount:
     create: true
     annotations: {}
+  # Extra pod-template labels. The CLI sets azure.workload.identity/use here
+  # (with the matching serviceAccount annotation above) so the AKS webhook
+  # injects the credentials ClickHouse needs to read the decision-log archive
+  # from Blob storage.
+  podLabels: {}
   metrics:
     enabled: true
     serviceMonitor:

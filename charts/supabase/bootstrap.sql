@@ -324,6 +324,18 @@ DECLARE r text := nullif(current_setting('bootstrap.app_role', true), '');
 BEGIN
   IF r IS NOT NULL AND EXISTS (SELECT FROM pg_roles WHERE rolname = r) THEN
     EXECUTE format('GRANT supabase_auth_admin TO %I', r);
+    -- Owning a publication requires CREATE on the database. RDS master users
+    -- own the database they created (implicit CREATE), but Azure Flexible
+    -- Server's admin is a non-superuser member of azure_pg_admin and the app
+    -- role starts with no database privileges, so without this grant the
+    -- ALTER below fails with "permission denied for database". Tolerant like
+    -- the schema grant: if bootstrap runs as a role that cannot grant, the
+    -- ALTER surfaces the real error on the next line.
+    BEGIN
+      EXECUTE format('GRANT CREATE ON DATABASE %I TO %I', current_database(), r);
+    EXCEPTION WHEN insufficient_privilege THEN
+      RAISE WARNING 'Could not GRANT CREATE ON DATABASE % TO % - run this as the database owner/master.', current_database(), r;
+    END;
     EXECUTE format('ALTER PUBLICATION supabase_realtime OWNER TO %I', r);
     -- Since PG15, only the owner of "public" can create objects in it. Your app
     -- migrations need CREATE here. On RDS the master user owns public and can grant

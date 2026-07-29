@@ -9,14 +9,10 @@
 {{- if and (not $ch.persistence.enabled) .Values.global.clickstack.enabled }}
 {{- fail "clickhouse.persistence.enabled=false requires the ClickStack observability backend to be disabled (global.clickstack.enabled=false): ClickStack stores telemetry in local MergeTree tables that would be lost on every ClickHouse pod restart. Enable persistence or disable ClickStack." }}
 {{- end }}
-{{- /* Statefulness is DERIVED, not independently settable: ClickHouse is only
-     stateful while ClickStack is enabled (otel telemetry + the
-     decision_logs_recent hot tier live in local MergeTree tables). With
-     ClickStack disabled the pod is always stateless - Deployment, emptyDir,
-     no PVC - even though persistence.enabled defaults to true, so a
-     hand-install that only sets global.clickstack.enabled=false can never
-     end up with a StatefulSet whose PVC holds nothing but system logs. */}}
-{{- $stateful := and $ch.persistence.enabled .Values.global.clickstack.enabled }}
+{{- /* Persistence is the statefulness switch. A PVC stores the direct
+     decision_logs MergeTree table even when ClickStack is disabled; disabling
+     persistence selects the archive-backed Deployment + emptyDir mode. */}}
+{{- $stateful := $ch.persistence.enabled }}
 {{- /* Stateless mode renders a Deployment, not a StatefulSet: there are no
      volume claims and no reliance on stable pod identity (the ClusterIP
      Service fronts the single pod either way), so the workload kind itself
@@ -53,6 +49,9 @@ spec:
       labels:
         {{- include "rulebricks.clickhouse.selectorLabels" . | nindent 8 }}
         {{- with .Values.global.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with $ch.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       annotations:

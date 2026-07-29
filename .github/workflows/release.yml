@@ -127,24 +127,32 @@ jobs:
             exit 1
           end
 
-          # The decision-logs view is seeded by the clickhouse-view post-install Job
-          # (its clickhouse-client args carry the SQL); this replaced the old
-          # -clickhouse-init-scripts Secret mechanism.
-          view_job = docs.find do |doc|
+          # The decision-log schema is seeded by the ClickHouse post-install Job;
+          # persistent mode must expose one direct MergeTree table.
+          bootstrap_job = docs.find do |doc|
             doc["kind"] == "Job" &&
-              doc.to_s.include?("CREATE OR REPLACE VIEW rulebricks.decision_logs")
+              doc.to_s.include?("CREATE TABLE IF NOT EXISTS rulebricks.decision_logs")
           end
-          if view_job.nil?
-            warn "ClickHouse decision-logs view Job not found"
+          if bootstrap_job.nil?
+            warn "ClickHouse decision-logs bootstrap Job not found"
             exit 1
           end
           required = [
             "CREATE DATABASE IF NOT EXISTS otel",
-            "CREATE OR REPLACE VIEW rulebricks.decision_logs"
+            "CREATE OR REPLACE VIEW rulebricks.decision_logs_archive",
+            "CREATE TABLE IF NOT EXISTS rulebricks.decision_logs",
+            "ORDER BY (api_key, timestamp, log_id)",
+            "TTL toDateTime(timestamp) + INTERVAL 30 DAY"
           ]
-          missing = required.reject { |needle| view_job.to_s.include?(needle) }
+          missing = required.reject { |needle| bootstrap_job.to_s.include?(needle) }
           unless missing.empty?
-            warn "ClickHouse view Job is missing: #{missing.join(", ")}"
+            warn "ClickHouse bootstrap Job is missing: #{missing.join(", ")}"
+            exit 1
+          end
+          forbidden = ["decision_logs_parquet_", "CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent"]
+          present = forbidden.select { |needle| bootstrap_job.to_s.include?(needle) }
+          unless present.empty?
+            warn "ClickHouse bootstrap still contains removed objects: #{present.join(", ")}"
             exit 1
           end
           RUBY

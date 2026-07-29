@@ -1,19 +1,13 @@
-{{- if and .Values.clickhouse.enabled .Values.global.clickstack.enabled }}
+{{- if and .Values.clickhouse.enabled .Values.clickhouse.persistence.enabled }}
 {{- $ch := .Values.clickhouse }}
-{{- /* Disk-pressure eviction for the decision_logs_recent hot tier (see
-     _defaults.tpl decisionLogsViewSql). The hot tier is a CACHE over the
-     durable object-storage archive, deliberately bounded by DISK PRESSURE
-     rather than a time TTL: while free space on the ClickHouse volume is
-     below 35%, drop the oldest daily partition and re-check. Reading actual
-     disk state from system.disks (instead of deriving a byte budget from
-     persistence.size) needs no unit math and automatically accounts for the
-     otel telemetry sharing the volume. The 35% floor exists because MergeTree
-     merges need free space roughly equal to the parts being merged; the
-     table-level min_free_disk_ratio_to_perform_insert=0.2 backstop stops
-     ingest before the volume fills even if this CronJob is broken. Only
-     decision_logs_recent partitions are ever dropped - a decision-log flood
-     can never evict otel telemetry - and the decision_logs view's dynamic
-     boundary means the archive transparently serves any evicted range.
+{{- /* Disk-pressure safety valve for the persistent decision_logs table (see
+     _defaults.tpl decisionLogsViewSql). The configured table TTL is the normal
+     retention mechanism. If free space falls below 35%, this job drops the
+     oldest completed daily partition early so MergeTree merges and shared OTel
+     telemetry retain working space. This is intentionally an emergency,
+     lossy action for the local table; the separately written raw archive can
+     still be used for an explicit fallback/import. The table-level
+     min_free_disk_ratio_to_perform_insert=0.2 remains the final backstop.
 
      The hardened clickhouse-server image has no shell, so this runs busybox
      (already mirrored for other init/hook duties) against the ClickHouse HTTP
@@ -102,9 +96,9 @@ spec:
                     # partition_id for toYYYYMMDD partitioning is the YYYYMMDD string,
                     # so lexicographic min = chronologically oldest. min() over an
                     # empty set returns '' for String, which reads as "nothing left".
-                    oldest=$(q "SELECT min(partition_id) FROM system.parts WHERE database = 'rulebricks' AND table = 'decision_logs_recent' AND active FORMAT TSVRaw")
+                    oldest=$(q "SELECT min(partition_id) FROM system.parts WHERE database = 'rulebricks' AND table = 'decision_logs' AND active FORMAT TSVRaw")
                     if [ -z "$oldest" ]; then
-                      echo "free space low but hot tier is empty; nothing to evict"
+                      echo "free space low but decision_logs is empty; nothing to evict"
                       exit 0
                     fi
                     today=$(date -u +%Y%m%d)
@@ -112,8 +106,8 @@ spec:
                       echo "only the active partition remains; leaving it (ingest is bounded by min_free_disk_ratio_to_perform_insert)"
                       exit 0
                     fi
-                    echo "free space low; dropping decision_logs_recent partition ${oldest}"
-                    q "ALTER TABLE rulebricks.decision_logs_recent DROP PARTITION ID '${oldest}'"
+                    echo "free space low; dropping decision_logs partition ${oldest}"
+                    q "ALTER TABLE rulebricks.decision_logs DROP PARTITION ID '${oldest}'"
                     i=$((i + 1))
                   done
                   echo "eviction cap reached this run; continuing next schedule"

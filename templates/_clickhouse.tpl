@@ -1,7 +1,7 @@
 {{/*
 Self-hosted single-node ClickHouse on Docker Hardened Images. Replaces the
 vendored Bitnami clickhouse subchart. The decision-log config (named collections,
-query limits, user access, the decision_logs view SQL) is shared with the CLI via
+query limits, user access, and decision_logs bootstrap SQL) is shared with the CLI via
 the helpers in _defaults.tpl.
 */}}
 

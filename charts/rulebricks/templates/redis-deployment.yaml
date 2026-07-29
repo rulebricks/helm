@@ -9,6 +9,12 @@ metadata:
     app.kubernetes.io/component: redis
 spec:
   replicas: 1
+  # Recreate, not RollingUpdate: the single replica holds an RWO PVC, and a
+  # rolling surge pod deadlocks on it (Multi-Attach: the new pod cannot mount
+  # the volume until the old one dies, which waits on the new pod's
+  # readiness). Only surfaces on upgrades that change the pod spec.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "rulebricks-chart.redis.fullname" . }}
