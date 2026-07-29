@@ -1335,8 +1335,8 @@ vector:
       cpu: "250m"
       memory: "256Mi"
     limits:
-      cpu: "1"
-      memory: "1Gi"
+      cpu: "2"
+      memory: "4Gi"
   service:
     enabled: true
     ports:
