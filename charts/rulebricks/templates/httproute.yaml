@@ -64,6 +64,14 @@ spec:
       backendRefs:
         - name: {{ include "rulebricks-chart.hps.fullname" . }}
           port: 80
+    # Fleet warm-up: pre-scale trigger + status poll (HPS-owned)
+    - matches:
+        - path:
+            type: Exact
+            value: /api/v1/scale
+      backendRefs:
+        - name: {{ include "rulebricks-chart.hps.fullname" . }}
+          port: 80
     - matches:
         - path:
             type: PathPrefix

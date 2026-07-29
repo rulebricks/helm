@@ -201,6 +201,14 @@ spec:
                  bound, not a partition count. */}}
             - name: MAX_WORKERS
               value: "{{ .Values.hps.workers.solutionPartitions | default (.Values.hps.workers.keda.maxReplicaCount | default 8) }}"
+            {{- /* Fleet ceiling the /api/v1/scale warm-up requests: the
+                 worker ScaledObject's replica bound (NOT the partition
+                 count). The KEDA metrics-api trigger reads it back via
+                 /internal/warmup-metric. */}}
+            - name: WORKER_MAX_REPLICAS
+              value: "{{ .Values.hps.workers.keda.maxReplicaCount | default 48 }}"
+            - name: WARMUP_TTL_SECONDS
+              value: "{{ ((.Values.hps.warmup).ttlSeconds) | default 600 }}"
             {{- with .Values.app.logging.kafkaSasl }}
             {{- if .existingSecret }}
             # Optional external Kafka SASL credentials secret

@@ -33,6 +33,7 @@ global:
     rclone: { registry: docker.io, repository: rulebricks/rclone, tag: "1.74.4" }
     busybox: { registry: docker.io, repository: rulebricks/busybox, tag: "1.38.0-alpine" }
     pause: { registry: docker.io, repository: rulebricks/pause, tag: "3.9" }
+    curl: { registry: docker.io, repository: rulebricks/curl, tag: "8.21.0-alpine" }
   # Image pull secret for the private rulebricks/* repos on Docker Hub. References
   # the license registry secret <release>-regcred (index.docker.io, authed by the
   # license PAT). kube-prometheus-stack + cert-manager honor this global value; keda,
@@ -523,7 +524,7 @@ rulebricks:
     # response topic lags.
     keda:
       enabled: true
-      minReplicaCount: 3
+      minReplicaCount: 4
       # ~1 gather pod per 4 workers of fleet ceiling (derivation in the
       # hps-keda.yaml template); the solution-response partition count is the
       # hard upper bound.
@@ -537,6 +538,19 @@ rulebricks:
       # The gather loop is one JS thread: saturation plateaus near ~50% of
       # the 1-CPU request, so the trigger sits just below that plateau.
       cpuThreshold: 45
+    # Fleet warm-up (/api/v1/scale): integrators pre-scale the worker fleet
+    # to its ceiling ahead of large batch workloads (KEDA metrics-api trigger
+    # polling HPS's /internal/warmup-metric; needs the in-cluster Redis).
+    # An unused warm-up costs at most ttlSeconds before normal scale-down
+    # reclaims the capacity.
+    warmup:
+      enabled: true
+      ttlSeconds: 600
+      # One-shot post-install prewarm Job: allocates every reachable burst
+      # node once so image prepull caches images on the VMs before they
+      # deallocate. The CLI enables this on Azure, where Deallocate-parked
+      # VMs keep their disks (and image cache) between bursts.
+      prewarmOnInstall: false
     # Pre-pull HPS server + worker images onto every node so burst scale-outs
     # skip image pulls
     imagePrepull:
@@ -603,10 +617,11 @@ rulebricks:
       solutionPartitions: 128
       keda:
         enabled: true
-        # Baseline (non-scaled) fleet: sized so steady-state throughput needs
-        # no scaling event at all; bursts scale out from here exponentially
-        # (see scalingBehavior defaults in the worker ScaledObject template).
-        minReplicaCount: 8
+        # Baseline (non-scaled) fleet: 28 workers at the 500m CPU request fill
+        # nearly one warm D16 burst node after daemonset/system overhead. This
+        # capacity stays ready with zero lag; bursts jump to the requested
+        # ceiling (see scalingBehavior defaults in the worker ScaledObject).
+        minReplicaCount: 28
         maxReplicaCount: 128
         # Poll fast so bursts are detected within seconds.
         pollingInterval: 5
@@ -615,13 +630,13 @@ rulebricks:
         # batches into <=CHUNK_MAX_ITEMS-payload messages) a message is a
         # bounded unit of work (~50-150ms), so:
         #   lagThreshold ~= target drain seconds * per-worker messages/sec
-        # 50 messages ~= 5-8s of backlog for one worker: one replica is added
-        # per ~5s of fleet backlog, biasing toward early scale-out.
-        lagThreshold: 50
+        # 15 messages ~= 1-2s of backlog for one worker, making a sustained
+        # burst request the fleet ceiling in the first polling window.
+        lagThreshold: 15
         cpuThreshold: 25
         # Optional override for the HPA scaling behavior rendered into the
-        # worker ScaledObject; leave unset to use the chart's aggressive
-        # exponential scale-up / smooth scale-down defaults.
+        # worker ScaledObject; leave unset to use the chart's bang-bang
+        # scale-up / smooth scale-down defaults.
         # scalingBehavior: {}
 
   ingress:
@@ -715,8 +730,14 @@ kafka:
   # forces every internal replication factor to this value.
   replicas: 1
   storage:
-    # Sized against the per-topic retention.bytes caps; Kafka halts on a full disk.
-    size: 20Gi
+    # Sized against the per-topic retention.bytes caps; Kafka halts on a full
+    # disk (observed at 50k solutions/s: decision logs write ~25-35MB/s
+    # compressed, filling a 20Gi volume mid-burst and taking down the RPC
+    # path with it - the broker carries BOTH planes). Worst-case cap math:
+    #   logs                24 partitions x 1Gi   = 24Gi
+    #   solution(+response) 2 x 128 parts x 64Mi  = 16Gi
+    #   KRaft metadata / active segments / fs overhead ~= 10Gi headroom
+    size: 50Gi
     class: gp3
   resources:
     requests:
@@ -787,7 +808,12 @@ kafka:
       replicas: 1
       config:
         retention.ms: "86400000"
-        retention.bytes: "268435456"
+        # Per-partition byte cap. Sized for a HOT partition: single-tenant
+        # bursts key most records to one partition, and a cap smaller than the
+        # burst backlog makes the broker delete unconsumed segments - observed
+        # as silent, permanent decision-log loss at 256Mi under load. The cap
+        # times partitions (24 x 1Gi) must stay within kafka.storage.size.
+        retention.bytes: "1073741824"
         max.message.bytes: "2097152"
   # Topic provisioning for EXTERNAL Kafka (kafka.enabled: false). The Strimzi
   # Topic Operator only runs for the in-cluster broker, and managed clusters
@@ -1034,23 +1060,23 @@ traefik:
   ports:
     # Graceful termination on both entrypoints: keep accepting for 5s after
     # SIGTERM (covers endpoint-removal propagation), then drain in-flight
-    # requests for up to 40s - above the 30s HPS RPC timeout, so a stopping
-    # proxy never severs a still-viable bulk request (Traefik's default is
-    # 10s).
+    # requests for up to 75s - above the 60s HPS RPC timeout (RPC_TIMEOUT_MS),
+    # so a stopping proxy never severs a still-viable bulk request (Traefik's
+    # default is 10s).
     web:
       port: 8000
       exposedPort: 80
       transport:
         lifeCycle:
           requestAcceptGraceTimeout: "5s"
-          graceTimeOut: "40s"
+          graceTimeOut: "75s"
     websecure:
       port: 8443
       exposedPort: 443
       transport:
         lifeCycle:
           requestAcceptGraceTimeout: "5s"
-          graceTimeOut: "40s"
+          graceTimeOut: "75s"
   metrics:
     prometheus:
       enabled: true
@@ -1328,12 +1354,12 @@ vector:
   # (customConfig sinks.decision_logs.batch.max_bytes, ~64 MiB from the CLI) in
   # memory before flushing. The previous 256Mi limit was smaller than that batch,
   # so under load Vector was OOMKilled before it could ever write a blob - which
-  # silently disabled decision-log export. Keep limits.memory comfortably above
-  # the configured batch size.
+  # silently disabled decision-log export. Reserve enough memory for concurrent
+  # batches and keep limits.memory comfortably above the configured batch size.
   resources:
     requests:
-      cpu: "250m"
-      memory: "256Mi"
+      cpu: "500m"
+      memory: "1Gi"
     limits:
       cpu: "2"
       memory: "4Gi"

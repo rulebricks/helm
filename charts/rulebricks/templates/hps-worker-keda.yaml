@@ -23,22 +23,21 @@ spec:
         {{- if .Values.hps.workers.keda.scalingBehavior }}
         {{- toYaml .Values.hps.workers.keda.scalingBehavior | nindent 8 }}
         {{- else }}
-        {{- /* Rule traffic is bursty (idle -> firehose). Scale-up is
-             exponential: act immediately (no stabilization) and double the
-             fleet (or add 8 pods, whichever is greater) every 15s, so
-             min -> max takes ~3-4 doubling periods. Scale-down is smooth: wait
-             out a 5-minute quiet window, then shed at most 25% of replicas per
-             minute so a brief lull between bursts never collapses the fleet. */}}
+        {{- /* Rule traffic is bursty (idle -> firehose). Scale-up is bang-bang:
+             act immediately (no stabilization) and allow one HPA reconcile to
+             add the full fleet ceiling. Creating every requested worker at
+             once gives the cluster autoscaler the complete capacity demand so
+             it can provision every needed burst node in one pass. Scale-down
+             is smooth: wait out a 5-minute quiet window, then shed at most 25%
+             of replicas per minute so a brief lull between bursts never
+             collapses the fleet. */}}
         scaleUp:
           stabilizationWindowSeconds: 0
           selectPolicy: Max
           policies:
-            - type: Percent
-              value: 100
-              periodSeconds: 15
             - type: Pods
-              value: 8
-              periodSeconds: 15
+              value: {{ .Values.hps.workers.keda.maxReplicaCount | default 48 }}
+              periodSeconds: 5
         scaleDown:
           stabilizationWindowSeconds: 300
           selectPolicy: Max
@@ -105,4 +104,27 @@ spec:
     metricType: Utilization
     metadata:
       value: "{{ .Values.hps.workers.keda.cpuThreshold | default 25 }}"
+  {{- /* Fleet warm-up trigger (default on; set hps.warmup.enabled=false to
+       remove). HPS reports the active /api/v1/scale warm-up's requested
+       worker count (or 0) at /internal/warmup-metric; with targetValue "1"
+       the HPA's desired replicas equal that count, and the HPA takes the
+       MAX across triggers - so an active warm-up scales the fleet to its
+       ceiling with zero lag, and expiry hands control back to the lag/CPU
+       triggers and their smooth scale-down. While HPS is briefly
+       unreachable (install/restart) KEDA logs scaler errors but the other
+       triggers keep working - same failure mode the kafka trigger already
+       has against a restarting broker. */}}
+  {{- $warmup := .Values.hps.warmup | default dict }}
+  {{- $warmupEnabled := true }}
+  {{- if hasKey $warmup "enabled" }}
+  {{- $warmupEnabled = $warmup.enabled }}
+  {{- end }}
+  {{- if $warmupEnabled }}
+  - type: metrics-api
+    metricType: AverageValue
+    metadata:
+      url: http://{{ include "rulebricks-chart.hps.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:80/internal/warmup-metric
+      valueLocation: value
+      targetValue: "1"
+  {{- end }}
 {{- end }}

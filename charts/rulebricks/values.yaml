@@ -171,6 +171,20 @@ hps:
     # Gather saturation shows as ~50% of the 1-CPU request (single JS thread
     # pegs one core); 45 fires just below that plateau, 60 never did.
     cpuThreshold: 45
+  # Fleet warm-up (/api/v1/scale): integrators pre-scale the worker fleet to
+  # its ceiling before large batch workloads. Implemented as a KEDA
+  # metrics-api trigger on the worker ScaledObject polling HPS's
+  # /internal/warmup-metric; requires a shared Redis backend (REDIS_URL).
+  warmup:
+    enabled: true
+    # How long one warm-up call holds the fleet at max before normal
+    # scale-down reclaims it. Repeat calls refresh the window.
+    ttlSeconds: 600
+    # One-shot post-install prewarm: allocate every reachable burst node
+    # once so the image-prepull DaemonSet caches images on them before they
+    # deallocate (valuable on Azure, whose burst pool parks VMs with their
+    # disks; pointless where scale-down terminates instances).
+    prewarmOnInstall: false
   # Pre-pull the HPS server + worker images onto every node (DaemonSet) so
   # burst scale-outs skip the image pull on freshly provisioned nodes.
   imagePrepull:
@@ -290,10 +304,10 @@ hps:
       enabled: true
       minReplicaCount: 3
       maxReplicaCount: 50
-      lagThreshold: 100 # Scale up when lag > 100 messages
+      lagThreshold: 25 # Scale up before a sustained backlog develops
       cpuThreshold: 75 # Backup: scale on CPU
       memoryThreshold: 80
-      pollingInterval: 15 # How often to check metrics (seconds)
+      pollingInterval: 5 # How often to check metrics (seconds)
       cooldownPeriod: 300 # Wait before scaling down (seconds)
 
 redis:

@@ -4,7 +4,7 @@ HPS gather-plane autoscaler.
 HPS pods do double duty: they serve HTTP AND consume/parse every chunk
 response from the solution-response topic (the "gather plane"). Gather work
 scales with request traffic, so a fixed replica count becomes the system's
-throughput ceiling. Scale-up is batched (2 pods/30s) rather than exponential:
+throughput ceiling. Scale-up is batched (4 pods/15s) rather than bang-bang:
 each scale event rebalances the response consumer group, which the HPS
 orphan-response relay makes lossless but still briefly pauses consumption.
 */}}
@@ -47,8 +47,8 @@ spec:
           selectPolicy: Max
           policies:
             - type: Pods
-              value: 2
-              periodSeconds: 30
+              value: 4
+              periodSeconds: 15
         scaleDown:
           stabilizationWindowSeconds: 900
           selectPolicy: Max

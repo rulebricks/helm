@@ -617,6 +617,24 @@
                 "cpuThreshold": { "type": ["integer", "string"] }
               }
             },
+            "warmup": {
+              "type": "object",
+              "description": "Fleet warm-up (/api/v1/scale): pre-scale the worker fleet to its ceiling ahead of burst workloads via a KEDA metrics-api trigger polling HPS's /internal/warmup-metric. Requires the shared in-cluster Redis.",
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "ttlSeconds": {
+                  "type": "integer",
+                  "minimum": 30,
+                  "default": 600,
+                  "description": "How long one warm-up call holds the fleet at max before normal scale-down reclaims it; repeat calls refresh the window."
+                },
+                "prewarmOnInstall": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "One-shot post-install Job that allocates every reachable burst node once so image prepull caches images on the VMs before they deallocate. Worth enabling only where scale-down PARKS nodes (Azure Deallocate mode) instead of terminating them."
+                }
+              }
+            },
             "imagePrepull": {
               "type": "object",
               "description": "DaemonSet that pre-pulls the HPS server + worker images onto every node so burst scale-outs skip the image pull on fresh nodes.",

@@ -113,6 +113,19 @@ spec:
               serviceName: {{ include "rulebricks-chart.hps.fullname" $ }}
               servicePort: 80
               {{- end }}
+          # Fleet warm-up: pre-scale trigger + status poll (HPS-owned).
+          - path: /api/v1/scale
+            pathType: Exact
+            backend:
+              {{- if semverCompare ">=1.19-0" $.Capabilities.KubeVersion.GitVersion }}
+              service:
+                name: {{ include "rulebricks-chart.hps.fullname" $ }}
+                port:
+                  number: 80
+              {{- else }}
+              serviceName: {{ include "rulebricks-chart.hps.fullname" $ }}
+              servicePort: 80
+              {{- end }}
           - path: /api/v1/flows/
             pathType: Prefix
             backend:

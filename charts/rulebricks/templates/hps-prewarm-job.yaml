@@ -1,0 +1,85 @@
+{{- /*
+One-shot post-install fleet prewarm.
+
+Freshly installed clusters have never allocated their burst nodes, so the
+first real burst pays full VM provisioning (minutes) instead of a parked-VM
+restart (~1 minute). This hook triggers the same warm-up the /api/v1/scale
+endpoint uses (via the cluster-internal /internal/warmup path - no API key
+exists at install time): workers scale to the fleet ceiling, the cluster
+autoscaler allocates every burst node it can reach, and the image-prepull
+DaemonSet caches the HPS/worker images on each. When the warm-up TTL lapses,
+normal scale-down releases the nodes.
+
+Only worth enabling where scale-down PARKS nodes instead of terminating them
+(Azure Deallocate mode keeps VM disks - and their image cache - between
+bursts), which is why prewarmOnInstall defaults to false and the CLI enables
+it per cloud. Partial prewarms (quota caps, small pools) are fine: whatever
+allocated got its images, and the TTL cleans up regardless - so this job
+succeeds once the warm-up is ACCEPTED, deliberately not waiting for full
+fleet readiness.
+
+The curl image is shell-less; a single curl invocation does the whole job:
+--retry-connrefused/--retry-all-errors waits out HPS still rolling out
+(post-install hooks fire before HPS is necessarily Ready), then the POST
+plants the warm signal.
+*/}}
+{{- $warmup := (.Values.hps).warmup | default dict }}
+{{- if and .Values.hps .Values.hps.enabled .Values.hps.workers.enabled $warmup.prewarmOnInstall }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "rulebricks-chart.hps.fullname" . }}-prewarm
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hps-prewarm
+  annotations:
+    "helm.sh/hook": post-install
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "rulebricks-chart.hps.fullname" . }}-prewarm
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: hps-prewarm
+    spec:
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+      containers:
+        - name: prewarm
+          image: {{ include "rulebricks-chart.image" (dict "root" $ "image" .Values.global.images.curl "name" "curl") | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command: ["curl"]
+          args:
+            - "-sfS"
+            - "-X"
+            - "POST"
+            - "--retry"
+            - "100"
+            - "--retry-delay"
+            - "6"
+            - "--retry-all-errors"
+            - "--retry-connrefused"
+            - "--max-time"
+            - "10"
+            - "http://{{ include "rulebricks-chart.hps.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:80/internal/warmup"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+{{- end }}
