@@ -102,6 +102,10 @@ data:
   {{- if $aiEnabled }}
   AI_ENABLED: "1"
   {{- end }}
+  {{- if and .Values.global .Values.global.ai .Values.global.ai.openaiBaseUrl }}
+  # Optional OpenAI-compatible endpoint; app/HPS default to the public API when unset
+  OPENAI_BASE_URL: {{ .Values.global.ai.openaiBaseUrl | quote }}
+  {{- end }}
   # Kafka topic namespace prefix. Emitted unconditionally because HPS applies it
   # to all topics (including the always-on solution work topics), independent of
   # whether decision logging is enabled.

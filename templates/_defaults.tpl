@@ -8,16 +8,28 @@ dominate the user-facing values.yaml.
        executions by their parent flow. Nullable so direct (non-flow) solves and
        pre-existing archived rows (which lack the keys) read back as NULL. Keep
        all three definitions below column-for-column identical. */ -}}
+{{- /* path_trace carries the compressed-JSON flow path trace (compress-json
+       string) on flows-shaped and flow-trace records. Nullable and appended
+       LAST so pre-existing NDJSON/Parquet archive objects (which lack the
+       key) read back as NULL, and so the decision_logs_recent migration is a
+       plain trailing ADD COLUMN. */ -}}
+{{- /* log_id is an INTERNAL-ONLY unique record id minted at produce time
+       (HPS), backfilled by Vector's normalize transform for legacy
+       producers. It exists as the deterministic ORDER BY tiebreaker for the
+       app's time-sorted pagination (all records of one bulk/flow emission
+       share a single timestamp) and as a dedup key for repairs. It is never
+       surfaced in API responses or the UI. Same trailing-Nullable migration
+       pattern as path_trace: pre-existing archive objects read back NULL. */ -}}
 {{- define "rulebricks.clickhouse.decisionLogStructure" -}}
-timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), trace_id Nullable(String), span_id Nullable(String), flow_execution_id Nullable(String), flow_name Nullable(String), flow_slug Nullable(String), flow_node_id Nullable(String), parallel_execution_id Nullable(String), parallel_path Nullable(String), request String, response String, decision String, params Nullable(String)
+timestamp DateTime64(3, 'UTC'), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), trace_id Nullable(String), span_id Nullable(String), flow_execution_id Nullable(String), flow_name Nullable(String), flow_slug Nullable(String), flow_node_id Nullable(String), parallel_execution_id Nullable(String), parallel_path Nullable(String), request String, response String, decision String, params Nullable(String), path_trace Nullable(String), log_id Nullable(String)
 {{- end -}}
 
 {{- define "rulebricks.clickhouse.decisionLogLocalStructure" -}}
-timestamp DateTime64(3), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), trace_id Nullable(String), span_id Nullable(String), flow_execution_id Nullable(String), flow_name Nullable(String), flow_slug Nullable(String), flow_node_id Nullable(String), parallel_execution_id Nullable(String), parallel_path Nullable(String), request String, response String, decision String, params Nullable(String)
+timestamp DateTime64(3), api_key String, user_id Nullable(String), environment Nullable(String), ip Nullable(String), method Nullable(String), url String, status Int32, rule_name Nullable(String), rule_id Nullable(String), rule_slug Nullable(String), rule_version Nullable(String), operation Nullable(String), level String, error Nullable(String), trace_id Nullable(String), span_id Nullable(String), flow_execution_id Nullable(String), flow_name Nullable(String), flow_slug Nullable(String), flow_node_id Nullable(String), parallel_execution_id Nullable(String), parallel_path Nullable(String), request String, response String, decision String, params Nullable(String), path_trace Nullable(String), log_id Nullable(String)
 {{- end -}}
 
 {{- define "rulebricks.clickhouse.decisionLogSelectColumns" -}}
-timestamp, api_key, user_id, environment, ip, method, url, status, rule_name, rule_id, rule_slug, rule_version, operation, level, error, trace_id, span_id, flow_execution_id, flow_name, flow_slug, flow_node_id, parallel_execution_id, parallel_path, request, response, decision, params
+timestamp, api_key, user_id, environment, ip, method, url, status, rule_name, rule_id, rule_slug, rule_version, operation, level, error, trace_id, span_id, flow_execution_id, flow_name, flow_slug, flow_node_id, parallel_execution_id, parallel_path, request, response, decision, params, path_trace, log_id
 {{- end -}}
 
 {{- define "rulebricks.clickhouse.decisionLogStorageXml" -}}
@@ -198,6 +210,10 @@ otherwise corrupt a multi-line script.
          granule pruning engages for the whole condition. NOTE: CREATE TABLE IF
          NOT EXISTS means existing deployments keep their old index set; new
          indexes apply to fresh installs only (no migration by design).
+       - path_trace IS migrated: the idempotent ALTER ... ADD COLUMN IF NOT
+         EXISTS after the CREATE runs on every upgrade job, so pre-existing
+         decision_logs_recent tables gain the column before the views (which
+         select it) are re-created. Old rows read back as NULL.
        - The decision_logs view splits hot/cold on a DYNAMIC boundary read from
          system.parts metadata: the archive branch serves everything OLDER than
          the oldest hot partition. Dropping a partition therefore never punches
@@ -232,7 +248,24 @@ otherwise corrupt a multi-line script.
        verifies - except for a transient window if a compaction run dies
        between write and delete, in which case that one hour double-counts
        until the next (idempotent, truncate-on-insert) run converges. */ -}}
-CREATE DATABASE IF NOT EXISTS rulebricks; CREATE DATABASE IF NOT EXISTS {{ $otelDb }}; CREATE OR REPLACE VIEW rulebricks.decision_logs_archive AS SELECT {{ $columns }}, toYear(timestamp) AS year, toMonth(timestamp) AS month, toDayOfMonth(timestamp) AS day, toHour(timestamp) AS hour FROM {{ $source }} UNION ALL SELECT {{ $columns }}, toYear(timestamp) AS year, toMonth(timestamp) AS month, toDayOfMonth(timestamp) AS day, toHour(timestamp) AS hour FROM {{ $parquetSource }};{{- if $accelerated }} CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent ({{ include "rulebricks.clickhouse.decisionLogLocalStructure" . }}, year UInt16 MATERIALIZED toYear(timestamp), month UInt8 MATERIALIZED toMonth(timestamp), day UInt8 MATERIALIZED toDayOfMonth(timestamp), hour UInt8 MATERIALIZED toHour(timestamp), INDEX idx_request_tokens request TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4, INDEX idx_response_tokens response TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4, INDEX idx_decision_tokens decision TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4, INDEX idx_flow_execution_id flow_execution_id TYPE bloom_filter(0.01) GRANULARITY 4, INDEX idx_trace_id trace_id TYPE bloom_filter(0.01) GRANULARITY 4) ENGINE = MergeTree PARTITION BY toYYYYMMDD(timestamp) ORDER BY (api_key, timestamp, status) SETTINGS min_free_disk_ratio_to_perform_insert = 0.2; CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent UNION ALL SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive WHERE toYYYYMMDD(timestamp) < (SELECT ifNull(minOrNull(toUInt32(partition)), toUInt32(29990101)) FROM system.parts WHERE database = 'rulebricks' AND table = 'decision_logs_recent' AND active);{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive;{{- end }}
+{{- /* Bootstrap backfill (accelerated mode only): a hot tier created MID-DAY
+       (first ClickStack enablement on an existing archive, or a recreated
+       PVC) would mask that day's earlier archive rows - the decision_logs
+       view serves the archive only for days OLDER than the oldest hot
+       partition, and eviction is disk-pressure-driven, so the gap could
+       persist indefinitely. When the hot table has NO active parts, copy the
+       current UTC day from the archive so the oldest hot partition is
+       complete. The system.parts guard folds to constant-false on every
+       normal upgrade (table already has data), making the statement an
+       idempotent no-op. Per-query SETTINGS lift the profile's 120s execution
+       cap and 50M-row read cap (a heavy day is a one-time large copy) while
+       keeping thread usage polite. Known accepted edges: a job death
+       mid-insert leaves a partial day that the empty-table guard then skips
+       (no worse than the pre-backfill behavior), and rows produced in the
+       ~one-Vector-flush window around the transition can appear in both the
+       backfill and the dual-write (their archived copies predate log_id
+       stamping on the transition day only). */ -}}
+CREATE DATABASE IF NOT EXISTS rulebricks; CREATE DATABASE IF NOT EXISTS {{ $otelDb }}; CREATE OR REPLACE VIEW rulebricks.decision_logs_archive AS SELECT {{ $columns }}, toYear(timestamp) AS year, toMonth(timestamp) AS month, toDayOfMonth(timestamp) AS day, toHour(timestamp) AS hour FROM {{ $source }} UNION ALL SELECT {{ $columns }}, toYear(timestamp) AS year, toMonth(timestamp) AS month, toDayOfMonth(timestamp) AS day, toHour(timestamp) AS hour FROM {{ $parquetSource }};{{- if $accelerated }} CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent ({{ include "rulebricks.clickhouse.decisionLogLocalStructure" . }}, year UInt16 MATERIALIZED toYear(timestamp), month UInt8 MATERIALIZED toMonth(timestamp), day UInt8 MATERIALIZED toDayOfMonth(timestamp), hour UInt8 MATERIALIZED toHour(timestamp), INDEX idx_request_tokens request TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4, INDEX idx_response_tokens response TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4, INDEX idx_decision_tokens decision TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 4, INDEX idx_flow_execution_id flow_execution_id TYPE bloom_filter(0.01) GRANULARITY 4, INDEX idx_trace_id trace_id TYPE bloom_filter(0.01) GRANULARITY 4) ENGINE = MergeTree PARTITION BY toYYYYMMDD(timestamp) ORDER BY (api_key, timestamp, status) SETTINGS min_free_disk_ratio_to_perform_insert = 0.2; ALTER TABLE rulebricks.decision_logs_recent ADD COLUMN IF NOT EXISTS path_trace Nullable(String); ALTER TABLE rulebricks.decision_logs_recent ADD COLUMN IF NOT EXISTS log_id Nullable(String); INSERT INTO rulebricks.decision_logs_recent ({{ $columns }}) SELECT {{ $columns }} FROM rulebricks.decision_logs_archive WHERE toYYYYMMDD(timestamp) = toYYYYMMDD(now('UTC')) AND (SELECT count() FROM system.parts WHERE database = 'rulebricks' AND table = 'decision_logs_recent' AND active) = 0 SETTINGS max_execution_time = 3600, max_rows_to_read = 0, max_threads = 2, max_insert_threads = 1; CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_recent UNION ALL SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive WHERE toYYYYMMDD(timestamp) < (SELECT ifNull(minOrNull(toUInt32(partition)), toUInt32(29990101)) FROM system.parts WHERE database = 'rulebricks' AND table = 'decision_logs_recent' AND active);{{- else }} CREATE OR REPLACE VIEW rulebricks.decision_logs AS SELECT {{ $columns }}, year, month, day, hour FROM rulebricks.decision_logs_archive;{{- end }}
 {{- end -}}
 
 {{- /* Legacy shell wrapper, retained for the Bitnami-style initdb path and the CLI's
@@ -269,6 +302,8 @@ if err == null { . = parsed };
 .error = to_string(.error) ?? null;
 .trace_id = to_string(.trace_id) ?? null;
 .span_id = to_string(.span_id) ?? null;
+.log_id = to_string(.log_id) ?? uuid_v4();
+.path_trace = to_string(.path_trace) ?? null;
 .request = to_string(.request) ?? "null";
 .response = to_string(.response) ?? "null";
 .decision = to_string(.decision) ?? "{}";

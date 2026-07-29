@@ -348,6 +348,10 @@ global:
   ai:
     enabled: false
     openaiApiKey: "" # Your OpenAI API key
+    # Optional OpenAI-compatible API base URL (e.g. an enterprise gateway),
+    # including the version path: https://gateway.example.com/v1
+    # Leave empty to use OpenAI's public API (https://api.openai.com/v1).
+    openaiBaseUrl: ""
   # =============================================================================
   # Secret Reference (for external secret management)
   # Use this to reference a pre-existing secret instead of inline values

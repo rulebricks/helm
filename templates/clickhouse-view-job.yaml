@@ -17,7 +17,11 @@ metadata:
 spec:
   # ClickHouse may still be starting when the hook fires; retry until it answers.
   backoffLimit: 30
-  activeDeadlineSeconds: 900
+  # Generous deadline: the multiquery includes the one-time bootstrap backfill
+  # of the current day from the archive (see decisionLogsViewSql), which is a
+  # potentially heavy INSERT ... SELECT capped at 3600s. Normal runs (guard
+  # folds to no-op) finish in seconds as before.
+  activeDeadlineSeconds: 3900
   template:
     metadata:
       labels:
