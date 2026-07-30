@@ -1782,6 +1782,18 @@ clickstack:
       repository: rulebricks/clickstack-otel-collector
       tag: "2.31.0-r1"
     memoryLimitMiB: 800
+    # Telemetry noise controls (dropped at the gateway before storage). The
+    # defaults keep HTTP trace spans only for the /api/v1 decision API and drop
+    # health-probe/metrics-scrape spans and log lines; spans without HTTP path
+    # attributes (Kafka, workers, DB) always pass so trace trees stay intact.
+    # Unanchored Go regexes, no double quotes; "" disables a rule. See
+    # charts/clickstack/values.yaml for details.
+    filters:
+      traces:
+        httpPathAllowRegex: "^/api/v1(/|$)"
+        httpPathDenyRegex: "^/(api/)?(health|healthz|livez|readyz|metrics|ping)([/?]|$)"
+      logs:
+        bodyDenyRegex: "(GET|HEAD) /(api/)?(health|healthz|livez|readyz|metrics|ping)([ ?]|$)"
     gateway:
       replicas: 1
       resources:

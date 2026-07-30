@@ -1,0 +1,114 @@
+{
+  "name": "Rulebricks API Overview",
+  "tags": ["rulebricks"],
+  "tiles": [
+    {
+      "id": "api-throughput",
+      "x": 0,
+      "y": 0,
+      "w": 12,
+      "h": 8,
+      "config": {
+        "name": "Decision API throughput",
+        "source": "__TRACES_SOURCE_ID__",
+        "displayType": "line",
+        "select": [
+          {
+            "aggFn": "count",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": ""
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene",
+        "groupBy": "ServiceName",
+        "granularity": "auto",
+        "implicitColumnExpression": "SpanName",
+        "numberFormat": { "output": "number" },
+        "filters": []
+      }
+    },
+    {
+      "id": "api-p95-latency",
+      "x": 12,
+      "y": 0,
+      "w": 12,
+      "h": 8,
+      "config": {
+        "name": "Decision API p95 latency (ms)",
+        "source": "__TRACES_SOURCE_ID__",
+        "displayType": "line",
+        "select": [
+          {
+            "aggFn": "quantile",
+            "level": 0.95,
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Duration/1e6"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene",
+        "granularity": "auto",
+        "implicitColumnExpression": "SpanName",
+        "numberFormat": { "output": "number" },
+        "filters": []
+      }
+    },
+    {
+      "id": "api-error-spans",
+      "x": 0,
+      "y": 8,
+      "w": 12,
+      "h": 8,
+      "config": {
+        "name": "Error spans",
+        "source": "__TRACES_SOURCE_ID__",
+        "displayType": "line",
+        "select": [
+          {
+            "aggFn": "count",
+            "aggCondition": "StatusCode:Error",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": ""
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene",
+        "groupBy": "ServiceName",
+        "granularity": "auto",
+        "implicitColumnExpression": "SpanName",
+        "numberFormat": { "output": "number" },
+        "filters": []
+      }
+    },
+    {
+      "id": "service-log-errors",
+      "x": 12,
+      "y": 8,
+      "w": 12,
+      "h": 8,
+      "config": {
+        "name": "Service errors (logs)",
+        "source": "__LOGS_SOURCE_ID__",
+        "displayType": "line",
+        "select": [
+          {
+            "aggFn": "count",
+            "aggCondition": "SeverityText:ERROR OR SeverityText:error",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": ""
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene",
+        "groupBy": "ServiceName",
+        "granularity": "auto",
+        "implicitColumnExpression": "Body",
+        "numberFormat": { "output": "number" },
+        "filters": []
+      }
+    }
+  ]
+}

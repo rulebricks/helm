@@ -1201,6 +1201,25 @@
           "type": "object",
           "properties": {
             "memoryLimitMiB": { "type": "integer", "minimum": 64 },
+            "filters": {
+              "type": "object",
+              "description": "Gateway-side telemetry noise controls. Unanchored Go regexes; must not contain double quotes; empty string disables a rule.",
+              "properties": {
+                "traces": {
+                  "type": "object",
+                  "properties": {
+                    "httpPathAllowRegex": { "type": "string", "pattern": "^[^\"]*$" },
+                    "httpPathDenyRegex": { "type": "string", "pattern": "^[^\"]*$" }
+                  }
+                },
+                "logs": {
+                  "type": "object",
+                  "properties": {
+                    "bodyDenyRegex": { "type": "string", "pattern": "^[^\"]*$" }
+                  }
+                }
+              }
+            },
             "gateway": {
               "type": "object",
               "properties": {

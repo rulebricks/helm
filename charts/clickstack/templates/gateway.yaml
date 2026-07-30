@@ -1,6 +1,14 @@
 {{- $retentionDays := .Values.clickhouse.retentionDays | default 7 | int -}}
 {{- $derivedTtl := printf "%dh" (mul $retentionDays 24) -}}
 {{- $ttl := .Values.clickhouse.ttl | default $derivedTtl -}}
+{{- $filters := .Values.collector.filters | default dict -}}
+{{- $traceFilters := get $filters "traces" | default dict -}}
+{{- $logFilters := get $filters "logs" | default dict -}}
+{{- $traceAllow := get $traceFilters "httpPathAllowRegex" | default "" -}}
+{{- $traceDeny := get $traceFilters "httpPathDenyRegex" | default "" -}}
+{{- $logDeny := get $logFilters "bodyDenyRegex" | default "" -}}
+{{- $traceFilterEnabled := or (ne $traceAllow "") (ne $traceDeny "") -}}
+{{- $logFilterEnabled := ne $logDeny "" -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -85,6 +93,35 @@ data:
         check_interval: 1s
         limit_mib: {{ .Values.collector.memoryLimitMiB | default 800 }}
         spike_limit_mib: {{ div (.Values.collector.memoryLimitMiB | default 800 | int) 4 }}
+{{- if or $traceFilterEnabled $logFilterEnabled }}
+      {{- /* Telemetry noise controls (collector.filters values). Each OTTL
+           condition DROPS matching data. Span rules only look at HTTP server
+           path attributes (http.route / http.target / url.path), so internal
+           spans - Kafka publishes, worker execution, DB calls - always pass
+           and /api/v1 trace trees stay intact. error_mode ignore: a condition
+           that errors (nil attribute, non-string body) keeps the data. */}}
+      filter/noise:
+        error_mode: ignore
+{{- if $traceFilterEnabled }}
+        traces:
+          span:
+{{- if $traceDeny }}
+            - attributes["http.route"] != nil and IsMatch(attributes["http.route"], "{{ $traceDeny }}")
+            - attributes["http.target"] != nil and IsMatch(attributes["http.target"], "{{ $traceDeny }}")
+            - attributes["url.path"] != nil and IsMatch(attributes["url.path"], "{{ $traceDeny }}")
+{{- end }}
+{{- if $traceAllow }}
+            - attributes["http.route"] != nil and not IsMatch(attributes["http.route"], "{{ $traceAllow }}")
+            - attributes["http.target"] != nil and not IsMatch(attributes["http.target"], "{{ $traceAllow }}")
+            - attributes["url.path"] != nil and not IsMatch(attributes["url.path"], "{{ $traceAllow }}")
+{{- end }}
+{{- end }}
+{{- if $logFilterEnabled }}
+        logs:
+          log_record:
+            - body != nil and IsMatch(body, "{{ $logDeny }}")
+{{- end }}
+{{- end }}
       resource:
         attributes:
           - key: deployment.environment
@@ -145,11 +182,11 @@ data:
       pipelines:
         traces/rulebricks:
           receivers: [otlp]
-          processors: [memory_limiter, resource, batch]
+          processors: [memory_limiter{{ if $traceFilterEnabled }}, filter/noise{{ end }}, resource, batch]
           exporters: [clickhouse]
         logs/rulebricks:
           receivers: [otlp]
-          processors: [memory_limiter, resource, batch]
+          processors: [memory_limiter{{ if $logFilterEnabled }}, filter/noise{{ end }}, resource, batch]
           exporters: [clickhouse]
         metrics/rulebricks:
           receivers: [otlp]

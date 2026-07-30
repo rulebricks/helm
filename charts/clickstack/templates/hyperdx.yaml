@@ -25,6 +25,15 @@ data:
         "useSsl": false
       }
     ]
+  {{- /* Consumed once via DEFAULT_SOURCES when the team has no sources yet
+       (HyperDX setupTeamDefaults). Column names must match the schema the
+       collector's clickhouse exporter creates (create_schema): that DDL has a
+       Timestamp DateTime64 column but NO TimestampTime - referencing it fails
+       every query with "Unknown expression identifier 'TimestampTime'".
+       defaultTableSelectExpression is REQUIRED by HyperDX's source schema for
+       log and trace sources; omitting it flags the source as invalid in the
+       UI. Existing installs keep their FerretDB-persisted sources: fix those
+       under Team Settings -> Sources instead. */}}
   sources.json: |
     [
       {
@@ -35,7 +44,7 @@ data:
         "kind": "log",
         "name": "Operational Logs",
         "connection": "Rulebricks ClickHouse",
-        "timestampValueExpression": "TimestampTime",
+        "timestampValueExpression": "Timestamp",
         "displayedTimestampValueExpression": "Timestamp",
         "implicitColumnExpression": "Body",
         "serviceNameExpression": "ServiceName",
@@ -60,6 +69,7 @@ data:
         "connection": "Rulebricks ClickHouse",
         "timestampValueExpression": "Timestamp",
         "displayedTimestampValueExpression": "Timestamp",
+        "defaultTableSelectExpression": "Timestamp, ServiceName as service, StatusCode as level, round(Duration / 1e6) as duration, SpanName",
         "implicitColumnExpression": "SpanName",
         "serviceNameExpression": "ServiceName",
         "traceIdExpression": "TraceId",
@@ -106,7 +116,7 @@ data:
         "kind": "session",
         "name": "Sessions",
         "connection": "Rulebricks ClickHouse",
-        "timestampValueExpression": "TimestampTime",
+        "timestampValueExpression": "Timestamp",
         "displayedTimestampValueExpression": "Timestamp",
         "implicitColumnExpression": "Body",
         "serviceNameExpression": "ServiceName",
