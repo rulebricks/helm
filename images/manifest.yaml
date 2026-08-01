@@ -35,7 +35,7 @@
 
 images:
   # --- Hardened infra (Docker Hardened Images, Community) ---
-  - { name: clickhouse-server, kind: mirror, source: dhi.io/clickhouse-server, tag: "26.7.1-debian13", auth: dhi, chartRefs: "values.yaml:clickhouse.image.tag", digest: "" }
+  - { name: clickhouse-server, kind: mirror, source: dhi.io/clickhouse-server, tag: "26.6.1-debian13", auth: dhi, chartRefs: "values.yaml:clickhouse.image.tag", digest: "" }
   - { name: valkey, kind: mirror, source: dhi.io/valkey, tag: "9.1.1-debian13", auth: dhi, chartRefs: "charts/rulebricks/values.yaml:redis.image.tag", digest: "" }
   - { name: redis-exporter, kind: mirror, source: dhi.io/redis-exporter, tag: "1.88.0-debian13", auth: dhi, chartRefs: "charts/rulebricks/values.yaml:cache.redisExporter.image.tag", digest: "" }
   - { name: kafka-exporter, kind: mirror, source: dhi.io/kafka-exporter, tag: "1.9.0-debian13", auth: dhi, chartRefs: "charts/rulebricks/values.yaml:kafkaExporter.image.tag", digest: "" }
@@ -82,9 +82,9 @@ images:
   - { name: external-dns, kind: mirror, source: dhi.io/external-dns, tag: "0.21.0-debian13", auth: dhi, chartRefs: "values.yaml:external-dns.image.tag", digest: "" }
   # external-secrets: DHI now carries it (previously ghcr-sourced while DHI lacked it).
   - { name: external-secrets, kind: mirror, source: dhi.io/external-secrets, tag: "2.8.0-debian13", auth: dhi, chartRefs: "values.yaml:external-secrets.image.tag values.yaml:external-secrets.webhook.image.tag values.yaml:external-secrets.certController.image.tag", digest: "" }
-  # cluster-autoscaler: CA minor must match the cluster's k8s minor; the chart
-  # currently targets Kubernetes 1.35.
-  - { name: cluster-autoscaler, kind: mirror, source: dhi.io/kubernetes-cluster-autoscaler, tag: "1.35.2-debian13", auth: dhi, chartRefs: "values.yaml:cluster-autoscaler.image.tag", digest: "" }
+  # cluster-autoscaler: CA minor must match the cluster's k8s minor; confirm the
+  # target cluster minor before moving this 1.35 pin.
+  - { name: cluster-autoscaler, kind: mirror, source: dhi.io/kubernetes-cluster-autoscaler, tag: "1.35.1-debian13", auth: dhi, chartRefs: "values.yaml:cluster-autoscaler.image.tag", digest: "" }
 
   # --- Tier-2 dormant/optional sub-images (only pulled when a specific feature
   #     toggle is on: thanos, admission webhooks, grafana renderer/tests, CRD jobs,

@@ -47,7 +47,7 @@ dependencies:
     repository: https://kedacore.github.io/charts
     condition: keda.enabled
   - name: cert-manager
-    version: v1.21.0
+    version: v1.21.1
     repository: https://charts.jetstack.io
     condition: cert-manager.enabled
   - name: vector

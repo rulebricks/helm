@@ -935,7 +935,7 @@ clickhouse:
   image:
     registry: docker.io
     repository: rulebricks/clickhouse-server
-    tag: "26.7.1-debian13"
+    tag: "26.6.1-debian13"
     pullPolicy: IfNotPresent
   priorityClassName: ""
   # Don't let node scale-down evict the decision-log query engine.
@@ -2194,7 +2194,7 @@ cluster-autoscaler:
   # a full repository path and does not honor global.imageRegistry.
   image:
     repository: docker.io/rulebricks/cluster-autoscaler
-    tag: "1.35.2-debian13"
+    tag: "1.35.1-debian13"
     # Unlike most subcharts, cluster-autoscaler expects secret-name strings.
     # The CLI sets this to [<release>-regcred] automatically.
     pullSecrets: []
