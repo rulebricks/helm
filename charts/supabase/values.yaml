@@ -140,7 +140,7 @@ db:
     registry: docker.io
     repository: rulebricks/supabase-postgres
     pullPolicy: IfNotPresent
-    tag: "17.6.1.142"
+    tag: "17.6.1.158"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -245,7 +245,7 @@ studio:
     registry: docker.io
     repository: rulebricks/supabase-studio
     pullPolicy: IfNotPresent
-    tag: "2026.07.20-sha-74a0848-r1"
+    tag: "2026.07.27-sha-cbb076d-r1"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -349,7 +349,7 @@ auth:
     registry: docker.io
     repository: rulebricks/supabase-gotrue
     pullPolicy: IfNotPresent
-    tag: "v2.193.1-r1"
+    tag: "v2.194.0-r1"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -473,7 +473,7 @@ rest:
     registry: docker.io
     repository: rulebricks/supabase-postgrest
     pullPolicy: IfNotPresent
-    tag: "v14.14"
+    tag: "v14.16"
   imagePullSecrets: []
   nameOverride: ""
   fullnameOverride: ""
@@ -554,7 +554,7 @@ realtime:
     registry: docker.io
     repository: rulebricks/supabase-realtime
     pullPolicy: IfNotPresent
-    tag: "v2.117.0-r1"
+    tag: "v2.121.3-r1"
   imagePullSecrets: []
   nameOverride: ""
   fullnameOverride: ""

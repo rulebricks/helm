@@ -319,7 +319,7 @@ redis:
   image:
     registry: docker.io
     repository: rulebricks/valkey
-    tag: "9.1.0-debian13"
+    tag: "9.1.1-debian13"
     pullPolicy: IfNotPresent
   persistence:
     enabled: true
@@ -378,7 +378,7 @@ serverlessRedisHttp:
   image:
     registry: docker.io
     repository: rulebricks/serverless-redis-http
-    tag: "0.0.10-r1"
+    tag: "0.0.10-r2"
 
 cache:
   valkeyAdmin:
@@ -436,7 +436,7 @@ cache:
     image:
       registry: docker.io
       repository: rulebricks/redis-exporter
-      tag: "1.87.0-debian13"
+      tag: "1.88.0-debian13"
       pullPolicy: IfNotPresent
     service:
       port: 9121
