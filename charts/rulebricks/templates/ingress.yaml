@@ -59,6 +59,9 @@ metadata:
     {{- if ne (include "rulebricks-chart.tlsEnabled" .) "true" }}
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     {{- end }}
+    {{- /* nginx defaults to a 1m request body cap, which blocks large rule/flow
+           and manifest imports (app bodyParser allows 10mb). Raise to match. */ -}}
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
     {{- end }}
 spec:
   ingressClassName: {{ $ingressClass }}

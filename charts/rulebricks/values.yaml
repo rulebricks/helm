@@ -241,6 +241,21 @@ hps:
   extraEnv:
     - name: FLOW_CHUNK_MAX_ITEMS
       value: "500"
+    # Reuse one hardened V8 sandbox context per execution unit instead of
+    # creating a fresh vm.createContext per derived field per record (and per
+    # function-column cell). Large win for context ingest on schemas with
+    # derived fields. Safe to disable by setting "0".
+    - name: RB_FN_CONTEXT_REUSE
+      value: "1"
+    # Bound the synchronous relationship cascade that runs after a context
+    # batch commits. CONTEXT_CASCADE_MAX_INSTANCES caps how many dependent
+    # parents are re-evaluated per relationship; CONTEXT_CASCADE_BUDGET_MS caps
+    # the wall-clock time of the whole cascade phase before the remainder is
+    # deferred. Together these bound worst-case ingest tail latency.
+    - name: CONTEXT_CASCADE_MAX_INSTANCES
+      value: "2000"
+    - name: CONTEXT_CASCADE_BUDGET_MS
+      value: "45000"
   extraEnvFrom: []
   resources:
     requests:
@@ -289,7 +304,12 @@ hps:
       minAvailable: ""
       maxUnavailable: ""
     # Extra environment variables
-    extraEnv: []
+    # RB_FN_CONTEXT_REUSE reuses one hardened V8 sandbox context per rule/flow
+    # evaluation instead of one per function-column cell. Keep in sync with the
+    # HPS server setting above.
+    extraEnv:
+      - name: RB_FN_CONTEXT_REUSE
+        value: "1"
     extraEnvFrom: []
     resources:
       requests:

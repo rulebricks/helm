@@ -513,6 +513,12 @@ rest:
     PGRST_DB_SCHEMAS: public,storage,graphql_public
     PGRST_DB_ANON_ROLE: anon
     PGRST_APP_SETTINGS_JWT_EXP: 3600
+    # Postgres connection pool per PostgREST replica. The upstream default (10)
+    # is exhausted by concurrent context-batch ingest + auth lookups under
+    # load, which surfaces as "Timed out acquiring connection from connection
+    # pool" (and, before the auth fix, as spurious 401s). Raise it to give
+    # concurrent API traffic more headroom.
+    PGRST_DB_POOL: 50
   # volumeMounts:
   #   - name: volume_name
   #     mountPath: /path/to/my/secret
