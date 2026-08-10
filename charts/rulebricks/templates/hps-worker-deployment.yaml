@@ -222,6 +222,11 @@ spec:
               value: {{ .Values.hps.workers.topics | default "solution" | quote }}
             - name: NODE_ENV
               value: "production"
+            {{- /* Per-partition fetch ceiling; kept at 2x the Kafka message
+                 cap (hps.limits in values.yaml) so full-size request chunks
+                 batch efficiently. Fallback equals the worker code default. */}}
+            - name: WORKER_MAX_BYTES_PER_PARTITION
+              value: {{ ((.Values.hps.limits).workerFetchMaxBytes) | default 4194304 | int64 | quote }}
             {{- with .Values.app.logging.kafkaSasl }}
             {{- if .existingSecret }}
             # Optional external Kafka SASL credentials secret

@@ -236,6 +236,28 @@ hps:
     enabled: false
     minAvailable: ""
     maxUnavailable: ""
+  # Payload & deadline envelope, rendered into HPS/worker env vars (see
+  # hps-deployment.yaml / hps-worker-deployment.yaml). The values here match
+  # the HPS code defaults (conservative profile); the umbrella chart overrides
+  # them with a large-batch profile sized together with its Kafka message
+  # caps, Traefik timeouts, and HPS memory. Keep bodyLimitBytes, the Kafka
+  # topic max.message.bytes, and nodeHeapMb/resources consistent when tuning.
+  limits:
+    bodyLimitBytes: 6291456 # HTTP_BODY_LIMIT_BYTES
+    rpcTimeoutMs: 60000 # RPC_TIMEOUT_MS (whole-request Kafka deadline)
+    requestTimeoutMs: 30000 # HTTP_REQUEST_TIMEOUT_MS (body receive)
+    itemMaxBytes: 1572864 # ITEM_MAX_BYTES (per payload in a bulk array)
+    contextBatchBodyLimitBytes: 4718592 # CONTEXT_BATCH_BODY_LIMIT_BYTES
+    contextBatchMaxItems: 10000 # CONTEXT_BATCH_MAX_ITEMS
+    largeBodyThresholdBytes: 8388608 # LARGE_BODY_THRESHOLD_BYTES (gate)
+    largeBodyMaxConcurrent: 2 # LARGE_BODY_MAX_CONCURRENT (per replica)
+    chunkMaxChunks: 64 # CHUNK_MAX_CHUNKS (max fan-out per request)
+    chunkHardMaxBytes: 1048576 # CHUNK_HARD_MAX_BYTES (per-chunk input cap)
+    responseFetchMaxBytes: 4194304 # RESPONSE_MAX_BYTES_PER_PARTITION (HPS)
+    workerFetchMaxBytes: 4194304 # WORKER_MAX_BYTES_PER_PARTITION (worker)
+    shutdownDrainMs: 25000 # KAFKA_SHUTDOWN_DRAIN_MS (in-flight drain)
+    terminationGracePeriodSeconds: 30 # HPS pod grace (>= drain + overhead)
+    # nodeHeapMb: 1024 # NODE_OPTIONS --max-old-space-size; unset = image default
   # Extra environment variables.
   # FLOW_CHUNK_MAX_ITEMS is an important throughput dial.
   extraEnv:

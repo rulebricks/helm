@@ -573,13 +573,64 @@ rulebricks:
       enabled: false
       minAvailable: ""
       maxUnavailable: ""
+    # -------------------------------------------------------------------------
+    # Payload & deadline envelope (large-batch profile).
+    # Self-hosted deployments accept 100MB-class bulk requests: these values
+    # feed HPS/worker env vars and are sized in LOCKSTEP with each other, the
+    # Kafka message caps (kafka.config / kafka.topics), the Traefik timeouts
+    # (traefik.ports.*), and the HPS memory limit + heap below. If you change
+    # one, revisit the others; docs: private-deployment/configuration-reference.
+    # -------------------------------------------------------------------------
+    limits:
+      # Max HTTP request body on HPS execution endpoints (bytes). 128 MiB.
+      bodyLimitBytes: 134217728
+      # Whole-request deadline for Kafka-backed execution (produce + worker
+      # processing + gather), ms. 300s is the ceiling for synchronous batch
+      # work; clients needing more should split requests. Traefik graceTimeOut
+      # and the HPS termination grace stay ABOVE this.
+      rpcTimeoutMs: 300000
+      # Deadline for receiving one request's entire body (ms). A 128 MiB
+      # upload on a ~4 Mbps link takes ~270s.
+      requestTimeoutMs: 300000
+      # Serialized cap per SINGLE payload inside a bulk array (bytes). 6 MiB
+      # (uncompressed) stays under the 8 MiB Kafka message cap with envelope
+      # headroom, since one oversized item must ride in one Kafka message.
+      itemMaxBytes: 6291456
+      # Context batch ingestion (NDJSON body cap + records per request).
+      contextBatchBodyLimitBytes: 134217728
+      contextBatchMaxItems: 100000
+      # Admission gate: at most this many concurrent requests larger than the
+      # threshold per HPS replica; excess is shed with 429 + Retry-After.
+      # 2 x 128 MiB in flight (plus parse copies) fits the 4Gi pod limit.
+      largeBodyThresholdBytes: 8388608
+      largeBodyMaxConcurrent: 2
+      # Chunk planner: allow fan-out up to the full worker-fleet width
+      # (solutionPartitions) so a 128 MiB request spreads ~1 MiB per chunk;
+      # the hard per-chunk cap keeps every chunk broker-safe (2 MiB input
+      # under the 8 MiB message cap = 4x response-amplification headroom).
+      chunkMaxChunks: 128
+      chunkHardMaxBytes: 2097152
+      # Consumer fetch ceilings (bytes/partition), 2x the 8 MiB message cap:
+      # gather side (HPS response consumer) and worker request consumer.
+      responseFetchMaxBytes: 16777216
+      workerFetchMaxBytes: 16777216
+      # On SIGTERM, keep the response consumer alive until in-flight RPCs
+      # resolve - must cover rpcTimeoutMs; terminationGracePeriodSeconds sits
+      # just above it.
+      shutdownDrainMs: 315000
+      terminationGracePeriodSeconds: 330
+      # Node.js old-space heap (MB) for the HPS server, sized to the memory
+      # limit below (~85%). Unset = image default (1024).
+      nodeHeapMb: 3584
     resources:
       requests:
         cpu: "1000m"
-        memory: "1Gi"
+        memory: "2Gi"
       limits:
         cpu: "2000m"
-        memory: "2Gi"
+        # Sized for the large-payload envelope above: concurrent 128 MiB
+        # bodies live on the heap while parsed/scattered/gathered.
+        memory: "4Gi"
     workers:
       enabled: true
       replicas: 8
@@ -735,9 +786,9 @@ kafka:
     # compressed, filling a 20Gi volume mid-burst and taking down the RPC
     # path with it - the broker carries BOTH planes). Worst-case cap math:
     #   logs                24 partitions x 1Gi   = 24Gi
-    #   solution(+response) 2 x 128 parts x 64Mi  = 16Gi
+    #   solution(+response) 2 x 128 parts x 128Mi = 32Gi
     #   KRaft metadata / active segments / fs overhead ~= 10Gi headroom
-    size: 50Gi
+    size: 75Gi
     class: gp3
   resources:
     requests:
@@ -765,8 +816,14 @@ kafka:
     socket.send.buffer.bytes: "1048576"
     socket.receive.buffer.bytes: "1048576"
     socket.request.max.bytes: "209715200"
-    message.max.bytes: "2097152"
-    replica.fetch.max.bytes: "4194304"
+    # Per-record (compressed) size cap, raised for the large-payload profile:
+    # request chunks are planner-capped at 2 MiB input, but worker RESPONSES
+    # ride as one message each - 8 MiB gives 4x response-amplification
+    # headroom before a result is undeliverable (which now surfaces as a
+    # clean 413 from the worker). Topic-level max.message.bytes below stays
+    # in lockstep; replica.fetch must exceed this.
+    message.max.bytes: "8388608"
+    replica.fetch.max.bytes: "16777216"
     log.retention.bytes: "536870912"
     log.segment.bytes: "1073741824"
     num.replica.fetchers: "4"
@@ -785,6 +842,11 @@ kafka:
   # Names carry the default prefix (com.rulebricks.); the CLI rewrites them if the
   # prefix changes.
   topics:
+    # RPC topics: retention.bytes is a PER-PARTITION cap sized for in-flight
+    # large-batch traffic (128 MiB requests spread ~1 MiB/partition; several
+    # concurrent bursts plus 5-minute retention windows fit comfortably).
+    # max.message.bytes matches the broker's message.max.bytes (8 MiB) so
+    # worker responses keep 4x amplification headroom over 2 MiB chunks.
     - name: com.rulebricks.solution
       partitions: 128
       replicas: 1
@@ -792,8 +854,8 @@ kafka:
         retention.ms: "300000"
         segment.ms: "300000"
         segment.bytes: "67108864"
-        retention.bytes: "67108864"
-        max.message.bytes: "2097152"
+        retention.bytes: "134217728"
+        max.message.bytes: "8388608"
     - name: com.rulebricks.solution-response
       partitions: 128
       replicas: 1
@@ -801,8 +863,8 @@ kafka:
         retention.ms: "300000"
         segment.ms: "300000"
         segment.bytes: "67108864"
-        retention.bytes: "67108864"
-        max.message.bytes: "2097152"
+        retention.bytes: "134217728"
+        max.message.bytes: "8388608"
     - name: com.rulebricks.logs
       partitions: 24
       replicas: 1
@@ -1058,25 +1120,40 @@ traefik:
       cpu: "1000m"
       memory: "2Gi"
   ports:
-    # Graceful termination on both entrypoints: keep accepting for 5s after
-    # SIGTERM (covers endpoint-removal propagation), then drain in-flight
-    # requests for up to 75s - above the 60s HPS RPC timeout (RPC_TIMEOUT_MS),
-    # so a stopping proxy never severs a still-viable bulk request (Traefik's
-    # default is 10s).
+    # Timeouts on both entrypoints, sized in lockstep with the HPS payload
+    # envelope (rulebricks.hps.limits):
+    #
+    # - respondingTimeouts.readTimeout: max time to receive an entire request
+    #   INCLUDING its body (Traefik v3 default: 60s). 330s admits a 128 MiB
+    #   upload on a ~4 Mbps link; it must sit at or above the HPS
+    #   HTTP_REQUEST_TIMEOUT_MS (300s), which produces the cleaner error.
+    # - lifeCycle.graceTimeOut: on SIGTERM keep accepting for 5s (endpoint-
+    #   removal propagation), then drain in-flight requests for up to 330s -
+    #   above the 300s HPS RPC deadline (RPC_TIMEOUT_MS), so a stopping proxy
+    #   never severs a still-viable bulk request (Traefik's default is 10s).
+    #
+    # NOTE for L4 cloud load balancers in front: Azure LB's default 4-minute
+    # TCP idle timeout would sever quiet long-running requests before the
+    # 300s deadline; the CLI sets the tcp-idle-timeout service annotation on
+    # Azure. AWS NLB (350s) and GCP passthrough LBs need no change.
     web:
       port: 8000
       exposedPort: 80
       transport:
+        respondingTimeouts:
+          readTimeout: "330s"
         lifeCycle:
           requestAcceptGraceTimeout: "5s"
-          graceTimeOut: "75s"
+          graceTimeOut: "330s"
     websecure:
       port: 8443
       exposedPort: 443
       transport:
+        respondingTimeouts:
+          readTimeout: "330s"
         lifeCycle:
           requestAcceptGraceTimeout: "5s"
-          graceTimeOut: "75s"
+          graceTimeOut: "330s"
   metrics:
     prometheus:
       enabled: true
