@@ -207,18 +207,6 @@
             }
           }
         },
-        "ai": {
-          "type": "object",
-          "description": "AI Features Configuration",
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "openaiApiKey": { "type": "string" },
-            "openaiBaseUrl": {
-              "type": "string",
-              "description": "Optional OpenAI-compatible API base URL (defaults to OpenAI's public API when empty)"
-            }
-          }
-        },
         "secrets": {
           "type": "object",
           "description": "Secrets Configuration",
@@ -1993,65 +1981,6 @@
                 }
               }
             ]
-          }
-        ]
-      }
-    },
-    {
-      "title": "AI Feature Validation",
-      "description": "If AI is enabled, OpenAI API Key is required and must not be empty.",
-      "if": {
-        "properties": {
-          "global": {
-            "type": "object",
-            "properties": {
-              "ai": {
-                "type": "object",
-                "properties": {
-                  "enabled": { "const": true }
-                },
-                "required": ["enabled"]
-              }
-            },
-            "required": ["ai"]
-          }
-        },
-        "required": ["global"]
-      },
-      "then": {
-        "anyOf": [
-          {
-            "properties": {
-              "global": {
-                "type": "object",
-                "properties": {
-                  "secrets": {
-                    "type": "object",
-                    "required": ["secretRef"],
-                    "properties": {
-                      "secretRef": { "type": "string", "minLength": 1 }
-                    }
-                  }
-                },
-                "required": ["secrets"]
-              }
-            }
-          },
-          {
-            "properties": {
-              "global": {
-                "type": "object",
-                "properties": {
-                  "ai": {
-                    "type": "object",
-                    "required": ["openaiApiKey"],
-                    "properties": {
-                      "openaiApiKey": { "type": "string", "minLength": 1 }
-                    }
-                  }
-                }
-              }
-            }
           }
         ]
       }

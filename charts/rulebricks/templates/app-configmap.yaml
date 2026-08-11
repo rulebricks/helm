@@ -92,20 +92,6 @@ data:
   SMTP_FROM: {{ .Values.app.smtp.from | default "" | quote }}
   SMTP_FROM_NAME: {{ .Values.app.smtp.fromName | default "" | quote }}
   {{- end }}
-  # AI Features - only the enabled flag (API key is in the app secret)
-  {{- $aiEnabled := false }}
-  {{- if and .Values.global .Values.global.ai .Values.global.ai.enabled }}
-    {{- $aiEnabled = true }}
-  {{- else if and .Values.app.ai .Values.app.ai.enabled }}
-    {{- $aiEnabled = true }}
-  {{- end }}
-  {{- if $aiEnabled }}
-  AI_ENABLED: "1"
-  {{- end }}
-  {{- if and .Values.global .Values.global.ai .Values.global.ai.openaiBaseUrl }}
-  # Optional OpenAI-compatible endpoint; app/HPS default to the public API when unset
-  OPENAI_BASE_URL: {{ .Values.global.ai.openaiBaseUrl | quote }}
-  {{- end }}
   # Kafka topic namespace prefix. Emitted unconditionally because HPS applies it
   # to all topics (including the always-on solution work topics), independent of
   # whether decision logging is enabled.

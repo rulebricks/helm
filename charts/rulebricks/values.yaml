@@ -96,9 +96,6 @@ app:
   clickhouse:
     existingSecret: ""
     existingSecretKey: "admin-password"
-  # AI features (optional)
-  ai:
-    enabled: false
   # SMTP configuration (optional, can also be set via global.smtp)
   smtp: {}
   livenessProbe:

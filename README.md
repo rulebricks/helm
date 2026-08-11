@@ -82,8 +82,6 @@ global:
 | `global.supabase.projectRef`         | Project reference (Cloud Supabase)                                        |
 | `global.supabase.accessToken`        | Access token for Supabase CLI (Cloud Supabase)                            |
 | `global.supabase.jwtSecret`          | JWT signing secret (self-hosted only)                                     |
-| `global.ai.enabled`                  | Enable AI-powered rule generation                                         |
-| `global.ai.openaiApiKey`             | OpenAI API key for AI features                                            |
 | `global.sso.enabled`                 | Enable Enterprise SSO                                                     |
 | `global.sso.provider`                | SSO provider: `azure`, `google`, `okta`, `keycloak`, `ory`, `other`       |
 | `global.sso.url`                     | Identity provider URL (required except for Google)                        |
@@ -124,7 +122,7 @@ The canonical inventory of every Secret and key lives in
 
 | Secret role                    | Values seam                                     | Keys                                            |
 | ------------------------------ | ----------------------------------------------- | ----------------------------------------------- |
-| Application (app, HPS, workers, SSO, managed migrations) | `global.secrets.secretRef` (+ `secretRefKeys`) | `LICENSE_KEY`, `EMAIL`, `SMTP_USER`, `SMTP_PASS`, `SUPABASE_*`, `OPENAI_API_KEY`, `JWT_SECRET`, `SSO_CLIENT_*`, `REDIS_PASSWORD`, `KAFKA_SASL_*` |
+| Application (app, HPS, workers, SSO, managed migrations) | `global.secrets.secretRef` (+ `secretRefKeys`) | `LICENSE_KEY`, `EMAIL`, `SMTP_USER`, `SMTP_PASS`, `SUPABASE_*`, `JWT_SECRET`, `SSO_CLIENT_*`, `REDIS_PASSWORD`, `KAFKA_SASL_*` |
 | Browser anon key (runtime)     | `global.supabase.secretRef` (+ `secretRefKey`)  | `anonKey`                                       |
 | Supabase JWT                   | `supabase.secret.jwt.secretRef`                 | `secret`, `anonKey`, `serviceKey`               |
 | Postgres                       | `supabase.secret.db.secretRef` or `supabase.externalDatabase.secretRef` | `username`, `password`, `database` (+ `host`, `port` external) |

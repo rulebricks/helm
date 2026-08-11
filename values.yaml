@@ -344,15 +344,6 @@ global:
     # [Self-hosted Supabase] JWT signing secret (only needed for self-hosted Supabase).
     # Empty by default - must be provided (>=32 chars); never ship a known default.
     jwtSecret: ""
-  # AI Features (Optional)
-  # Enables AI-powered rule generation and suggestions
-  ai:
-    enabled: false
-    openaiApiKey: "" # Your OpenAI API key
-    # Optional OpenAI-compatible API base URL (e.g. an enterprise gateway),
-    # including the version path: https://gateway.example.com/v1
-    # Leave empty to use OpenAI's public API (https://api.openai.com/v1).
-    openaiBaseUrl: ""
   # =============================================================================
   # Secret Reference (for external secret management)
   # Use this to reference a pre-existing secret instead of inline values
@@ -369,7 +360,6 @@ global:
       smtpUser: "SMTP_USER"
       smtpPass: "SMTP_PASS"
       supabaseServiceKey: "SUPABASE_SERVICE_KEY"
-      openaiApiKey: "OPENAI_API_KEY"
       supabaseAccessToken: "SUPABASE_ACCESS_TOKEN"
       ssoClientId: "SSO_CLIENT_ID"
       ssoClientSecret: "SSO_CLIENT_SECRET"
