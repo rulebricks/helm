@@ -1398,6 +1398,57 @@ backup:
     failed: 30
 
 # =============================================================================
+# SMTP RELAY (Azure Communication Services, API-key mode) - opt-in
+# In-cluster SMTP listener that forwards mail to the ACS Email REST API using
+# the resource's connection string (endpoint=...;accesskey=...). For ACS
+# tenants that hold an API key instead of Entra SMTP credentials. When
+# enabled, point global.smtp.host/port at <release>-smtp-relay:1025 and leave
+# global.smtp.user/pass EMPTY: GoTrue's Go SMTP client refuses AUTH over
+# plaintext to non-localhost hosts, and the relay ignores credentials anyway
+# (it is ClusterIP-only). The Rulebricks CLI wires all of this automatically
+# for the "Azure Communication Services (API key)" email provider.
+# =============================================================================
+smtpRelay:
+  enabled: false
+  # Self-mirrored source rebuild of ArrEssJay/smtp-acs-bridge (see
+  # images/manifest.yaml).
+  image:
+    registry: docker.io
+    repository: rulebricks/smtp-acs-bridge
+    tag: "1.4.0-r2"
+  replicas: 1
+  # REQUIRED when enabled. The address mail is sent from - a MailFrom address
+  # on a (verified) domain linked to the ACS resource, e.g.
+  # DoNotReply@xxxx.azurecomm.net. Normally equals global.smtp.from.
+  senderAddress: ""
+  # Optional comma-separated domain allow-list: client MAIL FROM addresses on
+  # these domains are forwarded as-is; anything else falls back to
+  # senderAddress.
+  allowedSenderDomains: ""
+  # ACS connection string, inline (evaluation only - prefer existingSecret).
+  connectionString: ""
+  # Runtime alternative to the inline connectionString: an existing Secret
+  # (CLI-created or synced by External Secrets Operator) carrying the
+  # connection string.
+  existingSecret:
+    name: ""
+    connectionStringKey: "connection-string"
+  service:
+    port: 1025
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  podLabels:
+    rulebricks.com/workload-group: infrastructure
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# =============================================================================
 # DECISION LOGS (Vector)
 # Aggregates and forwards rule execution logs to one or more configurable sinks (console, S3, etc.)
 # The Kafka broker address is automatically configured via the vector-env-configmap.yaml template.

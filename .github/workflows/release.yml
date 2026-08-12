@@ -76,6 +76,9 @@ jobs:
             --set cluster-autoscaler.autoDiscovery.clusterName=ci-cluster \
             --set cluster-autoscaler.awsRegion=us-east-1 \
             --set supabase.enabled=true \
+            --set smtpRelay.enabled=true \
+            --set smtpRelay.senderAddress=DoNotReply@ci.azurecomm.net \
+            --set 'smtpRelay.connectionString=endpoint=https://ci.communication.azure.com/;accesskey=Y2k=' \
             > /tmp/rulebricks-rendered.yaml
 
       - name: Verify Image Versions Match Manifest

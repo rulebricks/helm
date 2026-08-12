@@ -121,6 +121,9 @@ images:
   - { name: valkey-admin, kind: build, context: images/valkey-admin, base: docker.io/valkey/valkey-admin:1.0.2, tag: "1.0.2-r1", auth: none, chartRefs: "charts/rulebricks/values.yaml:cache.valkeyAdmin.image.tag", digest: "" }
   # Source rebuild on current Erlang/OTP (clears CISA KEV CVE-2025-32433). See images/serverless-redis-http/.
   - { name: serverless-redis-http, kind: build, context: images/serverless-redis-http, base: dhi.io/erlang-otp:28-alpine3.23, ref: "794c5a372fa3997e08320250235f32e5a86338a3", upstream: "github.com/hiett/serverless-redis-http", tag: "0.0.10-r1", auth: dhi, chartRefs: "charts/rulebricks/values.yaml:serverlessRedisHttp.image.tag", digest: "" }
+  # Source rebuild on current Rust toolchain (static OpenSSL/musl). In-cluster
+  # SMTP-to-ACS-REST relay for the ACS API-key email mode. See images/smtp-acs-bridge/.
+  - { name: smtp-acs-bridge, kind: build, context: images/smtp-acs-bridge, base: dhi.io/alpine-base:3.22, ref: "d17bb3fb0a36e0d33fc8eabe778e1f58e2d431d1", upstream: "github.com/rulebricks/smtp-acs-bridge", tag: "1.4.0-r2", auth: dhi, chartRefs: "values.yaml:smtpRelay.image.tag", digest: "" }
 
   # ClickStack observability images with no DHI equivalent
   - { name: hyperdx, kind: mirror, source: docker.hyperdx.io/hyperdx/hyperdx, tag: "2.31.0", auth: none, chartRefs: "values.yaml:clickstack.hyperdx.image.tag charts/clickstack/values.yaml:hyperdx.image.tag", digest: "" }
