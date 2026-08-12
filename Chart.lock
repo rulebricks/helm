@@ -1,7 +1,7 @@
 dependencies:
 - name: rulebricks
   repository: file://charts/rulebricks
-  version: 0.1.1
+  version: 0.1.2
 - name: strimzi-kafka-operator
   repository: oci://quay.io/strimzi-helm
   version: 1.1.0
@@ -10,7 +10,7 @@ dependencies:
   version: 0.1.0
 - name: supabase
   repository: file://charts/supabase
-  version: 0.1.6
+  version: 0.1.7
 - name: kube-prometheus-stack
   repository: https://prometheus-community.github.io/helm-charts
   version: 87.3.0
@@ -38,5 +38,5 @@ dependencies:
 - name: cluster-autoscaler
   repository: https://kubernetes.github.io/autoscaler
   version: 9.53.0
-digest: sha256:59c74ecb7129056f5094952a12381b5ba84d4dd724a6000d32c2f2b8af3b47b8
-generated: "2026-07-20T16:49:34.741569-07:00"
+digest: sha256:7b062f3c8c9cba749f4cdd8caf306dffa145ebca0caa9010b7b63f75028c8716
+generated: "2026-08-12T14:09:11.010313-07:00"

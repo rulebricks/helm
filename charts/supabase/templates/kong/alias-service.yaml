@@ -1,0 +1,27 @@
+{{- if .Values.kong.enabled -}}
+{{- /* In-cluster alias for the Kong API gateway. The name is a literal
+     "supabase" (not fullname-prefixed) on purpose: server-side consumers
+     (app, HPS) reach Supabase at http://supabase.<ns>.svc.cluster.local:8000
+     so they never depend on the public supabase.<domain> DNS record (which
+     split-horizon corporate DNS may hide from cluster DNS). The first
+     hostname label stays "supabase", matching the browser-facing
+     https://supabase.<domain> — @supabase/ssr derives the session cookie
+     name (sb-<first-label>-auth-token) from that label, so server and
+     browser keep identical cookie names. Kong routing is path-based, so the
+     different Host header is harmless. */ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase
+  labels:
+    {{- include "supabase.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "supabase.kong.selectorLabels" . | nindent 4 }}
+{{- end }}
