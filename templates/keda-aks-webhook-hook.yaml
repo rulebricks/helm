@@ -9,13 +9,14 @@ fails with "Apply failed with 6 conflicts".
 
 keda.additionalAnnotations.admissions.enforcer/disabled stops AKS from
 claiming the fields on a newly created webhook, but it does not release
-ownership already taken. This pre-upgrade hook deletes keda-admission only
-when that manager is present, so Helm recreates it with the opt-out
-annotation and AKS never reclaims the fields.
+ownership already taken. This pre-upgrade hook deletes keda-admission so
+Helm recreates it with the opt-out annotation. The kubectl image is
+distroless (no shell), so the Job always deletes; --ignore-not-found makes
+that a no-op when the object is already gone.
 
-No-op on clusters that never had the enforcer (EKS/GKE, fresh AKS installs
-that already carry the annotation). Brief gap in ScaledObject validation
-while the webhook is missing; existing scalers keep running.
+Brief gap in ScaledObject validation while the webhook is missing; existing
+scalers keep running. After the first successful upgrade AKS never reclaims
+the fields.
 */ -}}
 {{- if .Values.keda.enabled }}
 {{- $sa := printf "%s-keda-webhook-fix" .Release.Name | trunc 63 | trimSuffix "-" }}
@@ -50,7 +51,7 @@ rules:
   - apiGroups: ["admissionregistration.k8s.io"]
     resources: ["validatingwebhookconfigurations"]
     resourceNames: ["keda-admission"]
-    verbs: ["get", "delete"]
+    verbs: ["delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -111,28 +112,16 @@ spec:
         - name: clear-webhook
           image: {{ include "rulebricks.image" (dict "root" $ "image" $kubectl "name" "kubectl") | quote }}
           imagePullPolicy: IfNotPresent
-          command: ["/bin/sh", "-c"]
+          # DHI kubectl is distroless (no /bin/sh). Always delete; --ignore-not-found
+          # makes this a no-op when the webhook is already gone. Helm recreates it
+          # in the same upgrade with admissions.enforcer/disabled so AKS never
+          # reclaims the fields. Brief ScaledObject-validation gap only.
+          command: ["kubectl"]
           args:
-            - |
-              set -euo pipefail
-              WH=keda-admission
-              set +e
-              out=$(kubectl get validatingwebhookconfiguration "$WH" 2>&1)
-              rc=$?
-              set -e
-              if [ "$rc" -ne 0 ]; then
-                if echo "$out" | grep -qi 'not found'; then
-                  echo "$WH does not exist; nothing to do"
-                  exit 0
-                fi
-                echo "$out" >&2
-                exit "$rc"
-              fi
-              managers=$(kubectl get validatingwebhookconfiguration "$WH" -o jsonpath='{range .metadata.managedFields[*]}{.manager}{"\n"}{end}')
-              if echo "$managers" | grep -qx admissionsenforcer; then
-                echo "AKS admissionsenforcer owns $WH; deleting so Helm can recreate it with admissions.enforcer/disabled"
-                kubectl delete validatingwebhookconfiguration "$WH" --wait=true --timeout=60s
-              else
-                echo "$WH is not owned by admissionsenforcer; leaving in place"
-              fi
+            - delete
+            - validatingwebhookconfiguration
+            - keda-admission
+            - --ignore-not-found=true
+            - --wait=true
+            - --timeout=60s
 {{- end }}
