@@ -16,7 +16,8 @@ metadata:
     {{- include "rulebricks-chart.labels" . | nindent 4 }}
     app.kubernetes.io/component: hps
 spec:
-  replicas: {{ .Values.hps.replicas | default 1 }}
+  {{- $hpsKeda := ((.Values.hps.keda).enabled | default false) }}
+  {{- include "rulebricks-chart.kedaReplicas" (dict "root" . "name" (include "rulebricks-chart.hps.fullname" .) "kedaEnabled" $hpsKeda "fallback" (.Values.hps.replicas | default 1)) | nindent 2 }}
   {{- /* Surge one pod at a time and wait for readiness (Kafka group join)
        before terminating an old pod: every HPS membership change rebalances
        the response consumer group, so rollouts must stay gradual - the same

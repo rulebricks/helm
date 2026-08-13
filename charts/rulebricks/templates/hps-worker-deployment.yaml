@@ -34,7 +34,8 @@ metadata:
     {{- include "rulebricks-chart.labels" . | nindent 4 }}
     app.kubernetes.io/component: hps-worker
 spec:
-  replicas: {{ .Values.hps.workers.replicas | default 3 }}
+  {{- $workerKeda := ((.Values.hps.workers.keda).enabled | default false) }}
+  {{- include "rulebricks-chart.kedaReplicas" (dict "root" . "name" (include "rulebricks-chart.hps-worker.fullname" .) "kedaEnabled" $workerKeda "fallback" (.Values.hps.workers.replicas | default 3)) | nindent 2 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
