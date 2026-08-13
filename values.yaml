@@ -34,6 +34,7 @@ global:
     busybox: { registry: docker.io, repository: rulebricks/busybox, tag: "1.38.0-alpine" }
     pause: { registry: docker.io, repository: rulebricks/pause, tag: "3.9" }
     curl: { registry: docker.io, repository: rulebricks/curl, tag: "8.21.0-alpine" }
+    kubectl: { registry: docker.io, repository: rulebricks/kubectl, tag: "1.36.2-debian13" }
   # Image pull secret for the private rulebricks/* repos on Docker Hub. References
   # the license registry secret <release>-regcred (index.docker.io, authed by the
   # license PAT). kube-prometheus-stack + cert-manager honor this global value; keda,
@@ -1177,6 +1178,15 @@ keda:
   enabled: true
   # Self-mirrored to rulebricks/*. keda uses global.image.registry (not the parent
   # global.imageRegistry); the CLI sets it for an air-gapped registry.
+  # Opt KEDA's ValidatingWebhookConfiguration out of the AKS admissions enforcer.
+  # Without this, AKS injects namespaceSelector onto keda-admission and takes
+  # Server-Side Apply ownership of those fields (field manager
+  # "admissionsenforcer"); the next helm upgrade then fails with six conflicts
+  # on vscaledobject/vscaledjob/vstriggerauthentication/etc. Harmless on
+  # non-AKS: the annotation is ignored. Paired with templates/keda-aks-webhook-hook.yaml
+  # which deletes a still-contested webhook once so Helm can recreate it.
+  additionalAnnotations:
+    admissions.enforcer/disabled: "true"
   image:
     keda:
       registry: docker.io

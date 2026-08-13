@@ -1,0 +1,138 @@
+{{- /*
+AKS admissions-enforcer vs KEDA webhook SSA conflict.
+
+AKS mutates ValidatingWebhookConfiguration/keda-admission after first install,
+injecting namespaceSelector on all six KEDA webhooks and taking Server-Side
+Apply ownership of those fields (field manager "admissionsenforcer"). Helm's
+next apply of the KEDA chart (which hardcodes namespaceSelector: {}) then
+fails with "Apply failed with 6 conflicts".
+
+keda.additionalAnnotations.admissions.enforcer/disabled stops AKS from
+claiming the fields on a newly created webhook, but it does not release
+ownership already taken. This pre-upgrade hook deletes keda-admission only
+when that manager is present, so Helm recreates it with the opt-out
+annotation and AKS never reclaims the fields.
+
+No-op on clusters that never had the enforcer (EKS/GKE, fresh AKS installs
+that already carry the annotation). Brief gap in ScaledObject validation
+while the webhook is missing; existing scalers keep running.
+*/ -}}
+{{- if .Values.keda.enabled }}
+{{- $sa := printf "%s-keda-webhook-fix" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- $kubectl := required "global.images.kubectl is required" .Values.global.images.kubectl }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: keda-webhook-fix
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $sa }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: keda-webhook-fix
+rules:
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingwebhookconfigurations"]
+    resourceNames: ["keda-admission"]
+    verbs: ["get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $sa }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: keda-webhook-fix
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $sa }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: keda-webhook-fix
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: keda-webhook-fix
+    spec:
+      serviceAccountName: {{ $sa }}
+      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
+      {{- $sched := .Values.global.scheduling | default dict }}
+      {{- with $sched.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $sched.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: clear-webhook
+          image: {{ include "rulebricks.image" (dict "root" $ "image" $kubectl "name" "kubectl") | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              WH=keda-admission
+              set +e
+              out=$(kubectl get validatingwebhookconfiguration "$WH" 2>&1)
+              rc=$?
+              set -e
+              if [ "$rc" -ne 0 ]; then
+                if echo "$out" | grep -qi 'not found'; then
+                  echo "$WH does not exist; nothing to do"
+                  exit 0
+                fi
+                echo "$out" >&2
+                exit "$rc"
+              fi
+              managers=$(kubectl get validatingwebhookconfiguration "$WH" -o jsonpath='{range .metadata.managedFields[*]}{.manager}{"\n"}{end}')
+              if echo "$managers" | grep -qx admissionsenforcer; then
+                echo "AKS admissionsenforcer owns $WH; deleting so Helm can recreate it with admissions.enforcer/disabled"
+                kubectl delete validatingwebhookconfiguration "$WH" --wait=true --timeout=60s
+              else
+                echo "$WH is not owned by admissionsenforcer; leaving in place"
+              fi
+{{- end }}
