@@ -2139,6 +2139,38 @@
       }
     },
     {
+      "title": "ACS Relay Requires Empty SMTP Credentials",
+      "description": "When the ACS smtpRelay is enabled, global.smtp.user/pass must be empty or omitted: the relay ignores SMTP credentials (it is ClusterIP-only and signs ACS REST calls with the connection string), and GoTrue's Go SMTP client refuses AUTH over plaintext to non-localhost hosts - so non-empty credentials guarantee every auth email send fails.",
+      "if": {
+        "properties": {
+          "smtpRelay": {
+            "type": "object",
+            "properties": {
+              "enabled": { "const": true }
+            },
+            "required": ["enabled"]
+          }
+        },
+        "required": ["smtpRelay"]
+      },
+      "then": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
+              "smtp": {
+                "type": "object",
+                "properties": {
+                  "user": { "type": "string", "maxLength": 0 },
+                  "pass": { "type": "string", "maxLength": 0 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "title": "External DNS Consistency",
       "description": "If external-dns subchart is enabled, global.externalDnsEnabled must also be true.",
       "if": {

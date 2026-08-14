@@ -31,7 +31,7 @@ dependencies:
     repository: file://charts/clickstack
     condition: global.clickstack.enabled
   - name: supabase
-    version: 0.1.7
+    version: 0.1.8
     repository: file://charts/supabase
     condition: supabase.enabled
   - name: kube-prometheus-stack

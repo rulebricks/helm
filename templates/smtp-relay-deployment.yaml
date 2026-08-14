@@ -1,5 +1,16 @@
 {{- $relay := .Values.smtpRelay | default dict }}
 {{- if $relay.enabled }}
+{{- /* GoTrue's Go SMTP client refuses AUTH over plaintext to non-localhost
+     hosts, and the relay ignores credentials entirely (ClusterIP-only; it
+     signs ACS REST calls with the connection string). Non-empty SMTP
+     credentials in relay mode therefore guarantee every auth email send
+     fails - fail the render loudly instead of shipping a broken mailer.
+     values.schema.json enforces the same rule at validation time; this
+     guard also catches renders that skip schema validation. */}}
+{{- $globalSmtp := ((.Values.global | default dict).smtp) | default dict }}
+{{- if or $globalSmtp.user $globalSmtp.pass }}
+{{- fail "smtpRelay.enabled requires EMPTY global.smtp.user and global.smtp.pass: GoTrue refuses plaintext SMTP AUTH to non-localhost hosts and the relay ignores credentials (the ACS connection string in the smtp-relay Secret handles authentication). Remove global.smtp.user/pass from your values." }}
+{{- end }}
 {{- /* Resolve the ACS connection-string secret: BYO (existingSecret) or the
      chart-created <release>-smtp-relay from smtp-relay-secret.yaml. */}}
 {{- $secretName := printf "%s-smtp-relay" .Release.Name }}

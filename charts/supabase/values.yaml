@@ -415,7 +415,13 @@ auth:
     GOTRUE_SMS_AUTOCONFIRM: "true"
     # Security settings
     GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED: "true"
-    GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL: "10"
+    # 30s (up from 10s): with rotation enabled, a stale tab replaying an
+    # already-rotated refresh token outside this window makes GoTrue revoke
+    # the whole session family - and the losing client drops its (healthy)
+    # session cookie. Browsers routinely hold many long-lived tabs, so give
+    # slow tabs a wider grace window; Supabase Cloud uses the same order of
+    # magnitude.
+    GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL: "30"
     GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
     GOTRUE_EXTERNAL_MANUAL_LINKING_ENABLED: "false"
     # Rate limits
