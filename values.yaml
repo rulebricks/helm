@@ -1336,9 +1336,16 @@ supabase:
     podLabels:
       rulebricks.com/workload-group: infrastructure
     resources:
+      # Reserve a dependable baseline for the primary database without making
+      # the scheduler hold peak capacity continuously. CPU is intentionally
+      # uncapped so Postgres can burst across every spare core on its node.
+      # Memory cannot be throttled like CPU, so retain a generous hard ceiling
+      # to protect the node from an unbounded database OOM.
       requests:
-        cpu: "500m"
-        memory: "1Gi"
+        cpu: "1"
+        memory: "2Gi"
+      limits:
+        memory: "8Gi"
     persistence:
       enabled: true
       size: 10Gi
