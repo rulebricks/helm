@@ -1,7 +1,7 @@
 dependencies:
 - name: rulebricks
   repository: file://charts/rulebricks
-  version: 0.1.3
+  version: 0.1.4
 - name: strimzi-kafka-operator
   repository: oci://quay.io/strimzi-helm
   version: 1.1.0
@@ -38,5 +38,5 @@ dependencies:
 - name: cluster-autoscaler
   repository: https://kubernetes.github.io/autoscaler
   version: 9.53.0
-digest: sha256:428cd903dae3a7222b406c3810c56a708a3c2e3dfacaeebf7a0c4dae8e0260d9
-generated: "2026-08-14T12:39:46.751843-07:00"
+digest: sha256:377919126eb392b30fc568cf0f3a1c65348e8209cfc3309556d1d08cb44c8fd7
+generated: "2026-08-18T10:34:28.756686-07:00"

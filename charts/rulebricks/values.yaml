@@ -208,21 +208,22 @@ hps:
     minAvailable: ""
     maxUnavailable: ""
   # Payload and deadline envelope, rendered into HPS/worker env vars. These
-  # defaults are a conservative profile; when tuning, size bodyLimitBytes,
-  # the Kafka message caps, and nodeHeapMb/resources together.
+  # defaults support 20 MiB serialized items; size bodyLimitBytes, the Kafka
+  # message caps, and nodeHeapMb/resources together when tuning.
   limits:
-    bodyLimitBytes: 6291456 # HTTP_BODY_LIMIT_BYTES
+    bodyLimitBytes: 134217728 # HTTP_BODY_LIMIT_BYTES
     rpcTimeoutMs: 60000 # RPC_TIMEOUT_MS (whole-request Kafka deadline)
     requestTimeoutMs: 30000 # HTTP_REQUEST_TIMEOUT_MS (body receive)
-    itemMaxBytes: 1572864 # ITEM_MAX_BYTES (per payload in a bulk array)
+    itemMaxBytes: 20971520 # ITEM_MAX_BYTES (per payload in a bulk array)
     contextBatchBodyLimitBytes: 4718592 # CONTEXT_BATCH_BODY_LIMIT_BYTES
     contextBatchMaxItems: 10000 # CONTEXT_BATCH_MAX_ITEMS
     largeBodyThresholdBytes: 8388608 # LARGE_BODY_THRESHOLD_BYTES (gate)
     largeBodyMaxConcurrent: 2 # LARGE_BODY_MAX_CONCURRENT (per replica)
     chunkMaxChunks: 64 # CHUNK_MAX_CHUNKS (max fan-out per request)
     chunkHardMaxBytes: 1048576 # CHUNK_HARD_MAX_BYTES (per-chunk input cap)
-    responseFetchMaxBytes: 4194304 # RESPONSE_MAX_BYTES_PER_PARTITION (HPS)
-    workerFetchMaxBytes: 4194304 # WORKER_MAX_BYTES_PER_PARTITION (worker)
+    responseFetchMaxBytes: 67108864 # RESPONSE_MAX_BYTES_PER_PARTITION (HPS)
+    workerFetchMaxBytes: 67108864 # WORKER_MAX_BYTES_PER_PARTITION (worker)
+    logRetryBufferMaxBytes: 134217728 # LOG_RETRY_BUFFER_MAX_BYTES (HPS + worker)
     shutdownDrainMs: 25000 # KAFKA_SHUTDOWN_DRAIN_MS (in-flight drain)
     terminationGracePeriodSeconds: 30 # HPS pod grace (>= drain + overhead)
     # nodeHeapMb: 1024 # NODE_OPTIONS --max-old-space-size; unset = image default

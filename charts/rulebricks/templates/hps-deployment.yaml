@@ -216,18 +216,18 @@ spec:
             - name: WARMUP_TTL_SECONDS
               value: "{{ ((.Values.hps.warmup).ttlSeconds) | default 600 }}"
             {{- /* Payload & deadline envelope (hps.limits in values.yaml).
-                 Fallback defaults below equal the HPS code defaults, so a
-                 values file without the block renders unchanged behavior.
+                 Fallback defaults preserve the chart's large-payload safety
+                 envelope even when a values file omits the limits block.
                  HTTP_CONNECTION_TIMEOUT_MS is intentionally absent: HPS
                  derives it from RPC_TIMEOUT_MS (+30s). */}}
             - name: HTTP_BODY_LIMIT_BYTES
-              value: {{ $limits.bodyLimitBytes | default 6291456 | int64 | quote }}
+              value: {{ $limits.bodyLimitBytes | default 134217728 | int64 | quote }}
             - name: RPC_TIMEOUT_MS
               value: {{ $limits.rpcTimeoutMs | default 60000 | int64 | quote }}
             - name: HTTP_REQUEST_TIMEOUT_MS
               value: {{ $limits.requestTimeoutMs | default 30000 | int64 | quote }}
             - name: ITEM_MAX_BYTES
-              value: {{ $limits.itemMaxBytes | default 1572864 | int64 | quote }}
+              value: {{ $limits.itemMaxBytes | default 20971520 | int64 | quote }}
             - name: CONTEXT_BATCH_BODY_LIMIT_BYTES
               value: {{ $limits.contextBatchBodyLimitBytes | default 4718592 | int64 | quote }}
             - name: CONTEXT_BATCH_MAX_ITEMS
@@ -241,7 +241,9 @@ spec:
             - name: CHUNK_HARD_MAX_BYTES
               value: {{ $limits.chunkHardMaxBytes | default 1048576 | int64 | quote }}
             - name: RESPONSE_MAX_BYTES_PER_PARTITION
-              value: {{ $limits.responseFetchMaxBytes | default 4194304 | int64 | quote }}
+              value: {{ $limits.responseFetchMaxBytes | default 67108864 | int64 | quote }}
+            - name: LOG_RETRY_BUFFER_MAX_BYTES
+              value: {{ $limits.logRetryBufferMaxBytes | default 134217728 | int64 | quote }}
             - name: KAFKA_SHUTDOWN_DRAIN_MS
               value: {{ $limits.shutdownDrainMs | default 25000 | int64 | quote }}
             {{- with $limits.nodeHeapMb }}

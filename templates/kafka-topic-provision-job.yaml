@@ -3,10 +3,10 @@ External-Kafka topic provisioning.
 
 For the in-cluster broker (kafka.enabled: true) the Strimzi Topic Operator
 reconciles kafka.topics via KafkaTopic CRs. On an EXTERNAL managed cluster
-(kafka.enabled: false) that operator isn't deployed, and managed clusters -
-notably MSK Serverless - won't auto-create topics, so HPS stalls forever on
-UNKNOWN_TOPIC_OR_PARTITION. This pre-install/pre-upgrade hook creates the same
-kafka.topics on the managed cluster.
+(kafka.enabled: false) that operator isn't deployed, and some managed clusters
+won't auto-create topics, so HPS stalls forever on UNKNOWN_TOPIC_OR_PARTITION.
+This pre-install/pre-upgrade hook creates the same kafka.topics and reconciles
+their max.message.bytes on the managed cluster.
 
 It reaches token-auth brokers (AWS MSK IAM / GCP OAUTHBEARER) through the
 kafka-proxy bridge - run as a native sidecar (initContainer + restartPolicy:
@@ -117,7 +117,13 @@ spec:
               {{- range $t := .Values.kafka.topics }}
               echo "Ensuring topic {{ $t.name }} ({{ $t.partitions | default 1 }} partitions, RF {{ $rf }}) ..."
               /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$B" --create --if-not-exists --topic {{ $t.name | quote }} --partitions {{ $t.partitions | default 1 }} --replication-factor {{ $rf }}{{- with $t.config }}{{- range $k, $v := . }}{{- if has $k $mskAlterable }} --config {{ printf "%s=%s" $k (toString $v) | quote }}{{- end }}{{- end }}{{- end }}
+              {{- with $t.config }}
+              {{- if hasKey . "max.message.bytes" }}
+              echo "Reconciling max.message.bytes for {{ $t.name }} ..."
+              /opt/kafka/bin/kafka-configs.sh --bootstrap-server "$B" --alter --entity-type topics --entity-name {{ $t.name | quote }} --add-config {{ printf "max.message.bytes=%s" (toString (index . "max.message.bytes")) | quote }}
               {{- end }}
-              echo "Topic provisioning complete."
+              {{- end }}
+              {{- end }}
+              echo "Topic provisioning and size reconciliation complete."
 {{- end }}
 {{- end }}

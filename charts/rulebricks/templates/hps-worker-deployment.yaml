@@ -225,9 +225,11 @@ spec:
               value: "production"
             {{- /* Per-partition fetch ceiling; kept at 2x the Kafka message
                  cap (hps.limits in values.yaml) so full-size request chunks
-                 batch efficiently. Fallback equals the worker code default. */}}
+                 batch efficiently. Fallback preserves the chart profile. */}}
             - name: WORKER_MAX_BYTES_PER_PARTITION
-              value: {{ ((.Values.hps.limits).workerFetchMaxBytes) | default 4194304 | int64 | quote }}
+              value: {{ ((.Values.hps.limits).workerFetchMaxBytes) | default 67108864 | int64 | quote }}
+            - name: LOG_RETRY_BUFFER_MAX_BYTES
+              value: {{ ((.Values.hps.limits).logRetryBufferMaxBytes) | default 134217728 | int64 | quote }}
             {{- with .Values.app.logging.kafkaSasl }}
             {{- if .existingSecret }}
             # Optional external Kafka SASL credentials secret

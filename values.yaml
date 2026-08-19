@@ -510,8 +510,8 @@ rulebricks:
       # Deadline for receiving one request's entire body (ms).
       requestTimeoutMs: 300000
       # Cap per single payload inside a bulk array (bytes); must stay under
-      # the Kafka message cap with headroom.
-      itemMaxBytes: 6291456
+      # the 32 MiB execution-topic cap with envelope headroom.
+      itemMaxBytes: 20971520
       # Context batch ingestion (body byte cap, records per request).
       contextBatchBodyLimitBytes: 134217728
       contextBatchMaxItems: 100000
@@ -524,9 +524,13 @@ rulebricks:
       # cap with response headroom).
       chunkMaxChunks: 128
       chunkHardMaxBytes: 2097152
-      # Consumer fetch ceilings (bytes per partition), 2x the message cap.
-      responseFetchMaxBytes: 16777216
-      workerFetchMaxBytes: 16777216
+      # Consumer fetch ceilings (bytes per partition), 2x the 32 MiB
+      # execution-topic cap.
+      responseFetchMaxBytes: 67108864
+      workerFetchMaxBytes: 67108864
+      # Retry buffer shared by decision-log producers. Sized for at least one
+      # full 64 MiB log record plus another bounded retry.
+      logRetryBufferMaxBytes: 134217728
       # On SIGTERM, keep consuming until in-flight requests resolve; must
       # cover rpcTimeoutMs, with terminationGracePeriodSeconds just above.
       shutdownDrainMs: 315000
@@ -702,10 +706,11 @@ kafka:
     socket.send.buffer.bytes: "1048576"
     socket.receive.buffer.bytes: "1048576"
     socket.request.max.bytes: "209715200"
-    # Per-record size cap (large-payload profile). Keep the topic-level
-    # max.message.bytes below in lockstep, and replica.fetch above it.
-    message.max.bytes: "8388608"
-    replica.fetch.max.bytes: "16777216"
+    # Broker cap follows the largest topic (64 MiB decision logs). Replica
+    # fetch ceilings stay at 2x so one full record cannot stall replication.
+    message.max.bytes: "67108864"
+    replica.fetch.max.bytes: "134217728"
+    replica.fetch.response.max.bytes: "134217728"
     log.retention.bytes: "536870912"
     log.segment.bytes: "1073741824"
     num.replica.fetchers: "4"
@@ -723,8 +728,8 @@ kafka:
   # prefix (com.rulebricks.); the CLI rewrites them if the prefix changes.
   topics:
     # Execution topics: retention.bytes is a per-partition cap sized for
-    # in-flight large-batch traffic; max.message.bytes matches the broker's
-    # message.max.bytes.
+    # in-flight large-batch traffic. Their 32 MiB record cap leaves envelope
+    # headroom around a 20 MiB serialized item.
     - name: com.rulebricks.solution
       partitions: 128
       replicas: 1
@@ -733,7 +738,7 @@ kafka:
         segment.ms: "300000"
         segment.bytes: "67108864"
         retention.bytes: "134217728"
-        max.message.bytes: "8388608"
+        max.message.bytes: "33554432"
     - name: com.rulebricks.solution-response
       partitions: 128
       replicas: 1
@@ -742,7 +747,7 @@ kafka:
         segment.ms: "300000"
         segment.bytes: "67108864"
         retention.bytes: "134217728"
-        max.message.bytes: "8388608"
+        max.message.bytes: "33554432"
     - name: com.rulebricks.logs
       partitions: 24
       replicas: 1
@@ -752,9 +757,12 @@ kafka:
         # cap smaller than the burst backlog deletes unconsumed decision
         # logs. Cap times partitions must stay within kafka.storage.size.
         retention.bytes: "1073741824"
-        max.message.bytes: "2097152"
+        # A full-fidelity single-item log contains request + response inside a
+        # second JSON envelope, so it needs more than 2x the 20 MiB item cap.
+        max.message.bytes: "67108864"
   # Topic provisioning for EXTERNAL Kafka (kafka.enabled: false): a
-  # pre-install Job creates the `topics` above on the managed cluster.
+  # pre-install/upgrade Job creates the `topics` above and reconciles their
+  # max.message.bytes on the managed cluster.
   # Requires kafkaBridge.enabled for token-auth clusters.
   provisioning:
     enabled: true
@@ -1402,6 +1410,14 @@ vector:
         # deployments on a shared cluster don't rebalance each other.
         group_id: "${KAFKA_CONSUMER_GROUP:-vector-consumers}"
         auto_offset_reset: latest
+        # Full-fidelity single-item decision logs can approach the 64 MiB logs
+        # topic cap. Set both the partition and aggregate fetch envelopes;
+        # librdkafka automatically raises receive.message.max.bytes above the
+        # aggregate fetch size plus protocol overhead.
+        librdkafka_options:
+          message.max.bytes: "67108864"
+          fetch.message.max.bytes: "67108864"
+          fetch.max.bytes: "134217728"
         # TLS + SASL are driven by env from vector-kafka-env. Disabled by default
         # (in-cluster Kafka and the bridge path both use plaintext).
         tls:

@@ -405,6 +405,22 @@ Several components connect to Kafka: HPS (KafkaJS, produces/consumes the solutio
 | `aws-iam` (AWS MSK) | native (pod IAM identity) | native (operator pod identity) | native via IRSA only (auto-skipped until annotated) | kafka-proxy bridge | kafka-proxy bridge job |
 | `oauthbearer` (GCP Managed Kafka) | native (workload identity) | skipped — CPU trigger only | skipped | kafka-proxy bridge | kafka-proxy bridge job |
 
+The default large-payload profile requires an external broker that supports
+64 MiB records. Configure the broker before installing the chart:
+
+- `message.max.bytes >= 67108864`
+- `replica.fetch.max.bytes >= 134217728` and, where exposed,
+  `replica.fetch.response.max.bytes >= 134217728`
+- `solution` and `solution-response` topic `max.message.bytes >= 33554432`
+- `logs` topic `max.message.bytes >= 67108864`
+
+The bridge provisioning hook creates missing topics and reconciles their
+`max.message.bytes` on upgrades, but it cannot change broker-level settings.
+Direct PLAIN/SCRAM brokers remain customer-managed. MSK Serverless, Azure Event
+Hubs, and current Confluent Cloud tiers do not support the 64 MiB decision-log
+record ceiling; use a provisioned/self-managed Kafka tier that does, or override
+the complete HPS/Kafka/Vector payload envelope to fit the provider's limit.
+
 **AWS MSK with IAM auth** — credentials come from pod identity (IRSA), no static secrets:
 
 ```yaml
