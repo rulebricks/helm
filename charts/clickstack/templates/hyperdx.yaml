@@ -317,6 +317,8 @@ spec:
               value: {{ include "clickstack.hyperdx.appUrl" . | quote }}
             - name: FRONTEND_URL
               value: {{ include "clickstack.hyperdx.appUrl" . | quote }}
+            - name: USAGE_STATS_ENABLED
+              value: "false"
             - name: DEFAULT_CONNECTIONS
               value: {{ printf `[{"name":"Rulebricks ClickHouse","host":%q,"username":%q,"password":"$(CLICKHOUSE_PASSWORD)","useSsl":false}]` (include "clickstack.clickhouse.httpEndpoint" .) (.Values.clickhouse.username | toString) | quote }}
             - name: DEFAULT_SOURCES

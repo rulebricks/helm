@@ -933,6 +933,9 @@ clickhouse:
 # Ingress Controller (Traefik)
 traefik:
   enabled: true
+  global:
+    checkNewVersion: false
+    sendAnonymousUsage: false
   # traefik does not read global.imageRegistry; an air-gapped registry must
   # override image.registry (the CLI does this).
   image:

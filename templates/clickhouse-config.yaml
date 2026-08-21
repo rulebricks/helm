@@ -18,6 +18,12 @@ data:
     <clickhouse>
       <listen_host>0.0.0.0</listen_host>
     </clickhouse>
+  02-crash-reports.xml: |
+    <clickhouse>
+      <send_crash_reports>
+        <enabled>false</enabled>
+      </send_crash_reports>
+    </clickhouse>
   03-prometheus.xml: |
     <clickhouse>
       <prometheus>
