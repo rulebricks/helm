@@ -1,0 +1,110 @@
+{{- $relay := .Values.smtpRelay | default dict }}
+{{- if $relay.enabled }}
+{{- /* Resolve the ACS connection-string secret: BYO (existingSecret) or the
+     chart-created <release>-smtp-relay from smtp-relay-secret.yaml. */}}
+{{- $secretName := printf "%s-smtp-relay" .Release.Name }}
+{{- $secretKey := "connection-string" }}
+{{- $existing := $relay.existingSecret | default dict }}
+{{- if $existing.name }}
+{{- $secretName = $existing.name }}
+{{- $secretKey = ($existing.connectionStringKey | default "connection-string") }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-smtp-relay
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: smtp-relay
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: email
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ $relay.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: smtp-relay
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: smtp-relay
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: email
+        {{- with $relay.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # Roll the relay when the chart-managed connection-string secret
+        # changes. BYO secrets (existingSecret) rotate outside the chart and
+        # need a manual restart.
+        checksum/secret: {{ include (print $.Template.BasePath "/smtp-relay-secret.yaml") . | sha256sum }}
+    spec:
+      imagePullSecrets:
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+      {{- with $relay.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $relay.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $relay.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: smtp-relay
+          image: {{ include "rulebricks.image" (dict "root" $ "image" $relay.image "name" "smtp-acs-bridge") | quote }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: ACS_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName | quote }}
+                  key: {{ $secretKey | quote }}
+            - name: ACS_SENDER_ADDRESS
+              value: {{ required "smtpRelay.senderAddress is required when smtpRelay.enabled (a MailFrom address on a domain linked to the ACS resource)" $relay.senderAddress | quote }}
+            {{- with $relay.allowedSenderDomains }}
+            - name: ACS_ALLOWED_SENDER_DOMAINS
+              value: {{ . | quote }}
+            {{- end }}
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:1025"
+            - name: HEALTH_LISTEN_ADDR
+              value: "0.0.0.0:9090"
+          ports:
+            - name: smtp
+              containerPort: 1025
+              protocol: TCP
+            - name: health
+              containerPort: 9090
+              protocol: TCP
+          {{- with $relay.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 30
+{{- end }}

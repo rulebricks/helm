@@ -148,10 +148,6 @@ metrics:
     addEntryPointsLabels: false # Reduce cardinality
     addServicesLabels: false # Reduce cardinality
 
-# Global arguments
-globalArguments:
-  - "--global.checknewversion"
-
 # Enable API and ping
 api:
   dashboard: true

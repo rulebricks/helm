@@ -59,6 +59,15 @@ metadata:
     {{- if ne (include "rulebricks-chart.tlsEnabled" .) "true" }}
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     {{- end }}
+    {{- /* nginx defaults (1m body cap, 60s proxy read/send timeouts) sit far
+           below the HPS large-payload envelope (hps.limits: 128 MiB bodies,
+           300s execution deadline). Sized in lockstep with the Traefik
+           entrypoint timeouts in the umbrella chart's values. NOTE: no
+           trailing dash on the comment close - it would chomp the newline
+           and glue the first annotation onto the previous line. */}}
+    nginx.ingress.kubernetes.io/proxy-body-size: "128m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "330"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "330"
     {{- end }}
 spec:
   ingressClassName: {{ $ingressClass }}

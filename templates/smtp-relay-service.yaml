@@ -1,0 +1,23 @@
+{{- $relay := .Values.smtpRelay | default dict }}
+{{- if $relay.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-smtp-relay
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: smtp-relay
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: email
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: smtp-relay
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: smtp
+      port: {{ ($relay.service | default dict).port | default 1025 }}
+      targetPort: 1025
+      protocol: TCP
+{{- end }}

@@ -1,7 +1,7 @@
 dependencies:
 - name: rulebricks
   repository: file://charts/rulebricks
-  version: 0.1.1
+  version: 0.1.4
 - name: strimzi-kafka-operator
   repository: oci://quay.io/strimzi-helm
   version: 1.1.0
@@ -10,7 +10,7 @@ dependencies:
   version: 0.1.0
 - name: supabase
   repository: file://charts/supabase
-  version: 0.1.6
+  version: 0.1.8
 - name: kube-prometheus-stack
   repository: https://prometheus-community.github.io/helm-charts
   version: 87.3.0

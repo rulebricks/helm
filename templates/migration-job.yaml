@@ -160,8 +160,15 @@ spec:
                     echo "Skipping $version (already applied)"
                   else
                     echo "Applying $version..."
-                    if psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -f "$f"; then
-                      psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -c "INSERT INTO schema_migrations (version) VALUES ('$version');"
+                    # Apply the file and record it atomically. ON_ERROR_STOP is
+                    # required because psql otherwise exits successfully after
+                    # statement-level errors and marks a partial migration as
+                    # applied.
+                    if psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME \
+                      -v ON_ERROR_STOP=1 \
+                      --single-transaction \
+                      -f "$f" \
+                      -c "INSERT INTO schema_migrations (version) VALUES ('$version');"; then
                       echo "Successfully applied $version"
                     else
                       echo "Failed to apply $version"

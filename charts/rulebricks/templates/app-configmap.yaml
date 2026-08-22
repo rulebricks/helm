@@ -15,8 +15,9 @@ data:
   DOMAIN_NAME: {{ $domain | quote }}
   ROUTER_ENTRYPOINT: {{ $routerEntrypoint | quote }}
   # Supabase configuration (non-sensitive)
-  # - Self-hosted (supabase.enabled: true): URL derived from global.domain
-  # - External (supabase.enabled: false): URL from global.supabase.url
+  # - Self-hosted (supabase.enabled: true): public URL derived from global.domain;
+  #   server-side SUPABASE_URL points at Kong in-cluster (see below)
+  # - External (supabase.enabled: false): both URLs from global.supabase.url
   # Note: Sensitive keys (anonKey, serviceKey) are stored in the app secret
   {{- $supabaseAnonKey := "" }}
   {{- $supabaseUrl := "" }}
@@ -30,6 +31,20 @@ data:
   {{- /* If no explicit URL, derive public URL from global.domain (self-hosted) */ -}}
   {{- if not $supabaseUrl }}
     {{- $supabaseUrl = printf "%s://supabase.%s" $protocol $domain }}
+  {{- end }}
+  {{- /* Server-side calls (app admin/invite APIs, SSR auth, HPS) must not
+       depend on the public supabase.<domain> record: split-horizon corporate
+       DNS often serves it to browsers but not to cluster DNS, making every
+       server-side Supabase call fail with ENOTFOUND. Self-hosted deployments
+       therefore point SUPABASE_URL at Kong through a Service literally named
+       "supabase" (see the supabase subchart's kong/alias-service.yaml). The
+       hostname's first label stays identical to the public URL's, so
+       @supabase/ssr derives the same session cookie name
+       (sb-supabase-auth-token) on server and browser. An explicit
+       global.supabase.url (external/cloud Supabase) keeps one URL for both. */ -}}
+  {{- $supabaseServerUrl := $supabaseUrl }}
+  {{- if not (and .Values.global .Values.global.supabase .Values.global.supabase.url) }}
+    {{- $supabaseServerUrl = printf "http://supabase.%s.svc.cluster.local:8000" .Release.Namespace }}
   {{- end }}
   {{- /* The browser Supabase client authenticates every request to the Kong
        gateway with this key (the `apikey` header); without it, every
@@ -46,7 +61,8 @@ data:
   {{- end }}
   # Public key is safe for ConfigMap (embedded in client bundle for Next.js)
   SUPABASE_PUBLIC_KEY: {{ $supabaseAnonKey | quote }}
-  SUPABASE_URL: {{ $supabaseUrl | quote }}
+  # Server-side Supabase endpoint (in-cluster Kong for self-hosted; see above)
+  SUPABASE_URL: {{ $supabaseServerUrl | quote }}
   NEXT_PUBLIC_EMAIL: {{ .Values.global.email | default .Values.app.email | default "" | quote }}
   NEXT_PUBLIC_PROTOCOL: "https"
   NEXT_PUBLIC_DOMAIN_NAME: {{ $domain | quote }}
@@ -91,20 +107,6 @@ data:
   SMTP_PORT: {{ .Values.app.smtp.port | default "" | quote }}
   SMTP_FROM: {{ .Values.app.smtp.from | default "" | quote }}
   SMTP_FROM_NAME: {{ .Values.app.smtp.fromName | default "" | quote }}
-  {{- end }}
-  # AI Features - only the enabled flag (API key is in the app secret)
-  {{- $aiEnabled := false }}
-  {{- if and .Values.global .Values.global.ai .Values.global.ai.enabled }}
-    {{- $aiEnabled = true }}
-  {{- else if and .Values.app.ai .Values.app.ai.enabled }}
-    {{- $aiEnabled = true }}
-  {{- end }}
-  {{- if $aiEnabled }}
-  AI_ENABLED: "1"
-  {{- end }}
-  {{- if and .Values.global .Values.global.ai .Values.global.ai.openaiBaseUrl }}
-  # Optional OpenAI-compatible endpoint; app/HPS default to the public API when unset
-  OPENAI_BASE_URL: {{ .Values.global.ai.openaiBaseUrl | quote }}
   {{- end }}
   # Kafka topic namespace prefix. Emitted unconditionally because HPS applies it
   # to all topics (including the always-on solution work topics), independent of

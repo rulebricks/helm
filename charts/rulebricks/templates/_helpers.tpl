@@ -290,6 +290,38 @@ HPS Worker service name
 {{- end }}
 
 {{/*
+Replica field for a KEDA-scaled Deployment.
+
+KEDA/HPA patches .spec.replicas through the scale subresource (field
+manager kube-controller-manager). Helm 4+ server-side apply then fails
+with a conflict if the chart writes a different value.
+
+When KEDA is enabled and the Deployment already exists, emit the live
+replica count so Helm co-owns by matching. When KEDA is enabled but
+lookup is empty (first install, or helm template/--dry-run), omit the
+field entirely so Helm does not take ownership — Kubernetes defaults a
+new Deployment to 1 and KEDA scales it to minReplicaCount; an existing
+Deployment keeps whatever the scaler last set. When KEDA is off, emit
+the chart fallback as before.
+
+Usage: {{ include "rulebricks-chart.kedaReplicas" (dict "root" . "name" $n "kedaEnabled" $e "fallback" 3) }}
+Renders a `replicas: N` line or nothing.
+*/}}
+{{- define "rulebricks-chart.kedaReplicas" -}}
+{{- $fallback := .fallback -}}
+{{- $spec := dict -}}
+{{- if .kedaEnabled -}}
+  {{- $live := lookup "apps/v1" "Deployment" .root.Release.Namespace .name | default dict -}}
+  {{- $spec = $live.spec | default dict -}}
+{{- end -}}
+{{- if and .kedaEnabled (hasKey $spec "replicas") -}}
+replicas: {{ $spec.replicas }}
+{{- else if not .kedaEnabled -}}
+replicas: {{ $fallback }}
+{{- end -}}
+{{- end }}
+
+{{/*
 App deployment name
 */}}
 {{- define "rulebricks-chart.app.fullname" -}}

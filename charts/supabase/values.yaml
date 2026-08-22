@@ -415,7 +415,13 @@ auth:
     GOTRUE_SMS_AUTOCONFIRM: "true"
     # Security settings
     GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED: "true"
-    GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL: "10"
+    # 30s (up from 10s): with rotation enabled, a stale tab replaying an
+    # already-rotated refresh token outside this window makes GoTrue revoke
+    # the whole session family - and the losing client drops its (healthy)
+    # session cookie. Browsers routinely hold many long-lived tabs, so give
+    # slow tabs a wider grace window; Supabase Cloud uses the same order of
+    # magnitude.
+    GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL: "30"
     GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
     GOTRUE_EXTERNAL_MANUAL_LINKING_ENABLED: "false"
     # Rate limits
@@ -513,6 +519,12 @@ rest:
     PGRST_DB_SCHEMAS: public,storage,graphql_public
     PGRST_DB_ANON_ROLE: anon
     PGRST_APP_SETTINGS_JWT_EXP: 3600
+    # Postgres connection pool per PostgREST replica. The upstream default (10)
+    # is exhausted by concurrent context-batch ingest + auth lookups under
+    # load, which surfaces as "Timed out acquiring connection from connection
+    # pool" (and, before the auth fix, as spurious 401s). Raise it to give
+    # concurrent API traffic more headroom.
+    PGRST_DB_POOL: 50
   # volumeMounts:
   #   - name: volume_name
   #     mountPath: /path/to/my/secret

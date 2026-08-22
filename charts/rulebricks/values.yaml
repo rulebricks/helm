@@ -40,10 +40,8 @@ app:
     enabled: false
     minAvailable: ""
     maxUnavailable: ""
-  # Baseline app sizing. The Next.js app runs a CPU-bound startup pass (runtime
-  # NEXT_PUBLIC_* placeholder substitution across the .next build) before it
-  # serves on :3000; a too-small CPU limit makes that overrun the liveness probe
-  # window and crash-loop the pod, so keep a real baseline here.
+  # The app runs a CPU-bound startup pass before serving on :3000; keep a real
+  # CPU baseline or startup can overrun the liveness probe window.
   resources:
     requests:
       cpu: 500m
@@ -51,12 +49,9 @@ app:
     limits:
       cpu: "2000m"
       memory: 2Gi
-  # Extra environment variables to inject (list of name/value or valueFrom objects)
-  # Note: the chart sets HOSTNAME=0.0.0.0 on the app container by default so the
-  # Next.js standalone server binds to all interfaces. (Kubernetes otherwise sets
-  # HOSTNAME to the pod name; on some CNIs that resolves to an address the kubelet
-  # doesn't probe, which fails every liveness check and silently crash-loops the
-  # pod.) Adding your own HOSTNAME entry here replaces that default.
+  # Extra environment variables to inject (list of name/value or valueFrom objects).
+  # The chart sets HOSTNAME=0.0.0.0 by default so the server binds all
+  # interfaces; adding your own HOSTNAME entry replaces that default.
   # Example:
   #   - name: MY_SECRET
   #     valueFrom:
@@ -76,10 +71,8 @@ app:
     enabled: false
     kafkaBrokers: ""  # Override Kafka brokers URL, defaults to in-cluster Kafka
     kafkaTopic: "logs"
-    # Prefix applied to ALL Kafka topic names (solution, solution-response, logs, ...)
-    # so they don't collide on a shared/managed Kafka cluster. HPS prepends this to
-    # its topics; the chart applies it to KEDA lag triggers and the Vector consumer.
-    # Set to "" to disable prefixing entirely.
+    # Prefix applied to all Kafka topic names so they don't collide on a
+    # shared or managed cluster. Set to "" to disable prefixing.
     kafkaTopicPrefix: "com.rulebricks."
     kafkaSsl: false
     kafkaSasl:
@@ -90,15 +83,11 @@ app:
       existingSecret: ""
       existingSecretUsernameKey: "KAFKA_SASL_USERNAME"
       existingSecretPasswordKey: "KAFKA_SASL_PASSWORD"
-  # ClickHouse credentials for the decision-log query path. Defaults to the
-  # parent chart's <release>-clickhouse-credentials Secret; set existingSecret
+  # ClickHouse credentials for the decision-log query path. Set existingSecret
   # to match a BYO clickhouse.auth.existingSecret in the parent chart.
   clickhouse:
     existingSecret: ""
     existingSecretKey: "admin-password"
-  # AI features (optional)
-  ai:
-    enabled: false
   # SMTP configuration (optional, can also be set via global.smtp)
   smtp: {}
   livenessProbe:
@@ -137,9 +126,8 @@ metrics:
   hps:
     path: /metrics
   worker:
-    # HPS workers expose Prometheus metrics on this path (served by the small
-    # metrics HTTP server inside the bundled worker). Scraped via the headless
-    # worker Service + ServiceMonitor.
+    # Workers expose Prometheus metrics here, scraped via the headless worker
+    # Service and ServiceMonitor.
     path: /metrics
     port: 3000
 
@@ -149,58 +137,41 @@ hps:
     registry: docker.io
     repository: rulebricks/hps
     pullPolicy: Always
-  # The wait-for-kafka init container uses the centralized busybox image
-  # (global.images.busybox); it only needs `nc` to poll the broker TCP port.
   replicas: 1
-  # Gather-plane autoscaler (see templates/hps-keda.yaml). Conservative by
-  # design: HPS scale events rebalance the response consumer group and can
-  # time out in-flight requests, so pods are added/removed one at a time
-  # behind long stabilization windows.
+  # Autoscaler for the HPS request plane. Conservative by design: HPS scale
+  # events rebalance the response consumer group, so pods are added and
+  # removed gradually.
   keda:
     enabled: false
     minReplicaCount: 2
-    # Leave maxReplicaCount unset to inherit the derived default (~1 HPS per
-    # 4 workers of the worker fleet ceiling, floor 8 - see hps-keda.yaml).
+    # Leave maxReplicaCount unset to inherit the derived default.
     # maxReplicaCount: 16
     pollingInterval: 15
     cooldownPeriod: 600
-    # Lag is in chunk MESSAGES (up to FLOW_CHUNK_MAX_ITEMS payload results
-    # each); 50 standing messages is already a large payload backlog. Higher
-    # thresholds never fire before gather latency crosses the request window.
+    # Response-topic backlog (messages) that triggers scale-up.
     lagThreshold: 50
-    # Gather saturation shows as ~50% of the 1-CPU request (single JS thread
-    # pegs one core); 45 fires just below that plateau, 60 never did.
+    # CPU percentage of request that triggers scale-up.
     cpuThreshold: 45
-  # Fleet warm-up (/api/v1/scale): integrators pre-scale the worker fleet to
-  # its ceiling before large batch workloads. Implemented as a KEDA
-  # metrics-api trigger on the worker ScaledObject polling HPS's
-  # /internal/warmup-metric; requires a shared Redis backend (REDIS_URL).
+  # Fleet warm-up (/api/v1/scale): pre-scales the worker fleet to its ceiling
+  # ahead of large batch workloads. Requires a shared Redis backend.
   warmup:
     enabled: true
-    # How long one warm-up call holds the fleet at max before normal
-    # scale-down reclaims it. Repeat calls refresh the window.
+    # How long one warm-up call holds the fleet at max; repeat calls refresh it.
     ttlSeconds: 600
-    # One-shot post-install prewarm: allocate every reachable burst node
-    # once so the image-prepull DaemonSet caches images on them before they
-    # deallocate (valuable on Azure, whose burst pool parks VMs with their
-    # disks; pointless where scale-down terminates instances).
+    # One-shot post-install prewarm so image prepull caches images on burst
+    # nodes before they deallocate (useful on Azure).
     prewarmOnInstall: false
-  # Pre-pull the HPS server + worker images onto every node (DaemonSet) so
+  # Pre-pull the HPS server and worker images onto every node (DaemonSet) so
   # burst scale-outs skip the image pull on freshly provisioned nodes.
   imagePrepull:
     enabled: true
-    # Resident container that keeps the pulled images on the node uses the
-    # centralized pause image (global.images.pause).
-    # Tolerate the Rulebricks burst pool without tolerating shutdown,
-    # out-of-service, or unreachable node taints. Add explicit architecture
-    # tolerations here if those pools are tainted.
+    # Add architecture tolerations here if your node pools are tainted.
     nodeSelector: {}
     tolerations:
       - key: rulebricks.com/pool
         operator: Equal
         value: burst
         effect: NoSchedule
-    # Near-zero footprint so the DaemonSet never affects bin-packing.
     resources:
       init:
         requests:
@@ -236,11 +207,42 @@ hps:
     enabled: false
     minAvailable: ""
     maxUnavailable: ""
+  # Payload and deadline envelope, rendered into HPS/worker env vars. These
+  # defaults support 20 MiB serialized items; size bodyLimitBytes, the Kafka
+  # message caps, and nodeHeapMb/resources together when tuning.
+  limits:
+    bodyLimitBytes: 134217728 # HTTP_BODY_LIMIT_BYTES
+    rpcTimeoutMs: 60000 # RPC_TIMEOUT_MS (whole-request Kafka deadline)
+    requestTimeoutMs: 30000 # HTTP_REQUEST_TIMEOUT_MS (body receive)
+    itemMaxBytes: 20971520 # ITEM_MAX_BYTES (per payload in a bulk array)
+    contextBatchBodyLimitBytes: 4718592 # CONTEXT_BATCH_BODY_LIMIT_BYTES
+    contextBatchMaxItems: 10000 # CONTEXT_BATCH_MAX_ITEMS
+    largeBodyThresholdBytes: 8388608 # LARGE_BODY_THRESHOLD_BYTES (gate)
+    largeBodyMaxConcurrent: 2 # LARGE_BODY_MAX_CONCURRENT (per replica)
+    chunkMaxChunks: 64 # CHUNK_MAX_CHUNKS (max fan-out per request)
+    chunkHardMaxBytes: 1048576 # CHUNK_HARD_MAX_BYTES (per-chunk input cap)
+    responseFetchMaxBytes: 67108864 # RESPONSE_MAX_BYTES_PER_PARTITION (HPS)
+    workerFetchMaxBytes: 67108864 # WORKER_MAX_BYTES_PER_PARTITION (worker)
+    logRetryBufferMaxBytes: 134217728 # LOG_RETRY_BUFFER_MAX_BYTES (HPS + worker)
+    shutdownDrainMs: 25000 # KAFKA_SHUTDOWN_DRAIN_MS (in-flight drain)
+    terminationGracePeriodSeconds: 30 # HPS pod grace (>= drain + overhead)
+    # nodeHeapMb: 1024 # NODE_OPTIONS --max-old-space-size; unset = image default
   # Extra environment variables.
-  # FLOW_CHUNK_MAX_ITEMS is an important throughput dial.
+  # Bulk chunk sizing is self-tuning and needs no configuration here; the
+  # only chunking values to tune are chunkMaxChunks and chunkHardMaxBytes
+  # under `limits` above.
   extraEnv:
-    - name: FLOW_CHUNK_MAX_ITEMS
-      value: "500"
+    # Reuse one sandbox context per execution unit (faster context ingest on
+    # schemas with derived fields). Set "0" to disable.
+    - name: RB_FN_CONTEXT_REUSE
+      value: "1"
+    # Bound the relationship cascade that runs after a context batch commits:
+    # max dependent parents re-evaluated per relationship, and a wall-clock
+    # budget before the remainder is deferred.
+    - name: CONTEXT_CASCADE_MAX_INSTANCES
+      value: "2000"
+    - name: CONTEXT_CASCADE_BUDGET_MS
+      value: "45000"
   extraEnvFrom: []
   resources:
     requests:
@@ -264,10 +266,8 @@ hps:
     # Pod labels/annotations
     podLabels: {}
     podAnnotations: {}
-    # Health probes. Empty = no probe rendered. Set these to satisfy a cluster
-    # policy that requires liveness/readiness probes. When metrics.enabled (the
-    # default) the worker serves a Prometheus endpoint on the "metrics" port
-    # (metrics.worker.port, default 3000), which is a convenient probe target, e.g.:
+    # Health probes. Empty = no probe rendered. The worker's metrics endpoint
+    # is a convenient probe target, e.g.:
     #   readinessProbe:
     #     httpGet: { path: /metrics, port: metrics }
     #     initialDelaySeconds: 10
@@ -288,8 +288,11 @@ hps:
       enabled: false
       minAvailable: ""
       maxUnavailable: ""
-    # Extra environment variables
-    extraEnv: []
+    # Extra environment variables. Keep RB_FN_CONTEXT_REUSE in sync with the
+    # HPS server setting above.
+    extraEnv:
+      - name: RB_FN_CONTEXT_REUSE
+        value: "1"
     extraEnvFrom: []
     resources:
       requests:
@@ -314,8 +317,6 @@ redis:
   # Deploy bundled Valkey (set to false to use an external Valkey/Redis-compatible endpoint).
   # The redis key is retained for compatibility with existing chart overrides.
   enabled: true
-  # Valkey (OSI-licensed Redis fork), mirrored to docker.io/rulebricks/valkey.
-  # The pull is authenticated by the license-key registry secret.
   image:
     registry: docker.io
     repository: rulebricks/valkey
@@ -369,11 +370,7 @@ redis:
       existingSecretUrlKey: "redis-url"
       existingSecretTokenKey: "redis-token"
 
-# Serverless Redis-compatible HTTP bridge (hiett/serverless-redis-http),
-# rebuilt from unmodified upstream source (release 0.0.10) on the hardened
-# DHI Erlang/OTP runtime and published as docker.io/rulebricks/
-# serverless-redis-http (upstream is unmaintained; its 2021 image base
-# carried the CISA KEV-listed CVE-2025-32433).
+# Serverless Redis-compatible HTTP bridge.
 serverlessRedisHttp:
   image:
     registry: docker.io
@@ -387,9 +384,6 @@ cache:
     image:
       registry: docker.io
       repository: rulebricks/valkey-admin
-      # Upstream image with a Debian security patch layer, refreshed runtime
-      # deps, and npm CLI tooling removed (images/valkey-admin in the infra
-      # repo); -rN increments on rebuilds.
       tag: "1.0.2-r1"
       pullPolicy: IfNotPresent
     replicas: 1
@@ -482,9 +476,8 @@ kafkaExporter:
   # Extra kafka_exporter flags, e.g. "--kafka.version=3.6.0".
   extraArgs: []
   # For AWS MSK IAM, set the IRSA annotation (eks.amazonaws.com/role-arn) with
-  # a role granting kafka-cluster:Connect + Describe* on the cluster, topics,
-  # and groups. The exporter is skipped under aws-iam until the annotation is
-  # present (the exporter does not support EKS Pod Identity).
+  # a role granting kafka-cluster:Connect and Describe permissions. The
+  # exporter is skipped under aws-iam until the annotation is present.
   serviceAccount:
     create: true
     # Defaults to "<release>-kafka-exporter".

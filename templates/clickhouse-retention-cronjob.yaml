@@ -76,11 +76,30 @@ spec:
                 - |
                   set -eu
                   q() {
-                    wget -q -O - \
+                    query="$1"
+                    settings="${2:-}"
+                    headers="/tmp/clickhouse-headers.$$"
+                    response=""
+                    if ! response=$(wget -S -O - \
                       --header "X-ClickHouse-User: ${CLICKHOUSE_USER}" \
                       --header "X-ClickHouse-Key: ${CLICKHOUSE_PASSWORD}" \
-                      --post-data "$1" \
-                      "http://${CLICKHOUSE_HOST}:8123/"
+                      --post-data "${query}" \
+                      "http://${CLICKHOUSE_HOST}:8123/${settings}" \
+                      2>"${headers}"); then
+                      echo "ClickHouse query failed: ${query}" >&2
+                      # BusyBox wget does not reliably print ClickHouse's 500
+                      # response body, but -S preserves the status and
+                      # X-ClickHouse-Exception-Code header. Print both when
+                      # available so retention failures are diagnosable.
+                      cat "${headers}" >&2
+                      if [ -n "${response}" ]; then
+                        printf '%s\n' "${response}" >&2
+                      fi
+                      rm -f "${headers}"
+                      return 1
+                    fi
+                    rm -f "${headers}"
+                    printf '%s' "${response}"
                   }
                   i=0
                   while [ "$i" -lt 32 ]; do
@@ -103,11 +122,27 @@ spec:
                     fi
                     today=$(date -u +%Y%m%d)
                     if [ "$oldest" -ge "$today" ] 2>/dev/null; then
-                      echo "only the active partition remains; leaving it (ingest is bounded by min_free_disk_ratio_to_perform_insert)"
-                      exit 0
+                      insert_ok=$(q "SELECT free_space >= 0.20 * total_space FROM system.disks WHERE name = 'default' FORMAT TSVRaw")
+                      if [ "$insert_ok" = "1" ]; then
+                        echo "only the active partition remains and insert headroom is healthy (>=20% free); leaving it"
+                        exit 0
+                      fi
+                      if [ "$insert_ok" != "0" ]; then
+                        echo "unexpected system.disks response '${insert_ok}'" >&2
+                        exit 1
+                      fi
+                      # A single high-volume day can fill the disk before UTC
+                      # rollover. Below the table's 20% insert backstop, keeping
+                      # today's local partition would wedge ingest indefinitely.
+                      # The independently-written object archive remains durable.
+                      echo "free space below insert backstop; dropping active decision_logs partition ${oldest}"
+                    else
+                      echo "free space low; dropping decision_logs partition ${oldest}"
                     fi
-                    echo "free space low; dropping decision_logs partition ${oldest}"
-                    q "ALTER TABLE rulebricks.decision_logs DROP PARTITION ID '${oldest}'"
+                    # Override ClickHouse's 50 GB safety cap for this emergency
+                    # retention operation only. The server-wide guard remains in
+                    # place for every other DROP query.
+                    q "ALTER TABLE rulebricks.decision_logs DROP PARTITION ID '${oldest}'" "?max_partition_size_to_drop=0"
                     i=$((i + 1))
                   done
                   echo "eviction cap reached this run; continuing next schedule"

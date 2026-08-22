@@ -16,7 +16,8 @@ metadata:
     {{- include "rulebricks-chart.labels" . | nindent 4 }}
     app.kubernetes.io/component: hps
 spec:
-  replicas: {{ .Values.hps.replicas | default 1 }}
+  {{- $hpsKeda := ((.Values.hps.keda).enabled | default false) }}
+  {{- include "rulebricks-chart.kedaReplicas" (dict "root" . "name" (include "rulebricks-chart.hps.fullname" .) "kedaEnabled" $hpsKeda "fallback" (.Values.hps.replicas | default 1)) | nindent 2 }}
   {{- /* Surge one pod at a time and wait for readiness (Kafka group join)
        before terminating an old pod: every HPS membership change rebalances
        the response consumer group, so rollouts must stay gradual - the same
@@ -55,6 +56,11 @@ spec:
         checksum/private-ca: {{ .Values.global.tlsPrivateCaBundle | sha256sum }}
         {{- end }}
     spec:
+      {{- $limits := .Values.hps.limits | default dict }}
+      {{- /* HPS drains in-flight Kafka RPCs on SIGTERM (KAFKA_SHUTDOWN_DRAIN_MS
+           below); the pod grace period must outlive that drain or scale-in
+           kills still-viable requests mid-flight. */}}
+      terminationGracePeriodSeconds: {{ $limits.terminationGracePeriodSeconds | default 30 | int64 }}
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}
       serviceAccountName: {{ include "rulebricks-chart.hps.serviceAccountName" . }}
@@ -209,6 +215,43 @@ spec:
               value: "{{ .Values.hps.workers.keda.maxReplicaCount | default 48 }}"
             - name: WARMUP_TTL_SECONDS
               value: "{{ ((.Values.hps.warmup).ttlSeconds) | default 600 }}"
+            {{- /* Payload & deadline envelope (hps.limits in values.yaml).
+                 Fallback defaults preserve the chart's large-payload safety
+                 envelope even when a values file omits the limits block.
+                 HTTP_CONNECTION_TIMEOUT_MS is intentionally absent: HPS
+                 derives it from RPC_TIMEOUT_MS (+30s). */}}
+            - name: HTTP_BODY_LIMIT_BYTES
+              value: {{ $limits.bodyLimitBytes | default 134217728 | int64 | quote }}
+            - name: RPC_TIMEOUT_MS
+              value: {{ $limits.rpcTimeoutMs | default 60000 | int64 | quote }}
+            - name: HTTP_REQUEST_TIMEOUT_MS
+              value: {{ $limits.requestTimeoutMs | default 30000 | int64 | quote }}
+            - name: ITEM_MAX_BYTES
+              value: {{ $limits.itemMaxBytes | default 20971520 | int64 | quote }}
+            - name: CONTEXT_BATCH_BODY_LIMIT_BYTES
+              value: {{ $limits.contextBatchBodyLimitBytes | default 4718592 | int64 | quote }}
+            - name: CONTEXT_BATCH_MAX_ITEMS
+              value: {{ $limits.contextBatchMaxItems | default 10000 | int64 | quote }}
+            - name: LARGE_BODY_THRESHOLD_BYTES
+              value: {{ $limits.largeBodyThresholdBytes | default 8388608 | int64 | quote }}
+            - name: LARGE_BODY_MAX_CONCURRENT
+              value: {{ $limits.largeBodyMaxConcurrent | default 2 | int64 | quote }}
+            - name: CHUNK_MAX_CHUNKS
+              value: {{ $limits.chunkMaxChunks | default 64 | int64 | quote }}
+            - name: CHUNK_HARD_MAX_BYTES
+              value: {{ $limits.chunkHardMaxBytes | default 1048576 | int64 | quote }}
+            - name: RESPONSE_MAX_BYTES_PER_PARTITION
+              value: {{ $limits.responseFetchMaxBytes | default 67108864 | int64 | quote }}
+            - name: LOG_RETRY_BUFFER_MAX_BYTES
+              value: {{ $limits.logRetryBufferMaxBytes | default 134217728 | int64 | quote }}
+            - name: KAFKA_SHUTDOWN_DRAIN_MS
+              value: {{ $limits.shutdownDrainMs | default 25000 | int64 | quote }}
+            {{- with $limits.nodeHeapMb }}
+            {{- /* Overrides the image's NODE_OPTIONS default (1024 MB); size
+                 to ~85% of the container memory limit. */}}
+            - name: NODE_OPTIONS
+              value: {{ printf "--max-old-space-size=%d" (int64 .) | quote }}
+            {{- end }}
             {{- with .Values.app.logging.kafkaSasl }}
             {{- if .existingSecret }}
             # Optional external Kafka SASL credentials secret

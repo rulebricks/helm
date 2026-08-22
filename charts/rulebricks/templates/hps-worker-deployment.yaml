@@ -34,7 +34,8 @@ metadata:
     {{- include "rulebricks-chart.labels" . | nindent 4 }}
     app.kubernetes.io/component: hps-worker
 spec:
-  replicas: {{ .Values.hps.workers.replicas | default 3 }}
+  {{- $workerKeda := ((.Values.hps.workers.keda).enabled | default false) }}
+  {{- include "rulebricks-chart.kedaReplicas" (dict "root" . "name" (include "rulebricks-chart.hps-worker.fullname" .) "kedaEnabled" $workerKeda "fallback" (.Values.hps.workers.replicas | default 3)) | nindent 2 }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
@@ -222,6 +223,13 @@ spec:
               value: {{ .Values.hps.workers.topics | default "solution" | quote }}
             - name: NODE_ENV
               value: "production"
+            {{- /* Per-partition fetch ceiling; kept at 2x the Kafka message
+                 cap (hps.limits in values.yaml) so full-size request chunks
+                 batch efficiently. Fallback preserves the chart profile. */}}
+            - name: WORKER_MAX_BYTES_PER_PARTITION
+              value: {{ ((.Values.hps.limits).workerFetchMaxBytes) | default 67108864 | int64 | quote }}
+            - name: LOG_RETRY_BUFFER_MAX_BYTES
+              value: {{ ((.Values.hps.limits).logRetryBufferMaxBytes) | default 134217728 | int64 | quote }}
             {{- with .Values.app.logging.kafkaSasl }}
             {{- if .existingSecret }}
             # Optional external Kafka SASL credentials secret

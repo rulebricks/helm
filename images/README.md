@@ -16,12 +16,17 @@ current toolchains and hardened bases clears those findings without forking anyt
 ## The two archetypes
 
 ### Source rebuild (`kafka-proxy`, `serverless-redis-http`, `ferretdb`,
-### `supabase-gotrue`, `supabase-realtime`, `clickstack-otel-collector`)
+### `supabase-gotrue`, `supabase-realtime`, `clickstack-otel-collector`,
+### `smtp-acs-bridge`)
 
 Unmodified upstream source at a pinned release commit (`ref` in the manifest, injected as
 `ARG UPSTREAM_REF`), compiled with a current toolchain — dependencies re-resolve inside
 upstream's own declared version constraints — and shipped on a hardened runtime
 (`base` in the manifest, injected as `ARG BASE_IMAGE`). No forks, no source patches.
+The one exception: `smtp-acs-bridge` builds from Rulebricks' maintained copy
+([rulebricks/smtp-acs-bridge](https://github.com/rulebricks/smtp-acs-bridge), forked from
+the dormant `ArrEssJay/smtp-acs-bridge`), whose committed `Cargo.lock` is the dependency
+pin (`--locked`) — bump deps there via `cargo update`, not here.
 
 **To bump upstream:** in the manifest entry, set `ref` to the new release commit/tag and
 `tag` to `<new-version>-r1` (bump `-rN` instead when rebuilding the same upstream

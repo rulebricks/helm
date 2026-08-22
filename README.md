@@ -82,8 +82,6 @@ global:
 | `global.supabase.projectRef`         | Project reference (Cloud Supabase)                                        |
 | `global.supabase.accessToken`        | Access token for Supabase CLI (Cloud Supabase)                            |
 | `global.supabase.jwtSecret`          | JWT signing secret (self-hosted only)                                     |
-| `global.ai.enabled`                  | Enable AI-powered rule generation                                         |
-| `global.ai.openaiApiKey`             | OpenAI API key for AI features                                            |
 | `global.sso.enabled`                 | Enable Enterprise SSO                                                     |
 | `global.sso.provider`                | SSO provider: `azure`, `google`, `okta`, `keycloak`, `ory`, `other`       |
 | `global.sso.url`                     | Identity provider URL (required except for Google)                        |
@@ -124,7 +122,7 @@ The canonical inventory of every Secret and key lives in
 
 | Secret role                    | Values seam                                     | Keys                                            |
 | ------------------------------ | ----------------------------------------------- | ----------------------------------------------- |
-| Application (app, HPS, workers, SSO, managed migrations) | `global.secrets.secretRef` (+ `secretRefKeys`) | `LICENSE_KEY`, `EMAIL`, `SMTP_USER`, `SMTP_PASS`, `SUPABASE_*`, `OPENAI_API_KEY`, `JWT_SECRET`, `SSO_CLIENT_*`, `REDIS_PASSWORD`, `KAFKA_SASL_*` |
+| Application (app, HPS, workers, SSO, managed migrations) | `global.secrets.secretRef` (+ `secretRefKeys`) | `LICENSE_KEY`, `EMAIL`, `SMTP_USER`, `SMTP_PASS`, `SUPABASE_*`, `JWT_SECRET`, `SSO_CLIENT_*`, `REDIS_PASSWORD`, `KAFKA_SASL_*` |
 | Browser anon key (runtime)     | `global.supabase.secretRef` (+ `secretRefKey`)  | `anonKey`                                       |
 | Supabase JWT                   | `supabase.secret.jwt.secretRef`                 | `secret`, `anonKey`, `serviceKey`               |
 | Postgres                       | `supabase.secret.db.secretRef` or `supabase.externalDatabase.secretRef` | `username`, `password`, `database` (+ `host`, `port` external) |
@@ -406,6 +404,22 @@ Several components connect to Kafka: HPS (KafkaJS, produces/consumes the solutio
 | `plain` / `scram-sha-256` / `scram-sha-512` (Redpanda, Confluent, Event Hubs `$ConnectionString`) | native | native (secret TriggerAuthentication) | native | native | create topics yourself / auto-create |
 | `aws-iam` (AWS MSK) | native (pod IAM identity) | native (operator pod identity) | native via IRSA only (auto-skipped until annotated) | kafka-proxy bridge | kafka-proxy bridge job |
 | `oauthbearer` (GCP Managed Kafka) | native (workload identity) | skipped — CPU trigger only | skipped | kafka-proxy bridge | kafka-proxy bridge job |
+
+The default large-payload profile requires an external broker that supports
+64 MiB records. Configure the broker before installing the chart:
+
+- `message.max.bytes >= 67108864`
+- `replica.fetch.max.bytes >= 134217728` and, where exposed,
+  `replica.fetch.response.max.bytes >= 134217728`
+- `solution` and `solution-response` topic `max.message.bytes >= 33554432`
+- `logs` topic `max.message.bytes >= 67108864`
+
+The bridge provisioning hook creates missing topics and reconciles their
+`max.message.bytes` on upgrades, but it cannot change broker-level settings.
+Direct PLAIN/SCRAM brokers remain customer-managed. MSK Serverless, Azure Event
+Hubs, and current Confluent Cloud tiers do not support the 64 MiB decision-log
+record ceiling; use a provisioned/self-managed Kafka tier that does, or override
+the complete HPS/Kafka/Vector payload envelope to fit the provider's limit.
 
 **AWS MSK with IAM auth** — credentials come from pod identity (IRSA), no static secrets:
 

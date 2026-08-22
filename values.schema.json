@@ -207,18 +207,6 @@
             }
           }
         },
-        "ai": {
-          "type": "object",
-          "description": "AI Features Configuration",
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "openaiApiKey": { "type": "string" },
-            "openaiBaseUrl": {
-              "type": "string",
-              "description": "Optional OpenAI-compatible API base URL (defaults to OpenAI's public API when empty)"
-            }
-          }
-        },
         "secrets": {
           "type": "object",
           "description": "Secrets Configuration",
@@ -485,6 +473,69 @@
         }
       }
     },
+    "smtpRelay": {
+      "type": "object",
+      "description": "Opt-in in-cluster SMTP-to-ACS-REST relay for Azure Communication Services API-key email mode. When enabled, global.smtp.host/port point at <release>-smtp-relay:1025 and global.smtp.user/pass stay empty (the relay ignores SMTP credentials; GoTrue refuses AUTH over plaintext anyway).",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "image": {
+          "type": "object",
+          "properties": {
+            "registry": { "type": "string" },
+            "repository": { "type": "string" },
+            "tag": { "type": "string" },
+            "digest": { "type": "string" },
+            "pullPolicy": { "type": "string" }
+          }
+        },
+        "replicas": { "type": "integer", "minimum": 1, "default": 1 },
+        "senderAddress": {
+          "type": "string",
+          "description": "REQUIRED when enabled: the address mail is sent from - a MailFrom address on a domain linked to the ACS resource (e.g. DoNotReply@xxxx.azurecomm.net); normally equals global.smtp.from"
+        },
+        "allowedSenderDomains": {
+          "type": "string",
+          "description": "Optional comma-separated domain allow-list; client MAIL FROM addresses on these domains are forwarded as-is, others fall back to senderAddress"
+        },
+        "connectionString": {
+          "type": "string",
+          "description": "ACS connection string (endpoint=...;accesskey=...), inline (evaluation only - prefer existingSecret)"
+        },
+        "existingSecret": {
+          "type": "object",
+          "description": "Runtime alternative to the inline connectionString: an existing Secret (CLI-created or ESO-synced) carrying the connection string",
+          "properties": {
+            "name": { "type": "string" },
+            "connectionStringKey": { "type": "string", "default": "connection-string" }
+          }
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "port": { "type": "integer", "default": 1025 }
+          }
+        },
+        "resources": { "$ref": "#/definitions/resources" },
+        "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "enabled": { "const": true } },
+            "required": ["enabled"]
+          },
+          "then": {
+            "required": ["senderAddress"],
+            "properties": {
+              "senderAddress": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
     "externalSecrets": {
       "type": "object",
       "description": "External Secrets Operator convenience toggle. The chart consumes pre-existing Secrets via *.secretRef seams and renders no ExternalSecret/SecretStore resources; see examples/external-secrets/. Unknown keys are tolerated for older overlay-era values files.",
@@ -604,6 +655,28 @@
               }
             },
             "replicas": { "type": "integer", "minimum": 0 },
+            "limits": {
+              "type": "object",
+              "description": "Payload & deadline envelope rendered into HPS/worker env vars. The chart profile accepts 20 MiB serialized items, backed by 32 MiB execution topics and 64 MiB per-partition consumer fetches; keep overrides in lockstep with Kafka, ingress, and HPS memory.",
+              "properties": {
+                "bodyLimitBytes": { "type": "integer", "minimum": 1024, "description": "Max HTTP request body on HPS execution endpoints (HTTP_BODY_LIMIT_BYTES)." },
+                "rpcTimeoutMs": { "type": "integer", "minimum": 1000, "description": "Whole-request Kafka execution deadline in ms (RPC_TIMEOUT_MS). Traefik graceTimeOut and terminationGracePeriodSeconds must stay above it." },
+                "requestTimeoutMs": { "type": "integer", "minimum": 1000, "description": "Deadline for receiving one request's entire body in ms (HTTP_REQUEST_TIMEOUT_MS)." },
+                "itemMaxBytes": { "type": "integer", "minimum": 1024, "description": "Serialized cap per single payload inside a bulk array (ITEM_MAX_BYTES); the 20 MiB chart default leaves envelope headroom under the 32 MiB execution-topic cap." },
+                "contextBatchBodyLimitBytes": { "type": "integer", "minimum": 1024, "description": "Context batch NDJSON body cap (CONTEXT_BATCH_BODY_LIMIT_BYTES)." },
+                "contextBatchMaxItems": { "type": "integer", "minimum": 1, "description": "Max records per context batch request (CONTEXT_BATCH_MAX_ITEMS)." },
+                "largeBodyThresholdBytes": { "type": "integer", "description": "Admission-gate threshold (LARGE_BODY_THRESHOLD_BYTES); <= 0 disables the gate." },
+                "largeBodyMaxConcurrent": { "type": "integer", "minimum": 1, "description": "Concurrent above-threshold requests per HPS replica before shedding with 429 (LARGE_BODY_MAX_CONCURRENT)." },
+                "chunkMaxChunks": { "type": "integer", "minimum": 1, "description": "Max chunk fan-out per bulk request (CHUNK_MAX_CHUNKS); align with workers.solutionPartitions for full-fleet spread." },
+                "chunkHardMaxBytes": { "type": "integer", "minimum": 1024, "description": "Broker-safe per-chunk input cap (CHUNK_HARD_MAX_BYTES); keep well under the Kafka max.message.bytes to preserve response-amplification headroom." },
+                "responseFetchMaxBytes": { "type": "integer", "minimum": 1024, "description": "HPS response-consumer per-partition fetch ceiling (RESPONSE_MAX_BYTES_PER_PARTITION); keep >= 2x the execution-topic max.message.bytes." },
+                "workerFetchMaxBytes": { "type": "integer", "minimum": 1024, "description": "Worker request-consumer per-partition fetch ceiling (WORKER_MAX_BYTES_PER_PARTITION); keep >= 2x the execution-topic max.message.bytes." },
+                "logRetryBufferMaxBytes": { "type": "integer", "minimum": 1048576, "description": "In-memory retry buffer for decision-log producers (LOG_RETRY_BUFFER_MAX_BYTES); keep >= 2x the logs-topic max.message.bytes so one full record survives a transient failure." },
+                "shutdownDrainMs": { "type": "integer", "minimum": 0, "description": "How long a stopping HPS pod keeps consuming so in-flight RPCs resolve (KAFKA_SHUTDOWN_DRAIN_MS); should cover rpcTimeoutMs." },
+                "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1, "description": "HPS pod terminationGracePeriodSeconds; must exceed shutdownDrainMs plus shutdown overhead." },
+                "nodeHeapMb": { "type": "integer", "minimum": 128, "description": "Node.js --max-old-space-size for the HPS server in MB (rendered as NODE_OPTIONS); size to ~85% of the container memory limit. Unset = image default." }
+              }
+            },
             "keda": {
               "type": "object",
               "description": "Gather-plane autoscaler: scales HPS on response-topic lag. Conservative one-pod-at-a-time behavior because HPS scale events rebalance the response consumer group and can time out in-flight requests.",
@@ -1073,7 +1146,7 @@
         "enabled": { "type": "boolean" },
         "provisioning": {
           "type": "object",
-          "description": "Explicit topic management (create + idempotent alignment of existing topics via postScript). Topic names must carry the configured kafkaTopicPrefix.",
+          "description": "External bridge topic management. The pre-install/upgrade Job creates kafka.topics and reconciles max.message.bytes on existing topics; topic names must carry the configured kafkaTopicPrefix.",
           "properties": {
             "enabled": { "type": "boolean" },
             "numPartitions": { "type": "integer", "minimum": 1 },
@@ -1977,65 +2050,6 @@
       }
     },
     {
-      "title": "AI Feature Validation",
-      "description": "If AI is enabled, OpenAI API Key is required and must not be empty.",
-      "if": {
-        "properties": {
-          "global": {
-            "type": "object",
-            "properties": {
-              "ai": {
-                "type": "object",
-                "properties": {
-                  "enabled": { "const": true }
-                },
-                "required": ["enabled"]
-              }
-            },
-            "required": ["ai"]
-          }
-        },
-        "required": ["global"]
-      },
-      "then": {
-        "anyOf": [
-          {
-            "properties": {
-              "global": {
-                "type": "object",
-                "properties": {
-                  "secrets": {
-                    "type": "object",
-                    "required": ["secretRef"],
-                    "properties": {
-                      "secretRef": { "type": "string", "minLength": 1 }
-                    }
-                  }
-                },
-                "required": ["secrets"]
-              }
-            }
-          },
-          {
-            "properties": {
-              "global": {
-                "type": "object",
-                "properties": {
-                  "ai": {
-                    "type": "object",
-                    "required": ["openaiApiKey"],
-                    "properties": {
-                      "openaiApiKey": { "type": "string", "minLength": 1 }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        ]
-      }
-    },
-    {
       "title": "Inline Secrets Validation",
       "description": "If no external secretRef is provided (empty string), sensitive values must be provided inline.",
       "if": {
@@ -2062,7 +2076,56 @@
             "type": "object",
             "required": ["licenseKey"],
             "properties": {
-              "licenseKey": { "type": "string", "minLength": 1 },
+              "licenseKey": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Inline SMTP Credentials Validation",
+      "description": "With inline secrets (no secretRef), SMTP credentials must also be inline - unless the ACS smtpRelay is enabled: it authenticates to ACS with a connection string and deliberately runs with empty SMTP credentials (GoTrue's Go SMTP client refuses AUTH over plaintext to non-localhost hosts).",
+      "if": {
+        "allOf": [
+          {
+            "properties": {
+              "global": {
+                "type": "object",
+                "properties": {
+                  "secrets": {
+                    "type": "object",
+                    "properties": {
+                      "secretRef": { "const": "" }
+                    },
+                    "required": ["secretRef"]
+                  }
+                },
+                "required": ["secrets"]
+              }
+            },
+            "required": ["global"]
+          },
+          {
+            "not": {
+              "properties": {
+                "smtpRelay": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": { "const": true }
+                  },
+                  "required": ["enabled"]
+                }
+              },
+              "required": ["smtpRelay"]
+            }
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "global": {
+            "type": "object",
+            "properties": {
               "smtp": {
                 "type": "object",
                 "required": ["user", "pass"],

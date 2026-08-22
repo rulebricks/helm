@@ -185,20 +185,6 @@ spec:
                   name: {{ $supabaseSecretRef }}
                   key: {{ $supabaseAnonKeyRefKey }}
             {{- end }}
-            # AI API key (from secret, optional)
-            {{- $aiEnabled := false }}
-            {{- if and .Values.global .Values.global.ai .Values.global.ai.enabled }}
-              {{- $aiEnabled = true }}
-            {{- else if and .Values.app.ai .Values.app.ai.enabled }}
-              {{- $aiEnabled = true }}
-            {{- end }}
-            {{- if $aiEnabled }}
-            - name: OPENAI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "rulebricks-chart.app.secretName" . | trim }}
-                  key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "openaiApiKey" "default" "OPENAI_API_KEY") | trim }}
-            {{- end }}
             # Redis-compatible HTTP API endpoint/token
             {{- if and (not .Values.redis.enabled) .Values.redis.external .Values.redis.external.httpApi .Values.redis.external.httpApi.enabled .Values.redis.external.httpApi.existingSecret }}
             # External HTTP API (e.g. Upstash) credentials sourced from an existing secret
