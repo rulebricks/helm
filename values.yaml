@@ -28,7 +28,7 @@ global:
     busybox: { registry: docker.io, repository: rulebricks/busybox, tag: "1.38.0-alpine" }
     pause: { registry: docker.io, repository: rulebricks/pause, tag: "3.10.2" }
     curl: { registry: docker.io, repository: rulebricks/curl, tag: "8.21.0-alpine" }
-    kubectl: { registry: docker.io, repository: rulebricks/kubectl, tag: "1.36.2-debian13" }
+    kubectl: { registry: docker.io, repository: rulebricks/kubectl, tag: "1.36.3-debian13" }
   # Image pull secret for the private rulebricks/* repos (normally the
   # license registry secret <release>-regcred). keda, traefik, vector, and
   # the strimzi operator need the same secret on their own imagePullSecrets
