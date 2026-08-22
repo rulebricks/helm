@@ -22,7 +22,7 @@ dependencies:
   version: 2.20.1
 - name: cert-manager
   repository: https://charts.jetstack.io
-  version: v1.21.0
+  version: v1.21.1
 - name: vector
   repository: https://helm.vector.dev
   version: 0.57.0
@@ -38,5 +38,5 @@ dependencies:
 - name: cluster-autoscaler
   repository: https://kubernetes.github.io/autoscaler
   version: 9.53.0
-digest: sha256:377919126eb392b30fc568cf0f3a1c65348e8209cfc3309556d1d08cb44c8fd7
-generated: "2026-08-18T10:34:28.756686-07:00"
+digest: sha256:5c9cb2b1139a6c2124220baac0cf817c4446e73b364d1118e5f1cb65e21e67ad
+generated: "2026-08-22T06:26:06.962004879Z"

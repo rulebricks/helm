@@ -70,6 +70,8 @@ releases the weekly cron rebuild keeps pulling new OS fixes into the same `-rN` 
   pins at the release tag, so check them on every upstream bump:
   - `supabase-realtime`: `ELIXIR_VERSION`, `OTP_VERSION` (patched 27.3.4.x line
     from hexpm), `DEBIAN_VERSION`, `PG_DELTA_COMMIT`, `BUN_VERSION`
+  - `serverless-redis-http`: `BUILDER_IMAGE` (an exact hexpm Elixir + patched
+    Erlang/OTP tag compatible with the DHI runtime)
   - `clickstack-otel-collector`: `OTEL_COLLECTOR_VERSION`,
     `OTEL_COLLECTOR_CORE_VERSION` (from upstream's `.env`), `GOMPLATE_VERSION`
   - `postgres-documentdb`: `GOSU_VERSION`

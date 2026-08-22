@@ -2,11 +2,11 @@
 # rulebricks/serverless-redis-http — hiett/serverless-redis-http rebuilt from
 # unmodified upstream source on a current Erlang/OTP (clears the 2021-era base,
 # incl. CISA KEV CVE-2025-32433).
-# All pins live in images/manifest.yaml (base/ref), injected as build args
-# by scripts/images/build.sh. Bumps: images/README.md.
+# All pins live in images/manifest.yaml (base/ref plus the Elixir/OTP builder),
+# injected as build args by scripts/images/build.sh. Bumps: images/README.md.
 
 ARG BASE_IMAGE
-ARG BUILDER_IMAGE=docker.io/library/elixir:1.20-alpine
+ARG BUILDER_IMAGE
 
 FROM ${BUILDER_IMAGE} AS builder
 
