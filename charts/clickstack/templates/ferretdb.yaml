@@ -143,8 +143,8 @@ spec:
   volumeClaimTemplates:
     - metadata:
         name: data
-        labels:
-          {{- include "clickstack.labels" . | nindent 10 }}
+        # StatefulSet volumeClaimTemplates are immutable. Keep this metadata
+        # stable across chart upgrades.
       spec:
         accessModes:
           - ReadWriteOnce
