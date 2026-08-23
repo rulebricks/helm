@@ -7,6 +7,7 @@
 
 ARG BASE_IMAGE
 ARG BUILDER_IMAGE
+ARG RUNTIME_TOOLS_IMAGE
 
 FROM ${BUILDER_IMAGE} AS builder
 
@@ -25,14 +26,21 @@ RUN rm mix.lock && \
     mix deps.get && \
     mix release
 
+FROM ${RUNTIME_TOOLS_IMAGE} AS runtime-tools
+
 FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
+# Mix release launchers require these utilities, but the hardened Erlang
+# runtime intentionally omits them. Source only the binaries from the matching
+# DHI dev variant; their shared libraries are already present in the runtime.
+COPY --from=runtime-tools /usr/bin/grep /usr/bin/grep
+COPY --from=runtime-tools /usr/bin/sed /usr/bin/sed
 COPY --from=builder /build/_build/prod/rel/prod/ ./_build/prod/rel/prod/
 
-ENV MIX_ENV=prod
 # Only path uid 65532 can write; release dir stays read-only.
-ENV RELEASE_TMP=/tmp
+ENV MIX_ENV=prod \
+    RELEASE_TMP=/tmp
 
 CMD ["_build/prod/rel/prod/bin/prod", "start"]

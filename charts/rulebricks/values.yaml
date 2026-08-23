@@ -375,7 +375,7 @@ serverlessRedisHttp:
   image:
     registry: docker.io
     repository: rulebricks/serverless-redis-http
-    tag: "0.0.10-r2"
+    tag: "0.0.10-r3"
 
 cache:
   valkeyAdmin:
