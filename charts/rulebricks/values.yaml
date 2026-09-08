@@ -16,6 +16,14 @@
 #  __________________________________
 
 app:
+  # Keep pg_cron enabled as a second safe sweeper. This bounded worker drains
+  # private deployments where the application platform does not run Vercel cron.
+  contextExpiry:
+    enabled: true
+    schedule: "* * * * *"
+    maxBatches: 100
+    batchLimit: 1000
+    maxDurationSeconds: 240
   image:
     registry: docker.io
     repository: rulebricks/app
@@ -133,6 +141,15 @@ metrics:
 
 hps:
   enabled: true
+  # The stack chart enables this using its existing PostgreSQL settings.
+  # Standalone subchart installations can opt in with a PostgreSQL URI Secret
+  # whose login can SET ROLE service_role. Only HPS API pods receive credentials.
+  directDatabase:
+    enabled: false
+    existingSecret: ""
+    connectionKey: connection
+    # Connections per API replica; budget against the autoscaling ceiling.
+    poolSize: 4
   image:
     registry: docker.io
     repository: rulebricks/hps
@@ -215,8 +232,6 @@ hps:
     rpcTimeoutMs: 60000 # RPC_TIMEOUT_MS (whole-request Kafka deadline)
     requestTimeoutMs: 30000 # HTTP_REQUEST_TIMEOUT_MS (body receive)
     itemMaxBytes: 20971520 # ITEM_MAX_BYTES (per payload in a bulk array)
-    contextBatchBodyLimitBytes: 4718592 # CONTEXT_BATCH_BODY_LIMIT_BYTES
-    contextBatchMaxItems: 10000 # CONTEXT_BATCH_MAX_ITEMS
     largeBodyThresholdBytes: 8388608 # LARGE_BODY_THRESHOLD_BYTES (gate)
     largeBodyMaxConcurrent: 2 # LARGE_BODY_MAX_CONCURRENT (per replica)
     chunkMaxChunks: 64 # CHUNK_MAX_CHUNKS (max fan-out per request)
@@ -225,7 +240,7 @@ hps:
     workerFetchMaxBytes: 67108864 # WORKER_MAX_BYTES_PER_PARTITION (worker)
     logRetryBufferMaxBytes: 134217728 # LOG_RETRY_BUFFER_MAX_BYTES (HPS + worker)
     shutdownDrainMs: 25000 # KAFKA_SHUTDOWN_DRAIN_MS (in-flight drain)
-    terminationGracePeriodSeconds: 30 # HPS pod grace (>= drain + overhead)
+    terminationGracePeriodSeconds: 35 # HPS pod grace (>= 5s ingress handoff + drain + overhead)
     # nodeHeapMb: 1024 # NODE_OPTIONS --max-old-space-size; unset = image default
   # Extra environment variables.
   # Bulk chunk sizing is self-tuning and needs no configuration here; the
@@ -236,13 +251,6 @@ hps:
     # schemas with derived fields). Set "0" to disable.
     - name: RB_FN_CONTEXT_REUSE
       value: "1"
-    # Bound the relationship cascade that runs after a context batch commits:
-    # max dependent parents re-evaluated per relationship, and a wall-clock
-    # budget before the remainder is deferred.
-    - name: CONTEXT_CASCADE_MAX_INSTANCES
-      value: "2000"
-    - name: CONTEXT_CASCADE_BUDGET_MS
-      value: "45000"
   extraEnvFrom: []
   resources:
     requests:
@@ -344,7 +352,8 @@ redis:
       cpu: "200m"
       memory: "256Mi"
     limits:
-      cpu: "500m"
+      # Empty lets ordering bursts use available CPU without quota stalls.
+      cpu: ""
       memory: "4Gi"
   # External Valkey/Redis-compatible configuration (used when redis.enabled: false)
   external:

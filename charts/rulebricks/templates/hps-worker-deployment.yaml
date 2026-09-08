@@ -1,4 +1,4 @@
-{{- if and .Values.hps .Values.hps.enabled .Values.hps.workers.enabled }}
+{{- if and .Values.hps .Values.hps.enabled .Values.hps.workers.enabled (or (not (.Values.hps.directDatabase).enabled) (.Values.hps.directDatabase).existingSecret .DirectDatabaseEnv .Chart.IsRoot) }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -103,7 +103,7 @@ spec:
       {{- if and (not $workerTolerations) .Values.global .Values.global.scheduling }}
         {{- $workerTolerations = .Values.global.scheduling.tolerations | default list }}
       {{- end }}
-      {{- $workerTolerations = append $workerTolerations (dict "key" "rulebricks.com/pool" "operator" "Equal" "value" "burst" "effect" "NoSchedule") }}
+      {{- $workerTolerations = append $workerTolerations (dict "key" "rulebricks.com/pool" "operator" "Equal" "value" "burst" "effect" "NoSchedule") | uniq }}
       tolerations:
         {{- toYaml $workerTolerations | nindent 8 }}
       {{- /* Affinity precedence: worker affinity > global scheduling affinity > soft default anti-affinity.
@@ -211,6 +211,11 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           env:
+            {{- if (.Values.hps.directDatabase).enabled }}
+            # Workers use the API's shared pool and never receive DB credentials.
+            - name: DIRECT_DATABASE_API_URL
+              value: {{ printf "http://%s" (include "rulebricks-chart.hps.fullname" .) | quote }}
+            {{- end }}
             {{- if eq (include "rulebricks-chart.redis.hasAuth" .) "true" }}
             - name: REDIS_PASSWORD
               valueFrom:

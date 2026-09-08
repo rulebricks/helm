@@ -646,6 +646,20 @@
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },
+            "directDatabase": {
+              "type": "object",
+              "description": "Direct PostgreSQL access for Context operations using the existing database. Reuses the chart's database settings when available; existingSecret optionally overrides them. External Supabase without a connection Secret keeps PostgREST. Only HPS API pods receive database credentials.",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "existingSecret": { "type": "string" },
+                "connectionKey": { "type": "string", "minLength": 1 },
+                "poolSize": { "type": "integer", "minimum": 1, "description": "Maximum PostgreSQL connections per API replica; budget against maxReplicaCount and other database clients." }
+              },
+              "allOf": [{
+                "if": { "properties": { "enabled": { "const": true } }, "required": ["enabled"] },
+                "then": { "required": ["poolSize"] }
+              }]
+            },
             "image": {
               "type": "object",
               "properties": {
@@ -663,8 +677,6 @@
                 "rpcTimeoutMs": { "type": "integer", "minimum": 1000, "description": "Whole-request Kafka execution deadline in ms (RPC_TIMEOUT_MS). Traefik graceTimeOut and terminationGracePeriodSeconds must stay above it." },
                 "requestTimeoutMs": { "type": "integer", "minimum": 1000, "description": "Deadline for receiving one request's entire body in ms (HTTP_REQUEST_TIMEOUT_MS)." },
                 "itemMaxBytes": { "type": "integer", "minimum": 1024, "description": "Serialized cap per single payload inside a bulk array (ITEM_MAX_BYTES); the 20 MiB chart default leaves envelope headroom under the 32 MiB execution-topic cap." },
-                "contextBatchBodyLimitBytes": { "type": "integer", "minimum": 1024, "description": "Context batch NDJSON body cap (CONTEXT_BATCH_BODY_LIMIT_BYTES)." },
-                "contextBatchMaxItems": { "type": "integer", "minimum": 1, "description": "Max records per context batch request (CONTEXT_BATCH_MAX_ITEMS)." },
                 "largeBodyThresholdBytes": { "type": "integer", "description": "Admission-gate threshold (LARGE_BODY_THRESHOLD_BYTES); <= 0 disables the gate." },
                 "largeBodyMaxConcurrent": { "type": "integer", "minimum": 1, "description": "Concurrent above-threshold requests per HPS replica before shedding with 429 (LARGE_BODY_MAX_CONCURRENT)." },
                 "chunkMaxChunks": { "type": "integer", "minimum": 1, "description": "Max chunk fan-out per bulk request (CHUNK_MAX_CHUNKS); align with workers.solutionPartitions for full-fleet spread." },

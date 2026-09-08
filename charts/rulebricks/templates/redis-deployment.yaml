@@ -1,4 +1,18 @@
 {{- if .Values.redis.enabled }}
+{{- /* Redis must reject allocations before the pod's memory limit kills it.
+     Reserve headroom for allocator, connections and persistence buffers;
+     this budget follows the deployment's memory allocation, not ticket count. */ -}}
+{{- $memory := .Values.redis.resources.limits.memory | default "4Gi" | toString -}}
+{{- $unit := regexFind "[a-zA-Z]+$" $memory -}}
+{{- $units := dict "Ki" 1024 "Mi" 1048576 "Gi" 1073741824 "Ti" 1099511627776 "Pi" 1125899906842624 "Ei" 1152921504606846976 "k" 1000 "M" 1000000 "G" 1000000000 "T" 1000000000000 "P" 1000000000000000 "E" 1000000000000000000 "m" 0.001 -}}
+{{- $multiplier := 1.0 -}}
+{{- if $unit }}
+  {{- if not (hasKey $units $unit) }}{{ fail "Unsupported redis.resources.limits.memory quantity" }}{{ end -}}
+  {{- $multiplier = get $units $unit | float64 -}}
+{{- end -}}
+{{- $memoryBytes := mulf (regexReplaceAll "[a-zA-Z]+$" $memory "" | float64) $multiplier -}}
+{{- $maxmemory := mulf $memoryBytes 0.8 | floor | int64 -}}
+{{- if le $maxmemory 0 }}{{ fail "redis.resources.limits.memory must be positive" }}{{ end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -86,7 +100,9 @@ spec:
               cpu: {{ .Values.redis.resources.requests.cpu | default "200m" }}
               memory: {{ .Values.redis.resources.requests.memory | default "256Mi" }}
             limits:
-              cpu: {{ .Values.redis.resources.limits.cpu | default "500m" }}
+              {{- with .Values.redis.resources.limits.cpu }}
+              cpu: {{ . | quote }}
+              {{- end }}
               memory: {{ .Values.redis.resources.limits.memory | default "4Gi" }}
           # --dir is explicit so the AOF/RDB land on the PVC regardless of the
           # image's WORKDIR (DHI images may differ from the official valkey image).
@@ -96,7 +112,9 @@ spec:
           # every non-loopback connection when no password is set and breaks
           # HPS, SRH, and the valkey-admin console. The service is ClusterIP,
           # so it is only reachable from inside the cluster.
-          args: ["--appendonly", "yes", "--dir", "/data", "--protected-mode", "no"]
+          # Keep the measured every-second AOF policy. Ownership must not be
+          # evicted under memory pressure; AOF does not provide batch rollback.
+          args: ["--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", {{ $maxmemory | quote }}, "--maxmemory-policy", "noeviction", "--dir", "/data", "--protected-mode", "no"]
           livenessProbe:
             tcpSocket:
               port: 6379

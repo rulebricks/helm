@@ -1,4 +1,5 @@
-{{- if and .Values.hps .Values.hps.enabled }}
+{{- /* The stack renders automatic database wiring with the Supabase scope. */}}
+{{- if and .Values.hps .Values.hps.enabled (or (not (.Values.hps.directDatabase).enabled) (.Values.hps.directDatabase).existingSecret .DirectDatabaseEnv .Chart.IsRoot) }}
 {{- /* HPS is stateless: no volumes, no reliance on stable pod identity. It was
      historically a StatefulSet because response partitions were derived from
      the pod ordinal; partition selection now comes from live consumer-group
@@ -60,7 +61,7 @@ spec:
       {{- /* HPS drains in-flight Kafka RPCs on SIGTERM (KAFKA_SHUTDOWN_DRAIN_MS
            below); the pod grace period must outlive that drain or scale-in
            kills still-viable requests mid-flight. */}}
-      terminationGracePeriodSeconds: {{ $limits.terminationGracePeriodSeconds | default 30 | int64 }}
+      terminationGracePeriodSeconds: {{ $limits.terminationGracePeriodSeconds | default 35 | int64 }}
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}
       serviceAccountName: {{ include "rulebricks-chart.hps.serviceAccountName" . }}
@@ -174,6 +175,13 @@ spec:
             periodSeconds: {{ .Values.app.readinessProbe.periodSeconds }}
             timeoutSeconds: {{ .Values.app.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.app.readinessProbe.failureThreshold }}
+          # Endpoint removal and kubelet shutdown happen concurrently. Keep
+          # serving briefly while ingress observes removal, then let SIGTERM
+          # drain accepted requests through the existing Kafka shutdown path.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
           envFrom:
             - configMapRef:
                 name: {{ include "rulebricks-chart.app.configmap" . }}
@@ -191,6 +199,23 @@ spec:
                 secretKeyRef:
                   name: {{ include "rulebricks-chart.app.secretName" . | trim }}
                   key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "supabaseServiceKey" "default" "SUPABASE_SERVICE_KEY") | trim }}
+            {{- with .Values.hps.directDatabase }}
+            {{- if .enabled }}
+            - name: DIRECT_DATABASE_API_URL
+              value: {{ printf "http://%s" (include "rulebricks-chart.hps.fullname" $) | quote }}
+            - name: DIRECT_DATABASE_POOL_SIZE
+              value: {{ .poolSize | int64 | quote }}
+            {{- if $.DirectDatabaseEnv }}
+            {{- $.DirectDatabaseEnv | nindent 12 }}
+            {{- else }}
+            - name: DIRECT_DATABASE_CONNECTION
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "hps.directDatabase.existingSecret is required when native Context SQL is enabled" .existingSecret | quote }}
+                  key: {{ .connectionKey | default "connection" | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if eq (include "rulebricks-chart.redis.hasAuth" .) "true" }}
             - name: REDIS_PASSWORD
               valueFrom:
@@ -228,10 +253,6 @@ spec:
               value: {{ $limits.requestTimeoutMs | default 30000 | int64 | quote }}
             - name: ITEM_MAX_BYTES
               value: {{ $limits.itemMaxBytes | default 20971520 | int64 | quote }}
-            - name: CONTEXT_BATCH_BODY_LIMIT_BYTES
-              value: {{ $limits.contextBatchBodyLimitBytes | default 4718592 | int64 | quote }}
-            - name: CONTEXT_BATCH_MAX_ITEMS
-              value: {{ $limits.contextBatchMaxItems | default 10000 | int64 | quote }}
             - name: LARGE_BODY_THRESHOLD_BYTES
               value: {{ $limits.largeBodyThresholdBytes | default 8388608 | int64 | quote }}
             - name: LARGE_BODY_MAX_CONCURRENT
@@ -279,16 +300,30 @@ spec:
             {{- with .Values.hps.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- if .Values.global.tlsPrivateCaBundle }}
+          {{- if or .Values.global.tlsPrivateCaBundle .DirectDatabaseCASecret }}
           volumeMounts:
+            {{- if .Values.global.tlsPrivateCaBundle }}
             - name: private-ca
               mountPath: /etc/rulebricks/ca
               readOnly: true
+            {{- end }}
+            {{- if .DirectDatabaseCASecret }}
+            - name: direct-database-ca
+              mountPath: /etc/rulebricks/database-ca
+              readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if .Values.global.tlsPrivateCaBundle }}
+      {{- if or .Values.global.tlsPrivateCaBundle .DirectDatabaseCASecret }}
       volumes:
+        {{- if .Values.global.tlsPrivateCaBundle }}
         - name: private-ca
           configMap:
             name: {{ .Release.Name }}-private-ca
+        {{- end }}
+        {{- if .DirectDatabaseCASecret }}
+        - name: direct-database-ca
+          secret:
+            secretName: {{ .DirectDatabaseCASecret }}
+        {{- end }}
       {{- end }}
 {{- end }}

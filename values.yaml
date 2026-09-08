@@ -446,6 +446,16 @@ rulebricks:
   # HPS (High Performance Server): serves the execution endpoints.
   hps:
     enabled: true
+    # Query the existing PostgreSQL database directly for Context operations,
+    # reusing the chart's database settings automatically.
+    # With external Supabase, provide a connection Secret to opt in.
+    # HPS shares a small pool across workers; other reads use PostgREST.
+    directDatabase:
+      enabled: true
+      existingSecret: ""
+      connectionKey: connection
+      # Per API replica: max API replicas * poolSize is the connection budget.
+      poolSize: 4
     image:
       registry: docker.io
       repository: rulebricks/hps
@@ -512,9 +522,6 @@ rulebricks:
       # Cap per single payload inside a bulk array (bytes); must stay under
       # the 32 MiB execution-topic cap with envelope headroom.
       itemMaxBytes: 20971520
-      # Context batch ingestion (body byte cap, records per request).
-      contextBatchBodyLimitBytes: 134217728
-      contextBatchMaxItems: 100000
       # Admission gate: at most this many concurrent requests larger than the
       # threshold per replica; excess is shed with 429 + Retry-After.
       largeBodyThresholdBytes: 8388608
@@ -609,7 +616,8 @@ rulebricks:
         cpu: "200m"
         memory: "256Mi"
       limits:
-        cpu: "500m"
+        # Empty lets ordering bursts use available CPU without quota stalls.
+        cpu: ""
         memory: "4Gi"
     persistence:
       enabled: true

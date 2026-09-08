@@ -1,0 +1,114 @@
+{{- $expiry := .Values.app.contextExpiry | default dict -}}
+{{- if $expiry.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "rulebricks-chart.app.fullname" . }}-context-expiry
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: context-expiry
+spec:
+  schedule: {{ $expiry.schedule | default "* * * * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 270
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: context-expiry
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: {{ include "rulebricks-chart.registrySecretName" . }}
+          containers:
+            - name: context-expiry
+              image: {{ include "rulebricks-chart.image" (dict "root" $ "image" (merge (dict "tag" (include "rulebricks-chart.app.imageTag" .)) .Values.app.image)) | quote }}
+              imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+              resources:
+                requests: { cpu: "25m", memory: "64Mi" }
+                limits: { cpu: "250m", memory: "128Mi" }
+              {{- if .Values.global.tlsPrivateCaBundle }}
+              volumeMounts:
+                - name: private-ca
+                  mountPath: /etc/rulebricks/ca
+                  readOnly: true
+              {{- end }}
+              env:
+                {{- if .Values.global.tlsPrivateCaBundle }}
+                - name: NODE_EXTRA_CA_CERTS
+                  value: /etc/rulebricks/ca/ca.crt
+                {{- end }}
+                - name: SUPABASE_URL
+                  valueFrom:
+                    configMapKeyRef:
+                      name: {{ include "rulebricks-chart.app.configmap" . }}
+                      key: SUPABASE_URL
+                - name: SUPABASE_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "rulebricks-chart.app.secretName" . | trim }}
+                      key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "supabaseServiceKey" "default" "SUPABASE_SERVICE_KEY") | trim }}
+                - name: CONTEXT_EXPIRY_MAX_BATCHES
+                  value: {{ $expiry.maxBatches | default 100 | quote }}
+                - name: CONTEXT_EXPIRY_BATCH_LIMIT
+                  value: {{ $expiry.batchLimit | default 1000 | quote }}
+                - name: CONTEXT_EXPIRY_MAX_DURATION_SECONDS
+                  value: {{ $expiry.maxDurationSeconds | default 240 | quote }}
+              command: ["node", "-e"]
+              args:
+                - |
+                  (async () => {
+                    const bounded = (value, fallback, cap) => Number.isFinite(Number(value)) ? Math.max(1, Math.min(cap, Number(value))) : fallback;
+                    const maxBatches = bounded(process.env.CONTEXT_EXPIRY_MAX_BATCHES, 100, 1000);
+                    const batchLimit = bounded(process.env.CONTEXT_EXPIRY_BATCH_LIMIT, 1000, 10000);
+                    const deadline = Date.now() + bounded(process.env.CONTEXT_EXPIRY_MAX_DURATION_SECONDS, 240, 240) * 1000;
+                    const key = process.env.SUPABASE_SECRET_KEY;
+                    const rest = process.env.SUPABASE_URL.replace(/\/$/, '') + '/rest/v1';
+                    const headers = { apikey: key, authorization: 'Bearer ' + key, 'content-type': 'application/json' };
+                    const read = async (path, options = {}) => {
+                      const response = await fetch(rest + path, {
+                        ...options, headers,
+                        signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+                      });
+                      if (!response.ok) throw new Error('Context expiry request failed: HTTP ' + response.status);
+                      return response.json();
+                    };
+                    let expired = 0, batches = 0;
+                    let lastPendingId = null;
+                    for (; batches < maxBatches && Date.now() < deadline;) {
+                      const removed = Number(await read('/rpc/cleanup_expired_entity_instances', {
+                        method: 'POST',
+                        body: JSON.stringify({ p_batch_limit: batchLimit }),
+                      })) || 0;
+                      batches++;
+                      expired += removed;
+                      if (removed > 0) continue;
+                      if (Date.now() >= deadline) break;
+                      // The RPC returns only the instance count. Check pending
+                      // evaluations too before deciding that cleanup is finished.
+                      const query = '?select=id&expires_at=lte.' + new Date().toISOString() + '&order=expires_at.asc,id.asc&limit=1';
+                      const [instances, pending] = await Promise.all([
+                        read('/entity_instances' + query), read('/pending_evaluations' + query),
+                      ]);
+                      const pendingId = pending[0]?.id;
+                      if (!instances.length && !pendingId) break;
+                      // Locked rows are skipped by SQL; retry next tick instead
+                      // of spinning if neither cleanup pass is making progress.
+                      if (!pendingId || pendingId === lastPendingId) break;
+                      lastPendingId = pendingId;
+                    }
+                    console.log(JSON.stringify({ expired, batches, bounded: true }));
+                  })().catch(error => { console.error(error.message); process.exitCode = 1; });
+          {{- if .Values.global.tlsPrivateCaBundle }}
+          volumes:
+            - name: private-ca
+              configMap:
+                name: {{ .Release.Name }}-private-ca
+          {{- end }}
+{{- end }}

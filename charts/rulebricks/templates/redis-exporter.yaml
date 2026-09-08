@@ -69,7 +69,7 @@ spec:
               protocol: TCP
           env:
             - name: REDIS_ADDR
-              value: {{ include "rulebricks-chart.redis.connectionString" . | quote }}
+              value: {{ include "rulebricks-chart.redis.connectionString" . | trim | quote }}
             {{- if eq (include "rulebricks-chart.redis.hasAuth" .) "true" }}
             - name: REDIS_PASSWORD
               valueFrom:

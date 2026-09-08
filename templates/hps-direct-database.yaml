@@ -1,0 +1,44 @@
+{{- /*
+The stack can see both sibling charts. Render the existing HPS workloads here
+only when database settings must be shared; no extra database or Secret is made.
+Explicit connection Secrets and disabled native SQL render in the subchart.
+*/ -}}
+{{- $config := .Values.rulebricks.hps.directDatabase -}}
+{{- if and .Values.rulebricks.hps.enabled $config.enabled (not $config.existingSecret) -}}
+{{- $hps := deepCopy .Subcharts.rulebricks -}}
+{{- $basePath := printf "%s/charts/rulebricks/templates" (trimSuffix "/templates" .Template.BasePath) -}}
+{{- $_ := set $hps "Template" (dict "BasePath" $basePath "Name" .Template.Name) -}}
+{{- if .Subcharts.supabase -}}
+{{- $db := .Subcharts.supabase -}}
+{{- $_ := set $hps "DirectDatabaseEnv" (include "rulebricks.directDatabase.env" $db) -}}
+{{- if and $db.Values.externalDatabase.enabled $db.Values.externalDatabase.sslRootCert -}}
+{{- $_ := set $hps "DirectDatabaseCASecret" (printf "%s-db-ca" (include "supabase.fullname" $db)) -}}
+{{- end -}}
+{{- else -}}
+{{- /* External Supabase has no database credentials in this chart. */ -}}
+{{- $_ := set $hps.Values.hps.directDatabase "enabled" false -}}
+{{- end -}}
+{{ include (printf "%s/hps-deployment.yaml" $basePath) $hps }}
+---
+{{ include (printf "%s/hps-worker-deployment.yaml" $basePath) $hps }}
+{{- end -}}
+
+{{- define "rulebricks.directDatabase.env" -}}
+{{ include "supabase.db.hostEnv" . | replace "name: DB_HOST" "name: DIRECT_DATABASE_HOST" }}
+{{ include "supabase.db.portEnv" . | replace "name: DB_PORT" "name: DIRECT_DATABASE_PORT" }}
+- name: DIRECT_DATABASE_USER
+  value: {{ .Values.rest.environment.DB_USER | default "authenticator" | quote }}
+- name: DIRECT_DATABASE_SSL_MODE
+  value: {{ .Values.rest.environment.DB_SSL | default "disable" | quote }}
+{{- range $field, $name := dict "password" "PASSWORD" "database" "NAME" }}
+- name: DIRECT_DATABASE_{{ $name }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "supabase.db.secretName" $ | quote }}
+      key: {{ include "supabase.db.secretKey" (dict "root" $ "field" $field "default" $field) | quote }}
+{{- end }}
+{{- if and .Values.externalDatabase.enabled .Values.externalDatabase.sslRootCert }}
+- name: DIRECT_DATABASE_SSL_ROOT_CERT
+  value: /etc/rulebricks/database-ca/ca.pem
+{{- end }}
+{{- end -}}
