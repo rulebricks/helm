@@ -139,16 +139,16 @@ client argument and the entrypoint's generated init script.
        the named-collection structure), survives an empty bucket, and keeps the
        decision_logs view stable. Keep on a SINGLE line. */ -}}
 {{- /* Persistent mode stores decision logs in one MergeTree table:
-       - Daily partitions align TTL cleanup and the disk-pressure safety valve.
+       - Daily partitions make native TTL and whole-partition cache eviction cheap.
        - ORDER BY (api_key, timestamp, log_id) matches the app's primary list
          query and uses the producer-minted id as a deterministic tiebreaker.
        - tokenbf_v1 indexes accelerate whole-token payload search; bloom_filter
          indexes accelerate flow/trace correlation lookups.
-       - The table TTL is updated on every Helm upgrade, but is not materialized
-         synchronously; normal merges apply it without turning upgrades into a
-         full-table rewrite.
-       - min_free_disk_ratio_to_perform_insert is the final backstop if TTL and
-         the retention CronJob cannot reclaim space quickly enough. */ -}}
+       - The table TTL is a maximum local age, not a durability promise. The
+         shared-volume cache GC can discard any partition earlier at 75% usage;
+         object storage remains the durable decision-log copy.
+       - min_free_disk_ratio_to_perform_insert is the final backstop if cache GC
+         cannot reclaim space quickly enough. */ -}}
 {{- define "rulebricks.clickhouse.decisionLogsViewSql" -}}
 {{- $provider := .Values.global.storage.provider | default "s3" -}}
 {{- $source := "s3(decision_logs_s3)" -}}

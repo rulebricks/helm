@@ -1213,7 +1213,7 @@
         },
         "decisionLogs": {
           "type": "object",
-          "description": "Persistent decision-log table configuration. Stateless archive retention is managed by object-storage lifecycle policy.",
+          "description": "Best-effort local decision-log cache configuration. retentionDays is a maximum age; shared-volume pressure may evict partitions sooner. Stateless archive retention is managed by object-storage lifecycle policy.",
           "properties": {
             "retentionDays": { "type": "integer", "minimum": 1, "default": 30 }
           }

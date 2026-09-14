@@ -1,13 +1,13 @@
 {{- if and .Values.clickhouse.enabled .Values.clickhouse.persistence.enabled }}
 {{- $ch := .Values.clickhouse }}
-{{- /* Disk-pressure safety valve for the persistent decision_logs table (see
-     _defaults.tpl decisionLogsViewSql). The configured table TTL is the normal
-     retention mechanism. If free space falls below 35%, this job drops the
-     oldest completed daily partition early so MergeTree merges and shared OTel
-     telemetry retain working space. This is intentionally an emergency,
-     lossy action for the local table; the separately written raw archive can
-     still be used for an explicit fallback/import. The table-level
-     min_free_disk_ratio_to_perform_insert=0.2 remains the final backstop.
+{{- $otelDb := $ch.otelDatabase | default "otel" }}
+{{- /* ClickHouse is a disposable hot cache; object storage is the durable
+     decision-log store. Native TTLs cap age when capacity permits. At 75% disk
+     usage this job instead drops the globally oldest partition from the local
+     cache (decision logs, ClickStack, or ClickHouse's own disk-backed logs)
+     until 25% is free. Current partitions are eligible: under an extreme burst,
+     keeping ingestion alive is more useful than preserving a particular local
+     window. Vector's independent archive sink is unaffected.
 
      The hardened clickhouse-server image has no shell, so this runs busybox
      (already mirrored for other init/hook duties) against the ClickHouse HTTP
@@ -58,6 +58,8 @@ spec:
                   value: {{ include "rulebricks.clickhouse.fullname" . | quote }}
                 - name: CLICKHOUSE_USER
                   value: {{ $ch.auth.username | default "rulebricks" | quote }}
+                - name: CLICKSTACK_DATABASE
+                  value: {{ $otelDb | quote }}
                 - name: CLICKHOUSE_PASSWORD
                   valueFrom:
                     secretKeyRef:
@@ -75,6 +77,7 @@ spec:
                 - -c
                 - |
                   set -eu
+                  set -f
                   q() {
                     query="$1"
                     settings="${2:-}"
@@ -101,49 +104,84 @@ spec:
                     rm -f "${headers}"
                     printf '%s' "${response}"
                   }
+
+                  case "${CLICKSTACK_DATABASE}" in
+                    ""|system|rulebricks|*[!a-zA-Z0-9_]*)
+                      echo "unsafe ClickStack database name '${CLICKSTACK_DATABASE}'" >&2
+                      exit 1
+                      ;;
+                  esac
+
                   i=0
-                  while [ "$i" -lt 32 ]; do
-                    free_ok=$(q "SELECT free_space >= 0.35 * total_space FROM system.disks WHERE name = 'default' FORMAT TSVRaw")
+                  while [ "$i" -lt 128 ]; do
+                    free_ok=$(q "SELECT free_space >= 0.25 * total_space FROM system.disks WHERE name = 'default' FORMAT TSVRaw")
                     if [ "$free_ok" = "1" ]; then
-                      echo "disk healthy (>=35% free); nothing to do"
+                      echo "ClickHouse cache healthy (below 75% used)"
                       exit 0
                     fi
                     if [ "$free_ok" != "0" ]; then
                       echo "unexpected system.disks response '${free_ok}'" >&2
                       exit 1
                     fi
-                    # partition_id for toYYYYMMDD partitioning is the YYYYMMDD string,
-                    # so lexicographic min = chronologically oldest. min() over an
-                    # empty set returns '' for String, which reads as "nothing left".
-                    oldest=$(q "SELECT min(partition_id) FROM system.parts WHERE database = 'rulebricks' AND table = 'decision_logs' AND active FORMAT TSVRaw")
-                    if [ -z "$oldest" ]; then
-                      echo "free space low but decision_logs is empty; nothing to evict"
+
+                    candidate=$(q "SELECT database, table, partition_id
+                  FROM (
+                    SELECT
+                      database,
+                      table,
+                      partition_id,
+                      multiIf(
+                        match(partition_id, '^[0-9]{8}$'),
+                        toDateTime(concat(substring(partition_id, 1, 4), '-', substring(partition_id, 5, 2), '-', substring(partition_id, 7, 2))) + INTERVAL 1 DAY - INTERVAL 1 SECOND,
+                        database = 'system' AND match(partition_id, '^[0-9]{6}$'),
+                        toDateTime(concat(substring(partition_id, 1, 4), '-', substring(partition_id, 5, 2), '-01')) + INTERVAL 1 MONTH - INTERVAL 1 SECOND,
+                        max(max_time)
+                      ) AS newest_time,
+                      sum(bytes_on_disk) AS partition_bytes
+                    FROM system.parts
+                    WHERE active
+                      AND (
+                        (database = 'rulebricks' AND table = 'decision_logs')
+                        OR database = '${CLICKSTACK_DATABASE}'
+                        OR (database = 'system' AND match(table, '.*_log(_[0-9]+)?$'))
+                      )
+                    GROUP BY database, table, partition_id
+                  )
+                  ORDER BY newest_time ASC, partition_bytes DESC, database ASC, table ASC, partition_id ASC
+                  LIMIT 1
+                  FORMAT TSVRaw")
+                    if [ -z "$candidate" ]; then
+                      echo "ClickHouse cache is above 75% used but has no evictable partitions"
                       exit 0
                     fi
-                    today=$(date -u +%Y%m%d)
-                    if [ "$oldest" -ge "$today" ] 2>/dev/null; then
-                      insert_ok=$(q "SELECT free_space >= 0.20 * total_space FROM system.disks WHERE name = 'default' FORMAT TSVRaw")
-                      if [ "$insert_ok" = "1" ]; then
-                        echo "only the active partition remains and insert headroom is healthy (>=20% free); leaving it"
-                        exit 0
-                      fi
-                      if [ "$insert_ok" != "0" ]; then
-                        echo "unexpected system.disks response '${insert_ok}'" >&2
-                        exit 1
-                      fi
-                      # A single high-volume day can fill the disk before UTC
-                      # rollover. Below the table's 20% insert backstop, keeping
-                      # today's local partition would wedge ingest indefinitely.
-                      # The independently-written object archive remains durable.
-                      echo "free space below insert backstop; dropping active decision_logs partition ${oldest}"
-                    else
-                      echo "free space low; dropping decision_logs partition ${oldest}"
+
+                    old_ifs="$IFS"
+                    IFS="$(printf '\t')"
+                    set -- $candidate
+                    IFS="$old_ifs"
+                    if [ "$#" -ne 3 ]; then
+                      echo "unexpected cache candidate '${candidate}'" >&2
+                      exit 1
                     fi
-                    # Override ClickHouse's 50 GB safety cap for this emergency
-                    # retention operation only. The server-wide guard remains in
-                    # place for every other DROP query.
-                    q "ALTER TABLE rulebricks.decision_logs DROP PARTITION ID '${oldest}'" "?max_partition_size_to_drop=0"
+                    cache_database="$1"
+                    cache_table="$2"
+                    partition_id="$3"
+                    case "${cache_database}" in *[!a-zA-Z0-9_]*) exit 1 ;; esac
+                    case "${cache_table}" in *[!a-zA-Z0-9_]*) exit 1 ;; esac
+                    case "${partition_id}" in *[!a-zA-Z0-9_-]*) exit 1 ;; esac
+                    case "${cache_database}.${cache_table}" in
+                      rulebricks.decision_logs|"${CLICKSTACK_DATABASE}".*|system.*_log|system.*_log_[0-9]*) ;;
+                      *)
+                        echo "refusing non-cache candidate ${cache_database}.${cache_table}" >&2
+                        exit 1
+                        ;;
+                    esac
+
+                    echo "ClickHouse cache above 75% used; dropping ${cache_database}.${cache_table} partition ${partition_id}"
+                    # Cache partitions can exceed ClickHouse's default 50 GB
+                    # DROP guard during a load test; override it for this GC only.
+                    q "ALTER TABLE \`${cache_database}\`.\`${cache_table}\` DROP PARTITION ID '${partition_id}'" "?max_partition_size_to_drop=0"
                     i=$((i + 1))
                   done
-                  echo "eviction cap reached this run; continuing next schedule"
+                  echo "cache eviction cap reached; continuing next schedule"
 {{- end }}

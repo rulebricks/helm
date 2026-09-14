@@ -886,17 +886,17 @@ clickhouse:
     # clickstack.clickhouse.existingSecret.
     existingSecret: '{{ printf "%s-clickhouse-credentials" .Release.Name }}'
     existingSecretKey: admin-password
-  # Decision-log table retention. Applied during normal merges; changing the
-  # value updates the existing table on upgrade. Ignored in stateless mode,
-  # where object-store lifecycle policy owns retention.
+  # Maximum age for the best-effort local decision-log cache. Normal merges
+  # apply this TTL, while shared-volume pressure may evict partitions sooner.
+  # Object storage remains the durable copy and owns retention in stateless mode.
   decisionLogs:
     retentionDays: 30
   # enabled=true stores the decision_logs table on a PVC; enabled=false runs
   # stateless and serves the object-storage archive view instead. ClickStack
   # telemetry requires persistence.
   #
-  # PVC sizing: budget for retained decision-log volume plus ClickStack
-  # telemetry (when enabled) and leave at least 35% free for merges.
+  # PVC sizing: ClickHouse uses up to 75% as a hot cache for decision logs,
+  # ClickStack data, and its own system logs; cache GC preserves 25% headroom.
   persistence:
     enabled: true
     size: 100Gi
@@ -1448,11 +1448,20 @@ vector:
         # HPS owns the decision-log schema. Vector owns the Kafka-to-JSON
         # typing boundary so storage sinks stay stable during rolling deploys.
         source: '{{ include "rulebricks.vector.normalizeLogs" . }}'
+      # Keep the chart valid and observable when hand-authored values configure
+      # no storage sink. Once any additional sink is merged in, this filter
+      # prevents the fallback console from duplicating full decision logs into
+      # pod logs where ClickStack would ingest them again.
+      console_fallback:
+        type: filter
+        inputs:
+          - normalize_logs
+        condition: '{{ if gt (len .Values.customConfig.sinks) 1 }}false{{ else }}true{{ end }}'
     sinks:
       console:
         type: console
         inputs:
-          - normalize_logs
+          - console_fallback
         encoding:
           codec: json
       # ==== Decision Log Storage Sink ====
