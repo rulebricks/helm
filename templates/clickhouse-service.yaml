@@ -1,5 +1,7 @@
 {{- if .Values.clickhouse.enabled }}
 {{- $ch := .Values.clickhouse }}
+{{- $storageAnnotations := include "rulebricks.storage.serviceAccountAnnotations" . | fromYaml | default dict }}
+{{- $serviceAccountAnnotations := mergeOverwrite (dict) $storageAnnotations ($ch.serviceAccount.annotations | default dict) }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -11,6 +13,7 @@ spec:
   type: ClusterIP
   selector:
     {{- include "rulebricks.clickhouse.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: server
   ports:
     - name: http
       port: 8123
@@ -30,10 +33,11 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
-  {{- with $ch.serviceAccount.annotations }}
+  {{- with $serviceAccountAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+automountServiceAccountToken: true
 {{- end }}
 {{- if and $ch.metrics.enabled $ch.metrics.serviceMonitor.enabled }}
 ---

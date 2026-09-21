@@ -94,12 +94,13 @@ ClickHouse, and future storage-backed jobs.
 
 {{- define "rulebricks.storage.serviceAccountAnnotations" -}}
 {{- $storage := .Values.global.storage | default dict -}}
-{{/* AWS uses EKS Pod Identity (a namespace-scoped association created by the CLI,
-     no annotation). Only GCP/Azure workload identity bind via a ServiceAccount
-     annotation, so S3 intentionally emits nothing here. */}}
-{{- if and (eq ($storage.provider | default "") "gcs") $storage.gcp $storage.gcp.serviceAccountEmail }}
-iam.gke.io/gcp-service-account: {{ $storage.gcp.serviceAccountEmail | quote }}
-{{- else if and (eq ($storage.provider | default "") "azure-blob") $storage.azure $storage.azure.clientId }}
+{{/* AWS uses EKS Pod Identity associations created out of band by the CLI.
+     Reusing that role ARN as an IRSA annotation is unsafe because Pod Identity
+     roles trust pods.eks.amazonaws.com rather than the cluster OIDC provider.
+     Hand-authored IRSA installs can use clickhouse.serviceAccount.annotations. */}}
+{{- if eq ($storage.provider | default "") "gcs" }}
+iam.gke.io/gcp-service-account: {{ required "global.storage.gcp.serviceAccountEmail is required for GCS workload identity" (dig "gcp" "serviceAccountEmail" "" $storage) | quote }}
+{{- else if and (eq ($storage.provider | default "") "azure-blob") $storage.azure (eq ($storage.azure.authMode | default "workload-identity") "workload-identity") $storage.azure.clientId }}
 azure.workload.identity/client-id: {{ $storage.azure.clientId | quote }}
 {{- end }}
 {{- end -}}

@@ -21,15 +21,12 @@ clickhouse:
   database: otel
   endpoint: ""
   nativeEndpoint: ""
-  username: rulebricks
+  username: rulebricks_runtime
   existingSecret: ""
   existingSecretKey: admin-password
-  createSchema: true
-  # Operator-facing retention window for ClickStack operational telemetry.
-  # The chart converts this to the ClickHouse exporter TTL (days * 24h).
-  retentionDays: 7
-  # Advanced override. Leave empty to derive from retentionDays.
-  ttl: ""
+  # Runtime collectors never execute DDL; the parent hook seeds the upstream
+  # schema with its 30-day TTL and leaves optional PromQL tables disabled.
+  createSchema: false
   logsTableName: otel_logs
   tracesTableName: otel_traces
   metricsTables:
@@ -101,9 +98,12 @@ collector:
   image:
     registry: docker.io
     repository: rulebricks/clickstack-otel-collector
-    tag: "2.33.0-r1"
+    tag: "2.33.0-r5"
     pullPolicy: IfNotPresent
-  memoryLimitMiB: 800
+  # Keep the collector's hard limiter well below the container limit. Under
+  # burst traffic its queues, Prometheus discovery state, and non-Go RSS add
+  # meaningful headroom beyond the heap measured by memory_limiter.
+  memoryLimitMiB: 1600
   # Telemetry noise controls, applied at the gateway before anything is stored.
   # Rule-execution traffic (the /api/v1 decision API) is what ClickStack exists
   # to observe; without a filter every health probe, metrics scrape, and app
@@ -130,10 +130,10 @@ collector:
     resources:
       requests:
         cpu: 250m
-        memory: 512Mi
+        memory: 1Gi
       limits:
         cpu: 2000m
-        memory: 1Gi
+        memory: 3Gi
     podLabels:
       rulebricks.com/workload-group: infrastructure
     podAnnotations: {}
@@ -198,8 +198,11 @@ collector:
       include:
         - /var/log/pods/*/*/*.log
       exclude:
-        - /var/log/pods/*/clickstack-collector-agent/*.log
-        - /var/log/pods/*/clickstack-collector-gateway/*.log
+        # Container-directory matches avoid recursively ingesting collector
+        # output and duplicating Vector decision logs in ClickStack.
+        - /var/log/pods/*/clickhouse/*.log
+        - /var/log/pods/*/vector/*.log
+        - /var/log/pods/*/otel-collector/*.log
     kubeletstats:
       collectionInterval: 30s
 

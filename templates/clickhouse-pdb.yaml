@@ -1,0 +1,15 @@
+{{- if and .Values.clickhouse.enabled .Values.clickhouse.persistence.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "rulebricks.clickhouse.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      {{- include "rulebricks.clickhouse.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+{{- end }}

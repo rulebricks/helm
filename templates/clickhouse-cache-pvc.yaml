@@ -1,0 +1,20 @@
+{{- if and .Values.clickhouse.enabled .Values.clickhouse.persistence.enabled }}
+{{- $cache := .Values.clickhouse.cache | default dict -}}
+{{- $storageClass := $cache.storageClass | default .Values.clickhouse.persistence.storageClass -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "rulebricks.clickhouse.fullname" . }}-cache
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with $storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $cache.size | default "100Gi" }}
+{{- end }}

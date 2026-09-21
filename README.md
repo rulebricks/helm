@@ -95,7 +95,7 @@ global:
 | `global.annotations`                 | Annotations applied to all resource metadata                              |
 | `global.podLabels`                   | Labels applied to pod templates only                                      |
 | `global.podAnnotations`              | Annotations applied to pod templates only                                 |
-| `global.storage.*`                   | Shared object storage used by decision logs and database backups          |
+| `global.storage.*`                   | Shared object storage used by decision logs, ClickHouse, and DB backups   |
 | `backup.enabled`                     | Enable self-hosted Supabase Postgres backups                              |
 | `backup.schedule`                    | Cron schedule for Barman base backups                                     |
 | `backup.retentionDays`               | Number of days to retain restorable backups                               |
@@ -243,7 +243,7 @@ kubectl port-forward -n rulebricks svc/rulebricks-kube-prometheus-stack-promethe
 <details>
 <summary><strong>Shared Object Storage and Database Backups</strong></summary>
 
-Rulebricks uses one shared cloud provider, identity, and bucket/container for all storage-backed features. Decision logs and database backups are just key prefixes within that single bucket, configured under `global.storage.paths.*`.
+Rulebricks uses one shared cloud provider, identity, and bucket/container for all storage-backed features. Raw decision logs, native ClickHouse objects, and database backups use separate key prefixes under `global.storage.paths.*`.
 
 ```yaml
 global:
@@ -255,6 +255,7 @@ global:
       iamRoleArn: arn:aws:iam::123456789012:role/rulebricks-storage
     paths:
       decisionLogs: decision-logs
+      clickhouse: clickhouse
       dbBackups: db-backups
 
 backup:
@@ -265,9 +266,74 @@ backup:
   jobHistory:
     successful: 30
     failed: 30
+
+clickhouse:
+  persistence:
+    enabled: true
+    size: 100Gi
+    keepFreeSpaceBytes: 21474836480
+  cache:
+    size: 100Gi
+  temp:
+    sizeLimit: 20Gi
 ```
 
 Upgrade note: older values that split storage into `global.storage.decisionLogs.*` and `global.storage.dbBackups.*` (per-purpose buckets/regions) are still honored as overrides, but new installs should use the unified `global.storage.bucket`, `global.storage.region`, and `global.storage.paths.*` shape shown above.
+
+With `clickhouse.persistence.enabled: true`, the existing single ClickHouse
+StatefulSet stores native MergeTree objects under `paths.clickhouse`. Its PVC
+retains only the catalog and remote-object metadata. A separate release-scoped
+PVC at `/var/lib/clickhouse/disks/object_storage_cache` holds the bounded SLRU
+cache, and a size-limited `emptyDir` at `/var/lib/clickhouse/tmp` holds query
+spill. ClickHouse file logs use information level, 100 MB files, three retained
+rotations, and a separate 1 GiB `emptyDir`. Upgrades do not alter or delete the
+original StatefulSet claim. With persistence disabled, ClickHouse remains the
+existing Deployment/`emptyDir` archive-view mode, and ClickStack must also be
+disabled.
+
+Persistent installs set `object_storage` as the global MergeTree policy. A
+pre-upgrade compatibility hook checks an internal storage generation before
+the workload is changed. When the generation is current and every MergeTree is
+already remote-backed, it preserves all ClickHouse data. When the generation
+is missing, changed, or local MergeTrees remain, it drops only the ClickHouse
+databases named `rulebricks` and `otel`, plus legacy system-log tables, before
+the new server starts. Supabase, backups, and the raw decision-log archive are
+not touched.
+
+Runtime services use the config-managed `rulebricks_runtime` user, which has
+only SELECT, INSERT, SHOW, source-read, and named-collection access. ClickHouse
+additionally requires `CREATE TEMPORARY TABLE` to execute the app's bounded
+object-store table functions; that grant cannot create persistent MergeTrees.
+The runtime identity cannot execute persistent DDL. Schema migrations run only
+through the admin-backed Helm hook. The hook rejects any non-system MergeTree
+that is not remote-backed; system log tables stay disabled.
+
+An existing release needs one normal, non-atomic upgrade:
+
+```bash
+helm upgrade <release> rulebricks/stack -n <namespace> \
+  -f values.yaml --wait --timeout 20m
+```
+
+Do not add `--atomic`: an incompatible-generation reset is intentionally
+irreversible. The compatibility marker advances only after schema seeding and
+the remote-storage audit succeed, so retrying a failed reset upgrade is safe.
+Normal chart upgrades keep the same generation and do not reset ClickHouse.
+
+The `paths.clickhouse` prefix is owned exclusively by ClickHouse. Keep it
+separate from `paths.decisionLogs`, do not share it across releases, and do not
+apply bucket lifecycle deletion to it. External deletion can leave the
+persistent ClickHouse catalog pointing at missing objects. The raw NDJSON
+archive remains independently lifecycle-managed and is unchanged by this
+native storage policy.
+
+Decision logs have no table TTL. ClickStack's regular upstream tables retain
+their default 30-day TTL for disposable operational telemetry. The optional
+PromQL TimeSeries schema is disabled because its inner tables have no upstream
+TTL. Remove stale
+`clickhouse.decisionLogs.retentionDays`, `clickstack.clickhouse.retentionDays`,
+and `clickstack.clickhouse.ttl` entries from retained values files; lifecycle
+rules may be applied only to the raw archive prefix.
 
 Backups use Barman cloud tooling and are available only for self-hosted Supabase. By default, restorable backup data is retained for 30 days, and completed backup Jobs and their pod logs are retained for 30 days through both CronJob history limits and Kubernetes Job TTL. The default history limits assume the default daily schedule; increase `backup.jobHistory.successful` and `backup.jobHistory.failed` if you run backups more frequently and need every completed Job to remain visible for the full 30-day TTL window.
 

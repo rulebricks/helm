@@ -127,6 +127,18 @@ spec:
       {{- with .Values.hps.workers.topologySpreadConstraints }}
       topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
+      {{- else }}
+      # Workers are single-threaded Kafka consumers. Keep their CPU demand
+      # evenly distributed across worker nodes; otherwise a scale-up can pack
+      # most consumers onto two saturated nodes while another node sits idle.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "rulebricks-chart.hps-worker.fullname" . }}
+              app.kubernetes.io/instance: {{ .Release.Name }}
       {{- end }}
       {{- /* Only wait for the in-cluster Kafka service. When external brokers are
              configured (app.logging.kafkaBrokers set), the service does not exist. */ -}}

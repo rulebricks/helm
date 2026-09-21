@@ -56,10 +56,11 @@ jobs:
         run: helm lint . -f ci/validate-values.yaml
 
       - name: Render chart for validation
-        # ONE full-feature render (all toggles on, supabase enabled) feeds both the
-        # image-version guard and the workload/ClickHouse checks below, so the chart
-        # isn't re-rendered several times. CI-only test secrets live in
-        # ci/validate-values.yaml (excluded from the packaged chart via .helmignore).
+        # This full-feature render (all toggles on, Supabase enabled) feeds the
+        # image-version and general workload checks below. The dedicated
+        # ClickHouse validation step separately covers its provider/mode matrix.
+        # CI-only test secrets live in ci/validate-values.yaml (excluded from the
+        # packaged chart via .helmignore).
         run: |
           helm template rulebricks . \
             --namespace rulebricks \
@@ -140,22 +141,79 @@ jobs:
             warn "ClickHouse decision-logs bootstrap Job not found"
             exit 1
           end
+          seed = bootstrap_job.dig("spec", "template", "spec", "initContainers")&.find do |container|
+            container["name"] == "seed-clickstack-schema"
+          end
+          promql = (seed&.fetch("env", []) || []).find { |item| item["name"] == "ENABLE_PROMQL" }
+          unless promql&.fetch("value", nil) == "false"
+            warn "ClickHouse bootstrap must leave the unbounded PromQL TimeSeries schema disabled"
+            exit 1
+          end
           required = [
-            "CREATE DATABASE IF NOT EXISTS otel",
             "CREATE OR REPLACE VIEW rulebricks.decision_logs_archive",
             "CREATE TABLE IF NOT EXISTS rulebricks.decision_logs",
             "ORDER BY (api_key, timestamp, log_id)",
-            "TTL toDateTime(timestamp) + INTERVAL 30 DAY"
+            "storage_policy = 'object_storage'"
           ]
           missing = required.reject { |needle| bootstrap_job.to_s.include?(needle) }
           unless missing.empty?
             warn "ClickHouse bootstrap Job is missing: #{missing.join(", ")}"
             exit 1
           end
-          forbidden = ["decision_logs_parquet_", "CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent"]
+          forbidden = [
+            "decision_logs_parquet_",
+            "CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent",
+            "TTL toDateTime(timestamp)",
+            "MODIFY TTL"
+          ]
           present = forbidden.select { |needle| bootstrap_job.to_s.include?(needle) }
           unless present.empty?
             warn "ClickHouse bootstrap still contains removed objects: #{present.join(", ")}"
+            exit 1
+          end
+
+          reset_job = docs.find do |doc|
+            doc["kind"] == "Job" &&
+              doc.dig("metadata", "name") == "rulebricks-clickhouse-reset"
+          end
+          unless reset_job&.dig("metadata", "annotations", "helm.sh/hook") == "pre-upgrade"
+            warn "ClickHouse compatibility reset hook not found"
+            exit 1
+          end
+          reset_text = reset_job.to_s
+          reset_required = [
+            "EXPECTED_GENERATION",
+            "clickhouse_compatibility",
+            "DROP DATABASE IF EXISTS rulebricks",
+            "preserving data"
+          ]
+          missing_reset = reset_required.reject { |needle| reset_text.include?(needle) }
+          unless missing_reset.empty?
+            warn "ClickHouse reset hook is missing: #{missing_reset.join(", ")}"
+            exit 1
+          end
+
+          clickhouse = docs.find do |doc|
+            doc["kind"] == "StatefulSet" &&
+              doc.dig("metadata", "name") == "rulebricks-clickhouse"
+          end
+          log_volume = clickhouse&.dig("spec", "template", "spec", "volumes")&.find do |volume|
+            volume["name"] == "logs"
+          end
+          unless log_volume&.dig("emptyDir", "sizeLimit") == "1Gi"
+            warn "ClickHouse file-log emptyDir must be capped at 1Gi"
+            exit 1
+          end
+
+          clickhouse_config = docs.find do |doc|
+            doc["kind"] == "ConfigMap" &&
+              doc.dig("metadata", "name") == "rulebricks-clickhouse-config-d"
+          end
+          logging_xml = clickhouse_config&.dig("data", "05-server-logging.xml").to_s
+          unless logging_xml.include?("<level>information</level>") &&
+              logging_xml.include?("<size>100M</size>") &&
+              logging_xml.include?("<count>3</count>")
+            warn "ClickHouse file logging is not safely bounded"
             exit 1
           end
           RUBY

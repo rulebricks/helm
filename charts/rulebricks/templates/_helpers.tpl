@@ -523,6 +523,10 @@ Usage: {{ include "rulebricks-chart.tracing.env" (dict "root" . "serviceName" "r
 {{- $svc := .serviceName -}}
 {{- $tracing := ($root.Values.global | default dict).tracing | default dict -}}
 {{- $clickstack := ($root.Values.global | default dict).clickstack | default dict -}}
+{{- $samplingRatio := 1.0 -}}
+{{- if hasKey $tracing "samplingRatio" -}}
+  {{- $samplingRatio = get $tracing "samplingRatio" -}}
+{{- end -}}
 {{- if or $tracing.enabled ($clickstack.enabled | default false) -}}
 - name: OTEL_TRACING_ENABLED
   value: "1"
@@ -535,7 +539,7 @@ Usage: {{ include "rulebricks-chart.tracing.env" (dict "root" . "serviceName" "r
 - name: OTEL_TRACES_SAMPLER
   value: "parentbased_traceidratio"
 - name: OTEL_TRACES_SAMPLER_ARG
-  value: {{ $tracing.samplingRatio | default 1.0 | quote }}
+  value: {{ $samplingRatio | quote }}
 {{- with ($root.Values.global | default dict).version }}
 - name: RULEBRICKS_VERSION
   value: {{ . | quote }}

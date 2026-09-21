@@ -163,6 +163,9 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          # Bypass the image entrypoint so node agents cannot run ClickHouse
+          # migrations; schema changes are owned by the parent chart hook.
+          command: ["/otelcontribcol"]
           args:
             - --config=/etc/otelcol/config.yaml
           ports:
@@ -174,19 +177,6 @@ spec:
               value: /etc/otelcol/config.yaml
             - name: OPAMP_SERVER_URL
               value: {{ printf "http://%s:%d" (include "clickstack.hyperdx.fullname" .) (int .Values.hyperdx.ports.opamp) | quote }}
-            - name: CLICKHOUSE_ENDPOINT
-              value: {{ include "clickstack.clickhouse.httpEndpoint" . | quote }}
-            - name: CLICKHOUSE_NATIVE_ENDPOINT
-              value: {{ include "clickstack.clickhouse.nativeEndpoint" . | quote }}
-            - name: CLICKHOUSE_USER
-              value: {{ .Values.clickhouse.username | quote }}
-            - name: CLICKHOUSE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "clickstack.clickhouse.passwordSecretName" . }}
-                  key: {{ .Values.clickhouse.existingSecretKey | default "admin-password" }}
-            - name: HYPERDX_OTEL_EXPORTER_CLICKHOUSE_DATABASE
-              value: {{ .Values.clickhouse.database | default "otel" | quote }}
             - name: K8S_NODE_NAME
               valueFrom:
                 fieldRef:

@@ -1,6 +1,3 @@
-{{- $retentionDays := .Values.clickhouse.retentionDays | default 7 | int -}}
-{{- $derivedTtl := printf "%dh" (mul $retentionDays 24) -}}
-{{- $ttl := .Values.clickhouse.ttl | default $derivedTtl -}}
 {{- $filters := .Values.collector.filters | default dict -}}
 {{- $traceFilters := get $filters "traces" | default dict -}}
 {{- $logFilters := get $filters "logs" | default dict -}}
@@ -91,8 +88,8 @@ data:
     processors:
       memory_limiter:
         check_interval: 1s
-        limit_mib: {{ .Values.collector.memoryLimitMiB | default 800 }}
-        spike_limit_mib: {{ div (.Values.collector.memoryLimitMiB | default 800 | int) 4 }}
+        limit_mib: {{ .Values.collector.memoryLimitMiB | default 1600 }}
+        spike_limit_mib: {{ div (.Values.collector.memoryLimitMiB | default 1600 | int) 4 }}
 {{- if or $traceFilterEnabled $logFilterEnabled }}
       {{- /* Telemetry noise controls (collector.filters values). Each OTTL
            condition DROPS matching data. Span rules only look at HTTP server
@@ -142,8 +139,8 @@ data:
         database: ${env:HYPERDX_OTEL_EXPORTER_CLICKHOUSE_DATABASE}
         username: ${env:CLICKHOUSE_USER}
         password: ${env:CLICKHOUSE_PASSWORD}
-        create_schema: {{ .Values.clickhouse.createSchema | default true }}
-        ttl: {{ $ttl | quote }}
+        # Schema DDL is owned by the parent chart's ordered ClickHouse hook.
+        create_schema: false
         logs_table_name: {{ .Values.clickhouse.logsTableName | default "otel_logs" | quote }}
         traces_table_name: {{ .Values.clickhouse.tracesTableName | default "otel_traces" | quote }}
         metrics_tables:
@@ -274,6 +271,9 @@ spec:
         - name: otel-collector
           image: {{ include "clickstack.image" (dict "root" $ "image" .Values.collector.image "name" "clickstack-otel-collector") | quote }}
           imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
+          # Bypass the image entrypoint: it runs schema migrations before the
+          # collector. All DDL is serialized through the admin-only Helm hook.
+          command: ["/otelcontribcol"]
           args:
             - --config=/etc/otelcol/config.yaml
           ports:

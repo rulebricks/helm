@@ -1,5 +1,6 @@
 {{- if .Values.clickhouse.enabled }}
 {{- $ch := .Values.clickhouse }}
+{{- $tmp := $ch.temp | default dict }}
 {{- /* Stateless mode (persistence.enabled=false) keeps decision-log querying
      fully functional - the archive lives in object storage and is read through
      the named-collection views - but local MergeTree data does NOT survive pod
@@ -9,9 +10,11 @@
 {{- if and (not $ch.persistence.enabled) .Values.global.clickstack.enabled }}
 {{- fail "clickhouse.persistence.enabled=false requires the ClickStack observability backend to be disabled (global.clickstack.enabled=false): ClickStack stores telemetry in local MergeTree tables that would be lost on every ClickHouse pod restart. Enable persistence or disable ClickStack." }}
 {{- end }}
-{{- /* Persistence is the statefulness switch. A PVC stores the direct
-     decision_logs MergeTree table even when ClickStack is disabled; disabling
-     persistence selects the archive-backed Deployment + emptyDir mode. */}}
+{{- /* Persistence is the statefulness switch. The original StatefulSet PVC
+     remains dedicated to the catalog and object metadata. A standalone PVC
+     holds the bounded cache and a size-limited emptyDir holds temporary spill;
+     native MergeTree parts live in object storage. Disabling persistence
+     selects the archive-backed Deployment + emptyDir mode. */}}
 {{- $stateful := $ch.persistence.enabled }}
 {{- /* Stateless mode renders a Deployment, not a StatefulSet: there are no
      volume claims and no reliance on stable pod identity (the ClusterIP
@@ -51,9 +54,11 @@ spec:
         {{- with .Values.global.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- include "rulebricks.storage.podLabels" . | nindent 8 }}
         {{- with $ch.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        app.kubernetes.io/component: server
       annotations:
         {{- with $ch.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -85,6 +90,39 @@ spec:
       {{- with ($ch.affinity | default $sched.affinity) }}
       affinity:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if $stateful }}
+      initContainers:
+        - name: prepare-storage-layout
+          image: {{ include "rulebricks.image" (dict "root" $ "image" .Values.global.images.busybox "name" "busybox") | quote }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              # The cache and temp paths lived on the catalog PVC in older
+              # releases. Remove only those disposable bytes before nested
+              # mounts hide them, then preserve/create the metadata directory.
+              for path in \
+                /clickhouse-data/disks/object_storage_cache \
+                /clickhouse-data/tmp; do
+                if [ -d "${path}" ]; then
+                  find "${path}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+                fi
+              done
+              mkdir -p /clickhouse-data/disks/object_storage
+              touch /clickhouse-cache/.write-test
+              rm /clickhouse-cache/.write-test
+          volumeMounts:
+            - name: data
+              mountPath: /clickhouse-data
+            - name: object-storage-cache
+              mountPath: /clickhouse-cache
       {{- end }}
       containers:
         - name: clickhouse
@@ -125,6 +163,21 @@ spec:
                   name: {{ $s3Secret }}
                   key: AWS_SECRET_ACCESS_KEY
             {{- end }}
+            {{- $azure := $storage.azure | default dict }}
+            {{- if eq ($storage.provider | default "s3") "azure-blob" }}
+            {{- if eq ($azure.authMode | default "workload-identity") "connection-string" }}
+            - name: AZURE_STORAGE_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "global.storage.azure.connectionStringSecretRef.name is required for Azure connection-string auth" (dig "connectionStringSecretRef" "name" "" $azure) }}
+                  key: {{ required "global.storage.azure.connectionStringSecretRef.key is required for Azure connection-string auth" (dig "connectionStringSecretRef" "key" "" $azure) }}
+            {{- else }}
+            - name: AZURE_CLIENT_ID
+              value: {{ required "global.storage.azure.clientId is required for Azure workload identity" $azure.clientId | quote }}
+            - name: AZURE_TENANT_ID
+              value: {{ required "global.storage.azure.tenantId is required for Azure workload identity" $azure.tenantId | quote }}
+            {{- end }}
+            {{- end }}
             {{- if not $stateful }}
             {{- /* Stateless mode runs the entrypoint's initdb flow on every fresh
                  data dir (pod reschedule loses the emptyDir). The entrypoint's
@@ -142,6 +195,12 @@ spec:
               containerPort: 9000
             - name: metrics
               containerPort: 9363
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /ping
@@ -161,6 +220,12 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/clickhouse
+            {{- if $stateful }}
+            - name: object-storage-cache
+              mountPath: /var/lib/clickhouse/disks/object_storage_cache
+            {{- end }}
+            - name: temp
+              mountPath: /var/lib/clickhouse/tmp
             - name: logs
               mountPath: /var/log/clickhouse-server
             - name: config-d
@@ -172,14 +237,23 @@ spec:
               mountPath: /docker-entrypoint-initdb.d
             {{- end }}
       volumes:
+        - name: temp
+          emptyDir:
+            sizeLimit: {{ $tmp.sizeLimit | default "20Gi" }}
         - name: logs
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 1Gi
         - name: config-d
           configMap:
             name: {{ include "rulebricks.clickhouse.fullname" . }}-config-d
         - name: users-d
           configMap:
             name: {{ include "rulebricks.clickhouse.fullname" . }}-users-d
+        {{- if $stateful }}
+        - name: object-storage-cache
+          persistentVolumeClaim:
+            claimName: {{ include "rulebricks.clickhouse.fullname" . }}-cache
+        {{- end }}
         {{- if not $stateful }}
         {{- /* Stateless mode: /var/lib/clickhouse only holds the decision-log
              view definitions (metadata) plus scratch space for queries. The

@@ -24,10 +24,9 @@
 benchmarks/
 # CI-only template-validation values (not part of the chart)
 ci/
-
-
-
-
+# CI and image-build sources are not runtime chart content.
+scripts/
+.github/
 # NOTE: images/manifest.yaml MUST ship inside the chart tarball
 
 # Editor worktrees (full duplicate chart copies — must not be packaged)

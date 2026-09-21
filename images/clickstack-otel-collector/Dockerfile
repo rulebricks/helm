@@ -1,9 +1,9 @@
 # check=skip=InvalidDefaultArgInFrom
 # rulebricks/clickstack-otel-collector — HyperDX's ClickStack OTel collector
-# rebuilt from unmodified upstream source: all four Go binaries (collector,
+# rebuilt from pinned upstream source: all four Go binaries (collector,
 # OpAMP supervisor, gomplate, goose/migrate) recompiled on a current toolchain
-# (clears fixed Go stdlib/module CVEs). Configs/entrypoint/layout mirror
-# upstream's Dockerfile exactly.
+# (clears fixed Go stdlib/module CVEs). Schema seeds remain byte-for-byte
+# upstream; the chart's global MergeTree policy places them on object storage.
 # All pins live in images/manifest.yaml (base/ref plus the version-adjacent
 # args: OTEL_COLLECTOR_VERSION / OTEL_COLLECTOR_CORE_VERSION from upstream's
 # .env at the release tag, GOMPLATE_VERSION), injected as build args by

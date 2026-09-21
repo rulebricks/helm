@@ -94,6 +94,7 @@ app:
   # ClickHouse credentials for the decision-log query path. Set existingSecret
   # to match a BYO clickhouse.auth.existingSecret in the parent chart.
   clickhouse:
+    username: "rulebricks_runtime"
     existingSecret: ""
     existingSecretKey: "admin-password"
   # SMTP configuration (optional, can also be set via global.smtp)
@@ -169,6 +170,12 @@ hps:
     lagThreshold: 50
     # CPU percentage of request that triggers scale-up.
     cpuThreshold: 45
+    # Prevent scale-down below the number of accepted execution requests still
+    # in flight. Requires the parent chart's Prometheus installation.
+    inFlightPrometheus:
+      enabled: false
+      serverAddress: ""
+      threshold: "1"
   # Fleet warm-up (/api/v1/scale): pre-scales the worker fleet to its ceiling
   # ahead of large batch workloads. Requires a shared Redis backend.
   warmup:
@@ -239,8 +246,8 @@ hps:
     responseFetchMaxBytes: 67108864 # RESPONSE_MAX_BYTES_PER_PARTITION (HPS)
     workerFetchMaxBytes: 67108864 # WORKER_MAX_BYTES_PER_PARTITION (worker)
     logRetryBufferMaxBytes: 134217728 # LOG_RETRY_BUFFER_MAX_BYTES (HPS + worker)
-    shutdownDrainMs: 25000 # KAFKA_SHUTDOWN_DRAIN_MS (in-flight drain)
-    terminationGracePeriodSeconds: 35 # HPS pod grace (>= 5s ingress handoff + drain + overhead)
+    shutdownDrainMs: 65000 # KAFKA_SHUTDOWN_DRAIN_MS (fallback after HTTP drain)
+    terminationGracePeriodSeconds: 75 # HPS pod grace (> 5s handoff + 60s RPC deadline + final log drain)
     # nodeHeapMb: 1024 # NODE_OPTIONS --max-old-space-size; unset = image default
   # Extra environment variables.
   # Bulk chunk sizing is self-tuning and needs no configuration here; the
@@ -265,8 +272,8 @@ hps:
     replicas: 3 # Starting replicas
     topics: "solution"
     # Node scheduling configuration.
-    # Optional custom topology spread constraints. The chart does not set a
-    # default spread rule so workers can prefer non-infrastructure nodes.
+    # Optional custom topology spread constraints. By default workers are
+    # balanced strictly across eligible nodes by hostname.
     nodeSelector: {}
     tolerations: []
     affinity: {}
@@ -304,11 +311,11 @@ hps:
     extraEnvFrom: []
     resources:
       requests:
-        cpu: "100m"
-        memory: "128Mi"
+        cpu: "400m"
+        memory: "1Gi"
       limits:
-        cpu: "500m"
-        memory: "512Mi"
+        cpu: "1000m"
+        memory: "1Gi"
 
     # KEDA-based autoscaling for workers
     keda:

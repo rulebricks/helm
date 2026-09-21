@@ -75,7 +75,8 @@ global:
   # =============================================================================
   # Shared Object Storage
   # One cloud provider, one identity, and one bucket/container hold all Rulebricks
-  # data. Decision logs and DB backups are just path prefixes within it.
+  # data. Raw decision logs, native ClickHouse objects, and DB backups use
+  # separate path prefixes within it.
   # =============================================================================
   storage:
     provider: "s3" # s3 | azure-blob | gcs
@@ -105,6 +106,10 @@ global:
     # Per-purpose key prefixes within the single bucket/container.
     paths:
       decisionLogs: "decision-logs"
+      # Native ClickHouse MergeTree objects. Keep this separate from the raw
+      # decision-log archive above. Never attach an external lifecycle deletion
+      # policy to this prefix; ClickHouse owns object creation and deletion.
+      clickhouse: "clickhouse"
       dbBackups: "db-backups"
   # Switch for the built-in ClickStack observability backend (lives under
   # global so all subcharts can read it).
@@ -473,6 +478,13 @@ rulebricks:
       lagThreshold: 50
       # CPU percentage of request that triggers scale-up.
       cpuThreshold: 45
+      # Sum the per-pod in-flight execution gauge through Prometheus. This
+      # prevents HPA scale-down from selecting a pod while large requests are
+      # still waiting on worker responses.
+      inFlightPrometheus:
+        enabled: true
+        serverAddress: ""
+        threshold: "1"
     # Fleet warm-up (/api/v1/scale): pre-scales the worker fleet to its
     # ceiling ahead of large batch workloads. An unused warm-up costs at most
     # ttlSeconds before normal scale-down reclaims the capacity.
@@ -538,8 +550,8 @@ rulebricks:
       # Retry buffer shared by decision-log producers. Sized for at least one
       # full 64 MiB log record plus another bounded retry.
       logRetryBufferMaxBytes: 134217728
-      # On SIGTERM, keep consuming until in-flight requests resolve; must
-      # cover rpcTimeoutMs, with terminationGracePeriodSeconds just above.
+      # Fallback Kafka drain after HPS first waits for accepted HTTP requests;
+      # keep this near rpcTimeoutMs in case HTTP shutdown itself errors.
       shutdownDrainMs: 315000
       terminationGracePeriodSeconds: 330
       # Node.js heap (MB) for the HPS server, ~85% of the memory limit.
@@ -569,7 +581,10 @@ rulebricks:
       # so keep it near measured mid-load usage.
       resources:
         requests:
-          cpu: "500m"
+          # Close to measured sustained usage. This makes the scheduler spread
+          # the 128-worker ceiling across four 16-core burst nodes instead of
+          # packing it onto three nodes that saturate unevenly.
+          cpu: "400m"
           memory: "1Gi"
         limits:
           cpu: "1000m"
@@ -878,6 +893,8 @@ clickhouse:
   podAnnotations:
     cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
   auth:
+    # Hook-only schema administrator. Runtime workloads always connect as the
+    # config-managed rulebricks_runtime user, using the same password.
     username: rulebricks
     password: ""
     # BYO seam: point at an existing Secret to stop the chart from managing
@@ -886,20 +903,31 @@ clickhouse:
     # clickstack.clickhouse.existingSecret.
     existingSecret: '{{ printf "%s-clickhouse-credentials" .Release.Name }}'
     existingSecretKey: admin-password
-  # Maximum age for the best-effort local decision-log cache. Normal merges
-  # apply this TTL, while shared-volume pressure may evict partitions sooner.
-  # Object storage remains the durable copy and owns retention in stateless mode.
-  decisionLogs:
-    retentionDays: 30
-  # enabled=true stores the decision_logs table on a PVC; enabled=false runs
-  # stateless and serves the object-storage archive view instead. ClickStack
-  # telemetry requires persistence.
+  # enabled=true keeps ClickHouse metadata on a PVC and stores native MergeTree
+  # objects under global.storage.paths.clickhouse. The original StatefulSet PVC
+  # remains catalog/metadata-only; cache and temporary spill are isolated below.
+  # Persistent MergeTrees default to object_storage. An incompatible storage
+  # generation triggers a ClickHouse-only pre-upgrade reset before that default
+  # is applied; ordinary upgrades preserve data.
+  # enabled=false runs the existing stateless archive-view mode on emptyDir.
+  # ClickStack telemetry requires persistence.
   #
-  # PVC sizing: ClickHouse uses up to 75% as a hot cache for decision logs,
-  # ClickStack data, and its own system logs; cache GC preserves 25% headroom.
+  # Native object paths are ClickHouse-managed and must not have lifecycle expiry.
   persistence:
     enabled: true
     size: 100Gi
+    # ClickHouse refuses new local reservations before the catalog disk reaches
+    # zero bytes. This does not resize or replace the StatefulSet claim.
+    keepFreeSpaceBytes: 21474836480
+  # Disposable read-through cache on a standalone release-scoped PVC. It is not
+  # part of volumeClaimTemplates, so adding it is safe for existing StatefulSets.
+  cache:
+    size: 100Gi
+    # Empty inherits persistence.storageClass.
+    storageClass: ""
+  # Query spill is node-ephemeral and cannot consume either persistent volume.
+  temp:
+    sizeLimit: 20Gi
   resources:
     requests:
       cpu: "1000m"
@@ -918,25 +946,14 @@ clickhouse:
     enabled: true
     serviceMonitor:
       enabled: true
-  # Enables the system log tables (query_log, etc.), useful for diagnosing
-  # slow or failed decision-log queries.
-  sampling:
-    enabled: true
   queryLimits:
     # Per-query memory ceiling, kept below the server cap so one runaway
     # query fails instead of starving the server.
     maxMemoryUsage: 4294967296
     maxThreads: 4
     maxExecutionTime: 120
-    # Row-read safety valve. With readOverflowMode "break", hitting the cap
-    # returns a partial result; set "throw" to fail loudly instead.
+    # Row-read safety valve. Fail loudly instead of returning partial results.
     maxRowsToRead: 50000000
-    readOverflowMode: break
-  otelQueryLimits:
-    maxMemoryUsage: 4294967296
-    maxThreads: 8
-    maxExecutionTime: 120
-  otelDatabase: otel
 
 # Ingress Controller (Traefik)
 traefik:
@@ -1490,8 +1507,14 @@ vector:
       #   framing:
       #     method: newline_delimited
       #   batch:
-      #     max_bytes: 268435456
-      #     timeout_secs: 300
+      #     max_bytes: 67108864
+      #     timeout_secs: 30
+      #   acknowledgements:
+      #     enabled: true
+      #   buffer:
+      #     type: memory
+      #     max_events: 500
+      #     when_full: block
       #   # Authentication via IRSA (recommended) - no credentials needed in config.
       #   # Vector will use the IAM role attached to its service account.
 
@@ -1679,8 +1702,9 @@ vector-agent:
 # CLICKSTACK OBSERVABILITY BACKEND
 # Built-in logs, traces, and mirrored metrics via ClickHouse + HyperDX. When
 # enabled, the ClickStack OTel gateway owns the <release>-otel-collector service
-# that app/HPS/worker/Traefik already send OTLP to. Decision logs stay in object
-# storage and are queried through the object-storage-backed ClickHouse archive.
+# that app/HPS/worker/Traefik already send OTLP to. Persistent ClickStack and
+# decision-log MergeTree objects use the native ClickHouse object-storage prefix;
+# the independent raw NDJSON decision archive remains available for fallback.
 # =============================================================================
 clickstack:
   # NOTE: the on/off switch is global.clickstack.enabled (the subchart's
@@ -1688,12 +1712,12 @@ clickstack:
   # The keys below only configure ClickStack when it is enabled.
   clickhouse:
     database: otel
-    username: rulebricks
+    username: rulebricks_runtime
     existingSecret: ""
     existingSecretKey: admin-password
-    retentionDays: 7
-    # Advanced override. Leave empty to derive from retentionDays.
-    ttl: ""
+    # Parent-chart schema seeding uses HyperDX's upstream 30-day TTL and
+    # leaves the optional unbounded PromQL TimeSeries schema disabled.
+    createSchema: false
   hyperdx:
     enabled: true
     image:
@@ -1721,8 +1745,10 @@ clickstack:
     image:
       registry: docker.io
       repository: rulebricks/clickstack-otel-collector
-      tag: "2.33.0-r1"
-    memoryLimitMiB: 800
+      tag: "2.33.0-r5"
+    # The limiter's hard cap stays below the pod limit so burst queues and
+    # collector RSS cannot OOM the gateway before backpressure engages.
+    memoryLimitMiB: 1600
     # Telemetry noise controls (dropped at the gateway before storage): keep
     # HTTP trace spans for the /api/v1 API, drop health-probe and
     # metrics-scrape spans and log lines. "" disables a rule.
@@ -1737,10 +1763,10 @@ clickstack:
       resources:
         requests:
           cpu: 250m
-          memory: 512Mi
+          memory: 1Gi
         limits:
           cpu: 2000m
-          memory: 1Gi
+          memory: 3Gi
     agent:
       enabled: true
       securityContext:

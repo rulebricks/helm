@@ -3,6 +3,17 @@
 {{- $cv := merge (dict "global" .Values.global) (deepCopy .Values.clickhouse) -}}
 {{- $cctx := dict "Values" $cv "Release" .Release "Chart" .Chart "Template" .Template "Capabilities" .Capabilities "Files" .Files -}}
 {{- $user := $ch.auth.username | default "rulebricks" -}}
+{{- $clickstack := .Values.clickstack | default dict -}}
+{{- $clickstackClickhouse := $clickstack.clickhouse | default dict -}}
+{{- $otelDb := $clickstackClickhouse.database | default "otel" -}}
+{{- $adminDb := include "rulebricks.clickhouse.adminDatabase" . -}}
+{{- $generation := include "rulebricks.clickhouse.compatibilityGeneration" . -}}
+{{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $otelDb) -}}
+{{- fail "clickstack.clickhouse.database must be a valid unquoted ClickHouse identifier" -}}
+{{- end -}}
+{{- if and .Values.global.clickstack.enabled (or (eq $otelDb "system") (eq $otelDb "rulebricks") (eq $otelDb $adminDb)) -}}
+{{- fail (printf "clickstack.clickhouse.database must not be system, rulebricks, or %s" $adminDb) -}}
+{{- end -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -21,7 +32,10 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "rulebricks.clickhouse.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/name: clickhouse-init
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: bootstrap
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
     spec:
       restartPolicy: OnFailure
       imagePullSecrets:
@@ -30,8 +44,103 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
+      {{- if $ch.persistence.enabled }}
+      initContainers:
+        - name: verify-object-storage
+          image: {{ include "rulebricks.image" (dict "root" $ "image" .Values.global.images.busybox "name" "busybox") | quote }}
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: CLICKHOUSE_HOST
+              value: {{ include "rulebricks.clickhouse.fullname" . | quote }}
+            - name: CLICKHOUSE_USER
+              value: {{ $user | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rulebricks.clickhouse.credentialSecret" . }}
+                  key: {{ $ch.auth.existingSecretKey | default "admin-password" }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              set -f
+              q() {
+                query="$1"
+                settings="${2:-}"
+                headers="/tmp/clickhouse-headers.$$"
+                response=""
+                if ! response=$(wget -S -O - \
+                  --header "X-ClickHouse-User: ${CLICKHOUSE_USER}" \
+                  --header "X-ClickHouse-Key: ${CLICKHOUSE_PASSWORD}" \
+                  --post-data "${query}" \
+                  "http://${CLICKHOUSE_HOST}:8123/${settings}" \
+                  2>"${headers}"); then
+                  echo "ClickHouse cutover query failed: ${query}" >&2
+                  cat "${headers}" >&2
+                  [ -z "${response}" ] || printf '%s\n' "${response}" >&2
+                  rm -f "${headers}"
+                  return 1
+                fi
+                rm -f "${headers}"
+                printf '%s' "${response}"
+              }
+
+              # A table with no explicit policy must inherit the global remote
+              # default, and the remote disk must support a complete write/read.
+              q "CREATE DATABASE IF NOT EXISTS rulebricks"
+              q "DROP TABLE IF EXISTS rulebricks.__object_storage_probe SYNC" "?max_table_size_to_drop=0&max_partition_size_to_drop=0"
+              q "CREATE TABLE rulebricks.__object_storage_probe (id UInt8) ENGINE = MergeTree ORDER BY id"
+              probe_policy=$(q "SELECT storage_policy FROM system.tables WHERE database = 'rulebricks' AND name = '__object_storage_probe' FORMAT TSVRaw")
+              if [ "${probe_policy}" != "object_storage" ]; then
+                echo "ClickHouse global MergeTree policy is '${probe_policy}', expected object_storage" >&2
+                exit 1
+              fi
+              q "INSERT INTO rulebricks.__object_storage_probe VALUES (1)"
+              probe_rows=$(q "SELECT count() FROM rulebricks.__object_storage_probe FORMAT TSVRaw")
+              if [ "${probe_rows}" != "1" ]; then
+                echo "ClickHouse object-storage probe returned '${probe_rows}', expected 1" >&2
+                exit 1
+              fi
+              q "DROP TABLE rulebricks.__object_storage_probe SYNC" "?max_table_size_to_drop=0&max_partition_size_to_drop=0"
+        {{- if .Values.global.clickstack.enabled }}
+        - name: seed-clickstack-schema
+          image: {{ include "rulebricks.image" (dict "root" $ "image" .Values.clickstack.collector.image "name" "clickstack-otel-collector") | quote }}
+          imagePullPolicy: {{ .Values.clickstack.collector.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: CLICKHOUSE_ENDPOINT
+              value: {{ printf "tcp://%s:9000?dial_timeout=10s&compress=lz4" (include "rulebricks.clickhouse.fullname" .) | quote }}
+            - name: CLICKHOUSE_USER
+              value: {{ $user | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rulebricks.clickhouse.credentialSecret" . }}
+                  key: {{ $ch.auth.existingSecretKey | default "admin-password" }}
+            - name: HYPERDX_OTEL_EXPORTER_CLICKHOUSE_DATABASE
+              value: {{ $otelDb | quote }}
+            - name: HYPERDX_OTEL_EXPORTER_TABLES_TTL
+              value: "720h"
+            - name: ENABLE_PROMQL
+              # The PromQL TimeSeries schema has no upstream TTL and is not
+              # consumed by the bundled dashboards or collector pipelines.
+              value: "false"
+          command: ["/usr/local/bin/migrate"]
+          args: ["/etc/otel/schema/seed"]
+        {{- end }}
+      {{- end }}
       containers:
-        - name: init
+        - name: seed-and-audit
           image: {{ include "rulebricks.image" (dict "root" $ "image" $ch.image "name" "clickhouse-server") | quote }}
           imagePullPolicy: {{ $ch.image.pullPolicy | default "IfNotPresent" }}
           securityContext:
@@ -41,24 +150,76 @@ spec:
             capabilities:
               drop: ["ALL"]
           env:
+            - name: CLICKHOUSE_HOST
+              value: {{ include "rulebricks.clickhouse.fullname" . | quote }}
+            - name: CLICKHOUSE_USER
+              value: {{ $user | quote }}
             - name: CLICKHOUSE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "rulebricks.clickhouse.credentialSecret" . }}
                   key: {{ $ch.auth.existingSecretKey | default "admin-password" }}
-          # clickhouse-client is exec'd directly (no shell). Kubernetes substitutes
-          # $(CLICKHOUSE_PASSWORD) from the container env, so the password never
-          # appears in the rendered manifest.
-          command: ["clickhouse-client"]
+            - name: BOOTSTRAP_SQL
+              value: {{ include "rulebricks.clickhouse.decisionLogsViewSql" $cctx | quote }}
+            - name: PERSISTENT_MODE
+              value: {{ $ch.persistence.enabled | quote }}
+            - name: ADMIN_DATABASE
+              value: {{ $adminDb | quote }}
+            - name: COMPATIBILITY_GENERATION
+              value: {{ $generation | quote }}
+          command: ["/bin/sh", "-ec"]
           args:
-            - "--host"
-            - {{ include "rulebricks.clickhouse.fullname" . | quote }}
-            - "--port"
-            - "9000"
-            - "--user"
-            - {{ $user | quote }}
-            - "--password"
-            - "$(CLICKHOUSE_PASSWORD)"
-            - "--multiquery"
-            - {{ include "rulebricks.clickhouse.decisionLogsViewSql" $cctx | quote }}
+            - |
+              clickhouse-client \
+                --host "${CLICKHOUSE_HOST}" \
+                --port 9000 \
+                --user "${CLICKHOUSE_USER}" \
+                --password "${CLICKHOUSE_PASSWORD}" \
+                --multiquery \
+                --query "${BOOTSTRAP_SQL}"
+
+              [ "${PERSISTENT_MODE}" = "true" ] || exit 0
+
+              # Every MergeTree, including TimeSeries inner tables, must inherit
+              # or explicitly select the remote policy.
+              violations="$(
+                clickhouse-client \
+                  --host "${CLICKHOUSE_HOST}" \
+                  --port 9000 \
+                  --user "${CLICKHOUSE_USER}" \
+                  --password "${CLICKHOUSE_PASSWORD}" \
+                  --query "
+                    SELECT database, name, engine, storage_policy
+                    FROM system.tables
+                    WHERE database != 'system'
+                      AND engine LIKE '%MergeTree%'
+                      AND storage_policy != 'object_storage'
+                    ORDER BY database, name
+                    FORMAT TSVRaw
+                  "
+              )"
+              if [ -n "${violations}" ]; then
+                echo "ClickHouse post-seed audit failed; non-system MergeTree tables are not remote-backed:" >&2
+                printf '%s\n' "${violations}" >&2
+                exit 1
+              fi
+
+              clickhouse-client \
+                --host "${CLICKHOUSE_HOST}" \
+                --port 9000 \
+                --user "${CLICKHOUSE_USER}" \
+                --password "${CLICKHOUSE_PASSWORD}" \
+                --multiquery \
+                --query "
+                  CREATE DATABASE IF NOT EXISTS \`${ADMIN_DATABASE}\`;
+                  DROP TABLE IF EXISTS \`${ADMIN_DATABASE}\`.clickhouse_compatibility SYNC;
+                  CREATE TABLE \`${ADMIN_DATABASE}\`.clickhouse_compatibility
+                  (
+                    generation String,
+                    applied_at DateTime DEFAULT now()
+                  )
+                  ENGINE = TinyLog;
+                  INSERT INTO \`${ADMIN_DATABASE}\`.clickhouse_compatibility (generation)
+                  VALUES ('${COMPATIBILITY_GENERATION}');
+                "
 {{- end }}

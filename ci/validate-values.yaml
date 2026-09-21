@@ -5,6 +5,14 @@
 global:
   domain: rulebricks.example.com
   email: ops@example.com
+  storage:
+    provider: s3
+    bucket: rulebricks-ci-storage
+    region: us-east-1
+    paths:
+      decisionLogs: decision-logs
+      clickhouse: clickhouse-native
+      dbBackups: db-backups
   # Required by the Inline Secrets Validation schema gate whenever
   # global.secrets.secretRef is empty. CI-only fakes.
   smtp:

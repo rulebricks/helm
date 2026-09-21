@@ -58,10 +58,10 @@ spec:
         {{- end }}
     spec:
       {{- $limits := .Values.hps.limits | default dict }}
-      {{- /* HPS drains in-flight Kafka RPCs on SIGTERM (KAFKA_SHUTDOWN_DRAIN_MS
-           below); the pod grace period must outlive that drain or scale-in
-           kills still-viable requests mid-flight. */}}
-      terminationGracePeriodSeconds: {{ $limits.terminationGracePeriodSeconds | default 35 | int64 }}
+      {{- /* HPS first drains accepted HTTP requests while Kafka remains live,
+           then disconnects its Kafka clients. The pod grace period must exceed
+           preStop + RPC timeout + final producer drain. */}}
+      terminationGracePeriodSeconds: {{ $limits.terminationGracePeriodSeconds | default 75 | int64 }}
       imagePullSecrets:
         - name: {{ include "rulebricks-chart.registrySecretName" . }}
       serviceAccountName: {{ include "rulebricks-chart.hps.serviceAccountName" . }}
@@ -266,7 +266,7 @@ spec:
             - name: LOG_RETRY_BUFFER_MAX_BYTES
               value: {{ $limits.logRetryBufferMaxBytes | default 134217728 | int64 | quote }}
             - name: KAFKA_SHUTDOWN_DRAIN_MS
-              value: {{ $limits.shutdownDrainMs | default 25000 | int64 | quote }}
+              value: {{ $limits.shutdownDrainMs | default 65000 | int64 | quote }}
             {{- with $limits.nodeHeapMb }}
             {{- /* Overrides the image's NODE_OPTIONS default (1024 MB); size
                  to ~85% of the container memory limit. */}}

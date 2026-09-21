@@ -100,6 +100,23 @@ spec:
         name: {{ include "rulebricks-chart.kafka.triggerAuthName" . }}
       {{- end }}
     {{- end }}
+    {{- $inFlight := .Values.hps.keda.inFlightPrometheus | default dict }}
+    {{- if ($inFlight.enabled | default false) }}
+    # Keep one HPS replica per accepted execution request. CPU and Kafka lag
+    # are both near zero while a large request waits on workers, so without
+    # this signal the HPA can incorrectly scale down a busy coordinator.
+    - type: prometheus
+      metricType: Value
+      metadata:
+        serverAddress: {{ $inFlight.serverAddress | default (printf "http://%s-kube-prom-prometheus.%s.svc.cluster.local:9090" .Release.Name .Release.Namespace) | quote }}
+        metricName: hps_http_requests_in_flight
+        {{- /* HPA Value targets scale proportionally to the current replica
+             count. Clamp to a 0/1 hold signal: 1 preserves the current count
+             while any execution is active; CPU/Kafka can still scale up. */}}
+        query: {{ printf "clamp_max(sum(rulebricks_hps_http_requests_in_flight{namespace=%q}) or vector(0), 1)" .Release.Namespace | quote }}
+        threshold: {{ $inFlight.threshold | default "1" | quote }}
+        ignoreNullValues: "true"
+    {{- end }}
     # Fallback: CPU (event-loop pressure shows up as CPU on the hps container);
     # the sole trigger under GCP-flavored token auth.
     {{- /* metricType (not metadata.type) is the KEDA >= 2.7 form; the legacy

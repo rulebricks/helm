@@ -35,3 +35,11 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- printf "%s-clickhouse-credentials" .Release.Name -}}
 {{- end -}}
 {{- end -}}
+
+{{- define "rulebricks.clickhouse.compatibilityGeneration" -}}
+object-storage-v1
+{{- end -}}
+
+{{- define "rulebricks.clickhouse.adminDatabase" -}}
+rulebricks_admin
+{{- end -}}
