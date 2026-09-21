@@ -349,7 +349,7 @@ auth:
     registry: docker.io
     repository: rulebricks/supabase-gotrue
     pullPolicy: IfNotPresent
-    tag: "v2.194.0-r1"
+    tag: "v2.194.0-r2"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""

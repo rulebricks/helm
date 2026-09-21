@@ -58,7 +58,8 @@ main() {
   target="$(target_ref "${name}" "${tag}")"
 
   echo "==> mirror ${name}: ${source_ref} -> ${target}"
-  docker buildx imagetools create -t "${target}" "${source_ref}"
+  retry_registry "mirror ${source_ref} to ${target}" \
+    docker buildx imagetools create -t "${target}" "${source_ref}"
 
   local digest
   digest="$(resolve_digest "${target}")"

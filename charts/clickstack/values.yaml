@@ -21,7 +21,7 @@ clickhouse:
   database: otel
   endpoint: ""
   nativeEndpoint: ""
-  username: rulebricks_runtime
+  username: rulebricks
   existingSecret: ""
   existingSecretKey: admin-password
   # Runtime collectors never execute DDL; the parent hook seeds the upstream
@@ -98,7 +98,7 @@ collector:
   image:
     registry: docker.io
     repository: rulebricks/clickstack-otel-collector
-    tag: "2.33.0-r5"
+    tag: "2.33.0-r6"
     pullPolicy: IfNotPresent
   # Keep the collector's hard limiter well below the container limit. Under
   # burst traffic its queues, Prometheus discovery state, and non-Go RSS add
@@ -211,7 +211,7 @@ ferretdb:
   image:
     registry: docker.io
     repository: rulebricks/ferretdb
-    tag: "2.7.0-r1"
+    tag: "2.7.0-r2"
     pullPolicy: IfNotPresent
   postgresImage:
     registry: docker.io

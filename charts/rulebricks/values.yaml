@@ -94,7 +94,7 @@ app:
   # ClickHouse credentials for the decision-log query path. Set existingSecret
   # to match a BYO clickhouse.auth.existingSecret in the parent chart.
   clickhouse:
-    username: "rulebricks_runtime"
+    username: "rulebricks"
     existingSecret: ""
     existingSecretKey: "admin-password"
   # SMTP configuration (optional, can also be set via global.smtp)

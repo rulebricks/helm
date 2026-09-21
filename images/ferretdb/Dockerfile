@@ -5,7 +5,7 @@
 # args by scripts/images/build.sh. Bumps: images/README.md.
 
 ARG BASE_IMAGE
-ARG BUILDER_IMAGE=docker.io/library/golang:1.25
+ARG BUILDER_IMAGE=docker.io/library/golang:1.26
 
 FROM ${BUILDER_IMAGE} AS builder
 
@@ -23,10 +23,11 @@ RUN printf 'v%s' "${UPSTREAM_VERSION#v}" > build/version/version.txt && \
 
 # modelcontextprotocol/go-sdk is NOT bumped: fixes are 1.x-only and break the
 # 0.2.0 API; the MCP server is opt-in and never enabled by the chart (VEX'd).
-ENV CGO_ENABLED=0
-RUN go get github.com/jackc/pgx/v5@latest golang.org/x/crypto@latest golang.org/x/net@latest google.golang.org/grpc@latest go.opentelemetry.io/otel@latest go.opentelemetry.io/otel/sdk@latest go.opentelemetry.io/otel/trace@latest go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp@latest && \
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local
+RUN go get github.com/jackc/pgx/v5@v5.11.0 golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.59.0 google.golang.org/grpc@v1.84.0 go.opentelemetry.io/otel@v1.46.0 go.opentelemetry.io/otel/sdk@v1.46.0 go.opentelemetry.io/otel/trace@v1.46.0 go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp@v1.46.0 && \
     go mod tidy && \
-    go build -trimpath -o /out/ferretdb ./cmd/ferretdb
+    go mod verify && \
+    go build -mod=readonly -trimpath -o /out/ferretdb ./cmd/ferretdb
 
 FROM ${BASE_IMAGE}
 

@@ -57,6 +57,12 @@ releases the weekly cron rebuild keeps pulling new OS fixes into the same `-rN` 
   SHA because GitHub release tags are mutable and source tarballs are fetched by ref; the
   entry's `tag` names the release version that SHA corresponds to. Patch layers have no
   `ref` — their upstream pin is the `base` image tag itself.
+- **Go dependency refreshes are explicit.** Go source rebuilds use exact module
+  versions in their Dockerfiles, verify the resolved module graph, and compile with
+  `-mod=readonly`; never use `@latest` in an image build. Review dependency updates,
+  test both target architectures, and bump the image's `-rN` revision. The weekly
+  rebuild refreshes mutable base-image/OS fixes without silently changing the Go
+  dependency graph.
 - Tags are always `<upstream-version>-rN`.
 - The manifest `base` is the upstream provenance the release-manifest report tracks for
   "newer available" checks.

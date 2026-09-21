@@ -42,6 +42,15 @@ DIGEST_RESOLVE_ATTEMPTS="${DIGEST_RESOLVE_ATTEMPTS:-6}"
 DIGEST_RETRY_INITIAL_DELAY_SECONDS="${DIGEST_RETRY_INITIAL_DELAY_SECONDS:-5}"
 DIGEST_RETRY_MAX_DELAY_SECONDS="${DIGEST_RETRY_MAX_DELAY_SECONDS:-30}"
 
+# Registry authentication and manifest-copy operations are short and
+# idempotent, but the public registries occasionally return transport timeouts,
+# 429s, or 5xx responses. Retry only those transient failures; permanent
+# credentials/authorization errors and build failures must remain fail-fast.
+REGISTRY_RETRY_ATTEMPTS="${REGISTRY_RETRY_ATTEMPTS:-4}"
+REGISTRY_RETRY_INITIAL_DELAY_SECONDS="${REGISTRY_RETRY_INITIAL_DELAY_SECONDS:-3}"
+REGISTRY_RETRY_MAX_DELAY_SECONDS="${REGISTRY_RETRY_MAX_DELAY_SECONDS:-30}"
+REGISTRY_RETRY_JITTER_SECONDS="${REGISTRY_RETRY_JITTER_SECONDS:-3}"
+
 # die <message...> — print to stderr and exit non-zero.
 die() {
   echo "error: $*" >&2
@@ -89,6 +98,90 @@ target_ref() {
   repo="$(manifest_field "${name}" target)"
   [ -n "${repo}" ] || repo="${TARGET_NAMESPACE}/${name}"
   printf '%s/%s:%s' "${TARGET_REGISTRY}" "${repo}" "${tag}"
+}
+
+# is_transient_registry_error <output> — recognize errors that are safe to
+# retry. Explicit authentication/authorization failures always win, even if a
+# registry happens to include another retry-looking phrase in its response.
+is_transient_registry_error() {
+  local output="$1"
+
+  if printf '%s\n' "${output}" | grep -Eiq \
+    '(^|[^[:digit:]])(401|403)([^[:digit:]]|$)|unauthorized|authentication required|requested access to the resource is denied|denied:'; then
+    return 1
+  fi
+
+  printf '%s\n' "${output}" | grep -Eiq \
+    'context deadline exceeded|client\.timeout|i/o timeout|tls handshake timeout|connection (reset|refused|timed out)|net/http: request canceled|temporary failure|no such host|server misbehaving|unexpected eof|(^|[^[:alpha:]])eof([^[:alpha:]]|$)|too many requests|toomanyrequests|unexpected status.*(408|429|5[0-9]{2})|status( code)?[^[:digit:]]*(408|429|5[0-9]{2})|http[^[:digit:]]*(408|429|5[0-9]{2})|service unavailable|bad gateway|gateway timeout|internal server error'
+}
+
+# retry_registry <description> <command...> — run an idempotent registry
+# operation with bounded exponential backoff and jitter. Command output is
+# emitted after every attempt so the final CI log retains the original error.
+retry_registry() {
+  local description="$1"
+  shift
+  [ "$#" -gt 0 ] || die "retry_registry requires a command"
+
+  case "${REGISTRY_RETRY_ATTEMPTS}" in
+    ''|*[!0-9]*|0) die "REGISTRY_RETRY_ATTEMPTS must be a positive integer" ;;
+  esac
+  case "${REGISTRY_RETRY_INITIAL_DELAY_SECONDS}" in
+    ''|*[!0-9]*) die "REGISTRY_RETRY_INITIAL_DELAY_SECONDS must be a non-negative integer" ;;
+  esac
+  case "${REGISTRY_RETRY_MAX_DELAY_SECONDS}" in
+    ''|*[!0-9]*) die "REGISTRY_RETRY_MAX_DELAY_SECONDS must be a non-negative integer" ;;
+  esac
+  case "${REGISTRY_RETRY_JITTER_SECONDS}" in
+    ''|*[!0-9]*) die "REGISTRY_RETRY_JITTER_SECONDS must be a non-negative integer" ;;
+  esac
+
+  local attempt=1 delay="${REGISTRY_RETRY_INITIAL_DELAY_SECONDS}"
+  local output status jitter wait
+  if [ "${delay}" -gt "${REGISTRY_RETRY_MAX_DELAY_SECONDS}" ]; then
+    delay="${REGISTRY_RETRY_MAX_DELAY_SECONDS}"
+  fi
+
+  while [ "${attempt}" -le "${REGISTRY_RETRY_ATTEMPTS}" ]; do
+    if output="$("$@" 2>&1)"; then
+      [ -z "${output}" ] || printf '%s\n' "${output}"
+      return 0
+    else
+      status=$?
+    fi
+    [ -z "${output}" ] || printf '%s\n' "${output}" >&2
+
+    if [ "${attempt}" -eq "${REGISTRY_RETRY_ATTEMPTS}" ] \
+      || ! is_transient_registry_error "${output}"; then
+      return "${status}"
+    fi
+
+    jitter=0
+    if [ "${REGISTRY_RETRY_JITTER_SECONDS}" -gt 0 ]; then
+      jitter=$((RANDOM % (REGISTRY_RETRY_JITTER_SECONDS + 1)))
+    fi
+    wait=$((delay + jitter))
+    echo "warning: ${description} failed transiently (attempt ${attempt}/${REGISTRY_RETRY_ATTEMPTS}); retrying in ${wait}s" >&2
+    sleep "${wait}"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+    if [ "${delay}" -gt "${REGISTRY_RETRY_MAX_DELAY_SECONDS}" ]; then
+      delay="${REGISTRY_RETRY_MAX_DELAY_SECONDS}"
+    fi
+  done
+}
+
+_docker_login() {
+  local registry="$1" username="$2" password="$3"
+  printf '%s' "${password}" | docker login "${registry}" \
+    --username "${username}" --password-stdin
+}
+
+# docker_login_with_retry <registry> <username> <password>
+docker_login_with_retry() {
+  local registry="$1" username="$2" password="$3"
+  retry_registry "login to ${registry}" \
+    _docker_login "${registry}" "${username}" "${password}"
 }
 
 # resolve_digest <ref> — print the multi-arch manifest-list digest of a pushed ref.

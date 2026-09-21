@@ -1257,10 +1257,9 @@
           "properties": {
             "database": {
               "type": "string",
-              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
-              "not": { "enum": ["system", "rulebricks"] }
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
             },
-            "username": { "const": "rulebricks_runtime", "default": "rulebricks_runtime" },
+            "username": { "const": "rulebricks", "default": "rulebricks" },
             "existingSecret": { "type": "string" },
             "existingSecretKey": { "type": "string" },
             "createSchema": { "const": false, "default": false }

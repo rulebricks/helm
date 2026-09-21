@@ -26,6 +26,7 @@ FROM --platform=$BUILDPLATFORM ${BUILDER_IMAGE} AS collector-builder
 ARG TARGETARCH
 ARG OTEL_COLLECTOR_VERSION
 ARG OTEL_COLLECTOR_CORE_VERSION
+ENV GOTOOLCHAIN=local
 
 RUN go install go.opentelemetry.io/collector/cmd/builder@v${OTEL_COLLECTOR_VERSION}
 
@@ -34,51 +35,58 @@ COPY --from=src /src/packages/otel-collector/builder-config.yaml .
 RUN sed -i "s/__OTEL_COLLECTOR_VERSION__/${OTEL_COLLECTOR_VERSION}/g; s/__OTEL_COLLECTOR_CORE_VERSION__/${OTEL_COLLECTOR_CORE_VERSION}/g; s|output_path:.*|output_path: /build/output|" builder-config.yaml && \
     CGO_ENABLED=0 builder --config=builder-config.yaml --skip-compilation && \
     cd output && \
-    go get golang.org/x/crypto@latest golang.org/x/net@latest google.golang.org/grpc@latest && \
+    go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.59.0 google.golang.org/grpc@v1.84.0 && \
     go mod tidy && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath -tags grpcnotrace -ldflags="-s -w" -o /out/otelcol-hyperdx .
+    go mod verify && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -mod=readonly -trimpath -tags grpcnotrace -ldflags="-s -w" -o /out/otelcol-hyperdx .
 
 # OpAMP supervisor from the matching contrib release.
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMAGE} AS supervisor-builder
 ARG TARGETARCH
 ARG OTEL_COLLECTOR_VERSION
+ENV GOTOOLCHAIN=local
 
 WORKDIR /contrib
 ADD https://github.com/open-telemetry/opentelemetry-collector-contrib/archive/refs/tags/v${OTEL_COLLECTOR_VERSION}.tar.gz /tmp/contrib.tar.gz
 RUN tar -xzf /tmp/contrib.tar.gz --strip-components=1 && rm /tmp/contrib.tar.gz && \
     cd cmd/opampsupervisor && \
-    go get golang.org/x/crypto@latest golang.org/x/net@latest google.golang.org/grpc@latest && \
+    go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.59.0 google.golang.org/grpc@v1.84.0 && \
     go mod tidy && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/opampsupervisor .
+    go mod verify && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/opampsupervisor .
 
 # gomplate + goose CLI tools. gomplate v4 pins aged deps, so it is built from
-# its release source with flagged modules re-resolved; goose @latest is current.
+# its release source with flagged modules re-resolved.
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMAGE} AS tools-builder
 ARG TARGETARCH
 ARG GOMPLATE_VERSION
+ENV GOTOOLCHAIN=local
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go install -trimpath -ldflags="-s -w" \
-      github.com/pressly/goose/v3/cmd/goose@latest && \
+      github.com/pressly/goose/v3/cmd/goose@v3.28.0 && \
     mkdir -p /out && \
     find /go/bin -type f -name goose -exec cp {} /out/ \;
 WORKDIR /gomplate
 ADD https://github.com/hairyhenderson/gomplate/archive/refs/tags/${GOMPLATE_VERSION}.tar.gz /tmp/gomplate.tar.gz
 RUN tar -xzf /tmp/gomplate.tar.gz --strip-components=1 && rm /tmp/gomplate.tar.gz && \
-    go get golang.org/x/crypto@latest golang.org/x/net@latest google.golang.org/grpc@latest \
-           github.com/go-jose/go-jose/v4@latest github.com/go-git/go-git/v5@latest \
-           go.opentelemetry.io/otel@latest go.opentelemetry.io/otel/sdk@latest && \
+    go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.59.0 google.golang.org/grpc@v1.84.0 \
+           github.com/go-jose/go-jose/v4@v4.1.5 github.com/go-git/go-git/v5@v5.19.2 \
+           go.opentelemetry.io/otel@v1.46.0 go.opentelemetry.io/otel/sdk@v1.46.0 && \
     go mod tidy && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath \
+    go mod verify && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -mod=readonly -trimpath \
       -ldflags="-s -w -X github.com/hairyhenderson/gomplate/v4/version.Version=${GOMPLATE_VERSION#v}" \
       -o /out/gomplate ./cmd/gomplate
 
 # HyperDX's Go migrate tool.
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMAGE} AS migrate-builder
 ARG TARGETARCH
+ENV GOTOOLCHAIN=local
 WORKDIR /build
 COPY --from=src /src/packages/otel-collector/ ./
-RUN go get github.com/pressly/goose/v3@latest github.com/ClickHouse/clickhouse-go/v2@latest && \
+RUN go get github.com/pressly/goose/v3@v3.28.0 github.com/ClickHouse/clickhouse-go/v2@v2.48.0 && \
     go mod tidy && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
+    go mod verify && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
 
 # Runtime, mirrors upstream's Dockerfile prod stage.
 FROM ${BASE_IMAGE}

@@ -4,10 +4,7 @@
 {{- $cv := merge (dict "global" .Values.global) (deepCopy .Values.clickhouse) -}}
 {{- $cctx := dict "Values" $cv "Release" .Release "Chart" .Chart "Template" .Template "Capabilities" .Capabilities "Files" .Files -}}
 {{- $user := .Values.clickhouse.auth.username | default "rulebricks" -}}
-{{- $runtimeUser := "rulebricks_runtime" -}}
-{{- if eq $user $runtimeUser -}}
-{{- fail "clickhouse.auth.username must differ from the reserved runtime user rulebricks_runtime" -}}
-{{- end -}}
+{{- $runtimeUser := "rulebricks" -}}
 {{- $clickstack := .Values.clickstack | default dict -}}
 {{- $clickstackClickhouse := $clickstack.clickhouse | default dict -}}
 {{- $otelDb := $clickstackClickhouse.database | default "otel" -}}

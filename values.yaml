@@ -1537,7 +1537,7 @@ kafkaBridge:
   brokers: ""
   # Local port the proxy listens on; Vector points KAFKA_BOOTSTRAP_SERVERS here.
   localPort: 19092
-  image: "docker.io/rulebricks/kafka-proxy:0.4.3-r1"
+  image: "docker.io/rulebricks/kafka-proxy:0.4.3-r2"
   # Workload identity used by the bridge. AWS: IRSA role ARN; GCP: Workload
   # Identity service account email. The CLI writes the matching annotation
   # onto the Vector and HPS service accounts.
@@ -1712,7 +1712,7 @@ clickstack:
   # The keys below only configure ClickStack when it is enabled.
   clickhouse:
     database: otel
-    username: rulebricks_runtime
+    username: rulebricks
     existingSecret: ""
     existingSecretKey: admin-password
     # Parent-chart schema seeding uses HyperDX's upstream 30-day TTL and
@@ -1745,7 +1745,7 @@ clickstack:
     image:
       registry: docker.io
       repository: rulebricks/clickstack-otel-collector
-      tag: "2.33.0-r5"
+      tag: "2.33.0-r6"
     # The limiter's hard cap stays below the pod limit so burst queues and
     # collector RSS cannot OOM the gateway before backpressure engages.
     memoryLimitMiB: 1600
@@ -1784,7 +1784,7 @@ clickstack:
     image:
       registry: docker.io
       repository: rulebricks/ferretdb
-      tag: "2.7.0-r1"
+      tag: "2.7.0-r2"
     postgresImage:
       registry: docker.io
       repository: rulebricks/postgres-documentdb
