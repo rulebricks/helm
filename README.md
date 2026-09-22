@@ -300,14 +300,6 @@ databases named `rulebricks` and `otel`, plus legacy system-log tables, before
 the new server starts. Supabase, backups, and the raw decision-log archive are
 not touched.
 
-Runtime services use the config-managed `rulebricks_runtime` user, which has
-only SELECT, INSERT, SHOW, source-read, and named-collection access. ClickHouse
-additionally requires `CREATE TEMPORARY TABLE` to execute the app's bounded
-object-store table functions; that grant cannot create persistent MergeTrees.
-The runtime identity cannot execute persistent DDL. Schema migrations run only
-through the admin-backed Helm hook. The hook rejects any non-system MergeTree
-that is not remote-backed; system log tables stay disabled.
-
 An existing release needs one normal, non-atomic upgrade:
 
 ```bash

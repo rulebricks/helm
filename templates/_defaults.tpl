@@ -187,13 +187,6 @@ temporary spill, so neither can exhaust the catalog filesystem.
              not the path columns, so hive pruning was never exercised. */}}
       <use_hive_partitioning>0</use_hive_partitioning>
     </default>
-    <runtime>
-      <profile>default</profile>
-      <!-- Defense in depth beyond RBAC: runtime queries may use ClickHouse's
-           internal temporary tables for object-store table functions, but
-           cannot execute user-authored DDL. -->
-      <allow_ddl>0</allow_ddl>
-    </runtime>
   </profiles>
 </clickhouse>
 {{- end -}}

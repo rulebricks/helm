@@ -703,9 +703,9 @@
                 "cpuThreshold": { "type": ["integer", "string"] },
                 "inFlightPrometheus": {
                   "type": "object",
-                  "description": "Prometheus-backed in-flight execution trigger that prevents HPS scale-down below the number of accepted requests still running.",
+                  "description": "Optional Prometheus-backed hold signal for in-flight executions. Disabled by default so Prometheus availability cannot block an upgrade.",
                   "properties": {
-                    "enabled": { "type": "boolean", "default": true },
+                    "enabled": { "type": "boolean", "default": false },
                     "serverAddress": { "type": "string" },
                     "threshold": { "type": ["integer", "string"], "default": "1" }
                   }
@@ -843,7 +843,7 @@
                 },
                 "topologySpreadConstraints": {
                   "type": "array",
-                  "description": "Optional custom topology spread constraints for HPS worker pods. Unset by default so workers can prefer non-infrastructure nodes.",
+                  "description": "Optional custom topology spread constraints for HPS worker pods. Without an override, the chart softly prefers even placement across eligible nodes.",
                   "items": { "type": "object" }
                 },
                 "serviceAccount": {

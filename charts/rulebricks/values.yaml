@@ -170,8 +170,8 @@ hps:
     lagThreshold: 50
     # CPU percentage of request that triggers scale-up.
     cpuThreshold: 45
-    # Prevent scale-down below the number of accepted execution requests still
-    # in flight. Requires the parent chart's Prometheus installation.
+    # Optional hold signal that prevents scale-down while executions are in
+    # flight. Requires a continuously reachable Prometheus endpoint.
     inFlightPrometheus:
       enabled: false
       serverAddress: ""
@@ -272,8 +272,8 @@ hps:
     replicas: 3 # Starting replicas
     topics: "solution"
     # Node scheduling configuration.
-    # Optional custom topology spread constraints. By default workers are
-    # balanced strictly across eligible nodes by hostname.
+    # Optional custom topology spread constraints. By default workers prefer
+    # balanced placement across eligible nodes without blocking scheduling.
     nodeSelector: {}
     tolerations: []
     affinity: {}

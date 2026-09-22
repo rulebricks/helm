@@ -478,11 +478,11 @@ rulebricks:
       lagThreshold: 50
       # CPU percentage of request that triggers scale-up.
       cpuThreshold: 45
-      # Sum the per-pod in-flight execution gauge through Prometheus. This
-      # prevents HPA scale-down from selecting a pod while large requests are
-      # still waiting on worker responses.
+      # Optional Prometheus-backed hold signal for in-flight executions.
+      # Disabled by default so a transient Prometheus outage cannot make the
+      # HPS ScaledObject unhealthy and block an otherwise healthy upgrade.
       inFlightPrometheus:
-        enabled: true
+        enabled: false
         serverAddress: ""
         threshold: "1"
     # Fleet warm-up (/api/v1/scale): pre-scales the worker fleet to its
@@ -893,8 +893,6 @@ clickhouse:
   podAnnotations:
     cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
   auth:
-    # Hook-only schema administrator. Runtime workloads always connect as the
-    # config-managed rulebricks_runtime user, using the same password.
     username: rulebricks
     password: ""
     # BYO seam: point at an existing Secret to stop the chart from managing

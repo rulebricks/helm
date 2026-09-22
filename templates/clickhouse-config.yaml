@@ -4,16 +4,6 @@
 {{- $cv := merge (dict "global" .Values.global) (deepCopy .Values.clickhouse) -}}
 {{- $cctx := dict "Values" $cv "Release" .Release "Chart" .Chart "Template" .Template "Capabilities" .Capabilities "Files" .Files -}}
 {{- $user := .Values.clickhouse.auth.username | default "rulebricks" -}}
-{{- $runtimeUser := "rulebricks" -}}
-{{- $clickstack := .Values.clickstack | default dict -}}
-{{- $clickstackClickhouse := $clickstack.clickhouse | default dict -}}
-{{- $otelDb := $clickstackClickhouse.database | default "otel" -}}
-{{- if not (regexMatch "^[A-Za-z_][A-Za-z0-9_]*$" $otelDb) -}}
-{{- fail "clickstack.clickhouse.database must be a valid unquoted ClickHouse identifier" -}}
-{{- end -}}
-{{- $provider := .Values.global.storage.provider | default "s3" -}}
-{{- $namedCollection := printf "decision_logs_%s" (ternary "azure" $provider (eq $provider "azure-blob")) -}}
-{{- $sourceType := ternary "AZURE" "S3" (eq $provider "azure-blob") -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -127,33 +117,6 @@ data:
           </networks>
           <access_management>1</access_management>
         </{{ $user }}>
-        <!-- All pods that serve traffic use this non-DDL identity. The shared
-             password keeps Secret rotation atomic while privileges keep schema
-             ownership exclusively with the hook-only admin above. -->
-        <{{ $runtimeUser }}>
-          <password from_env="CLICKHOUSE_PASSWORD"/>
-          <profile>runtime</profile>
-          <quota>default</quota>
-          <networks>
-            <ip>::/0</ip>
-          </networks>
-          <access_management>0</access_management>
-          <named_collection_control>0</named_collection_control>
-          <show_named_collections>1</show_named_collections>
-          <show_named_collections_secrets>0</show_named_collections_secrets>
-          <grants>
-            <query>GRANT SELECT ON system.*</query>
-            <query>GRANT SELECT, INSERT ON rulebricks.*</query>
-            <query>GRANT SELECT, INSERT ON {{ $otelDb }}.*</query>
-            <query>GRANT SHOW DATABASES, SHOW TABLES, SHOW COLUMNS, SHOW DICTIONARIES ON *.*</query>
-            <query>GRANT NAMED COLLECTION ON {{ $namedCollection }}</query>
-            <query>GRANT SHOW NAMED COLLECTIONS ON {{ $namedCollection }}</query>
-            <query>GRANT READ ON {{ $sourceType }}</query>
-            <!-- ClickHouse implements table functions through an internal
-                 temporary table; this does not permit persistent table DDL. -->
-            <query>GRANT CREATE TEMPORARY TABLE ON *.*</query>
-          </grants>
-        </{{ $runtimeUser }}>
         <!-- Lock the built-in default user to loopback so it can't be used remotely. -->
         <default replace="replace">
           <profile>default</profile>
