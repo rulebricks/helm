@@ -178,10 +178,38 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
+Effective Filament switch: renders "true" or "". The ONLY place
+global.filament.enabled is interpreted; the umbrella chart includes it too
+(named templates are global across the chart tree), so the umbrella's
+re-rendered app Deployment and this chart's suppression of its own always
+agree. Accepts true, false or "auto": auto enables Filament unless
+global.supabase.url names a managed (Supabase Cloud) project or the app
+service account's token is disabled (app.serviceAccount.automount=false;
+Filament needs it to launch sandbox Jobs). The app values are .Values.app
+here and .Values.rulebricks.app in the umbrella. Unset means disabled so this
+chart stays usable on its own.
+*/}}
+{{- define "rulebricks-chart.filamentEnabled" -}}
+{{- $global := .Values.global | default dict -}}
+{{- $setting := dig "filament" "enabled" false $global -}}
+{{- $app := dict -}}
+{{- if hasKey .Values "rulebricks" -}}
+{{- $app = .Values.rulebricks.app | default dict -}}
+{{- else if hasKey .Values "app" -}}
+{{- $app = .Values.app | default dict -}}
+{{- end -}}
+{{- if eq (toString $setting) "auto" -}}
+{{- if not (or (dig "supabase" "url" "" $global) (eq (toString (dig "serviceAccount" "automount" true $app)) "false")) }}true{{ end -}}
+{{- else if eq (toString $setting) "true" -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
 Create the name of the app service account to use
 */}}
 {{- define "rulebricks-chart.app.serviceAccountName" -}}
-{{- if and .Values.app.serviceAccount .Values.app.serviceAccount.create }}
+{{- if or (and .Values.app.serviceAccount .Values.app.serviceAccount.create) (include "rulebricks-chart.filamentEnabled" .) }}
 {{- default (include "rulebricks-chart.app.fullname" .) .Values.app.serviceAccount.name }}
 {{- else }}
 {{- include "rulebricks-chart.serviceAccountName" . }}
@@ -710,3 +738,23 @@ local_redis
 local_redis
 {{- end }}
 {{- end }}
+
+{{/*
+A Kubernetes memory quantity in MiB, for integer Ki/Mi/Gi, K/M/G or plain
+byte values. Empty when the format is not recognized, so callers can fall
+back to defaults.
+*/}}
+{{- define "rulebricks-chart.memoryMiB" -}}
+{{- $v := . -}}
+{{- if or (kindIs "float64" $v) (kindIs "int64" $v) (kindIs "int" $v) -}}
+{{- $v = printf "%d" (int64 $v) -}}
+{{- end -}}
+{{- $v = toString ($v | default "") | trim -}}
+{{- if regexMatch "^[0-9]+Gi$" $v -}}{{ mul (trimSuffix "Gi" $v | atoi) 1024 }}
+{{- else if regexMatch "^[0-9]+Mi$" $v -}}{{ trimSuffix "Mi" $v | atoi }}
+{{- else if regexMatch "^[0-9]+Ki$" $v -}}{{ div (trimSuffix "Ki" $v | atoi) 1024 }}
+{{- else if regexMatch "^[0-9]+G$" $v -}}{{ div (mul (trimSuffix "G" $v | atoi) 1000000000) 1048576 }}
+{{- else if regexMatch "^[0-9]+M$" $v -}}{{ div (mul (trimSuffix "M" $v | atoi) 1000000) 1048576 }}
+{{- else if regexMatch "^[0-9]+$" $v -}}{{ div ($v | atoi) 1048576 }}
+{{- end -}}
+{{- end -}}

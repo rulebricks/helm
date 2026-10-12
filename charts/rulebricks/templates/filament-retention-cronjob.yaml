@@ -1,0 +1,93 @@
+{{- /* Expires Filament run artifacts (private working files) a week after their
+     last use, never while their session is running. Cloud runs the same
+     database function from a Vercel cron. */ -}}
+{{- if include "rulebricks-chart.filamentEnabled" . }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "rulebricks-chart.app.fullname" . }}-filament-retention
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: filament-retention
+spec:
+  schedule: {{ dig "filamentRetention" "schedule" "17 * * * *" (.Values.app | default dict) | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 270
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: filament-retention
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: {{ include "rulebricks-chart.registrySecretName" . }}
+          containers:
+            - name: filament-retention
+              image: {{ include "rulebricks-chart.image" (dict "root" $ "image" (merge (dict "tag" (include "rulebricks-chart.app.imageTag" .)) .Values.app.image)) | quote }}
+              imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+              resources:
+                requests: { cpu: "25m", memory: "64Mi" }
+                limits: { cpu: "250m", memory: "128Mi" }
+              {{- if .Values.global.tlsPrivateCaBundle }}
+              volumeMounts:
+                - name: private-ca
+                  mountPath: /etc/rulebricks/ca
+                  readOnly: true
+              {{- end }}
+              env:
+                {{- if .Values.global.tlsPrivateCaBundle }}
+                - name: NODE_EXTRA_CA_CERTS
+                  value: /etc/rulebricks/ca/ca.crt
+                {{- end }}
+                - name: SUPABASE_URL
+                  valueFrom:
+                    configMapKeyRef:
+                      name: {{ include "rulebricks-chart.app.configmap" . }}
+                      key: SUPABASE_URL
+                - name: SUPABASE_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "rulebricks-chart.app.secretName" . | trim }}
+                      key: {{ include "rulebricks-chart.app.secretKey" (dict "root" . "field" "supabaseServiceKey" "default" "SUPABASE_SERVICE_KEY") | trim }}
+              command: ["node", "-e"]
+              args:
+                - |
+                  (async () => {
+                    const deadline = Date.now() + 240 * 1000;
+                    const key = process.env.SUPABASE_SECRET_KEY;
+                    const url = process.env.SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/rpc/cleanup_expired_filament_run_artifacts';
+                    let expired = 0, batches = 0;
+                    for (; batches < 20 && Date.now() < deadline; batches++) {
+                      const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { apikey: key, authorization: 'Bearer ' + key, 'content-type': 'application/json' },
+                        body: JSON.stringify({ p_batch_limit: 50 }),
+                        signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+                      });
+                      // The function arrives with the post-upgrade migration;
+                      // until then there is nothing to expire.
+                      if (response.status === 404) {
+                        console.warn('Filament artifact expiry skipped: database function not installed yet');
+                        return;
+                      }
+                      if (!response.ok) throw new Error('Filament artifact expiry failed: HTTP ' + response.status);
+                      const removed = Number(await response.json()) || 0;
+                      expired += removed;
+                      if (removed === 0) break;
+                    }
+                    console.log(JSON.stringify({ expired, batches }));
+                  })().catch(error => { console.error(error.message); process.exitCode = 1; });
+          {{- if .Values.global.tlsPrivateCaBundle }}
+          volumes:
+            - name: private-ca
+              configMap:
+                name: {{ .Release.Name }}-private-ca
+          {{- end }}
+{{- end }}

@@ -52,11 +52,11 @@ app:
   # CPU baseline or startup can overrun the liveness probe window.
   resources:
     requests:
-      cpu: 500m
-      memory: 512Mi
+      cpu: "2000m"
+      memory: 4Gi
     limits:
       cpu: "2000m"
-      memory: 2Gi
+      memory: 4Gi
   # Extra environment variables to inject (list of name/value or valueFrom objects).
   # The chart sets HOSTNAME=0.0.0.0 by default so the server binds all
   # interfaces; adding your own HOSTNAME entry replaces that default.
@@ -316,6 +316,12 @@ hps:
       limits:
         cpu: "1000m"
         memory: "1Gi"
+    # Workers hold each run's flow trace in memory. With limits.memory of 2Gi
+    # or more they get a 75% heap and a 64 MiB trace budget automatically;
+    # below that, the V8 heap default and a 32 MiB budget. 
+    # Overrides:
+    # nodeHeapMb: 1536 # NODE_OPTIONS --max-old-space-size
+    # traceCaptureMaxBytes: 67108864 # PATH_TRACE_SNAPSHOT_MAX_BYTES
 
     # KEDA-based autoscaling for workers
     keda:

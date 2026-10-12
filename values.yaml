@@ -3,6 +3,52 @@
 # These important values are used across multiple components and should be set here
 # =============================================================================
 global:
+  # Filament uses the existing app and PostgreSQL database automatically.
+  # Release only after durability acceptance and draining legacy runs.
+  filament:
+    # "auto" (default), true or false. "auto" enables Filament unless
+    # global.supabase.url is set (managed Supabase Cloud, which Filament does
+    # not support) or rulebricks.app.serviceAccount.automount is false
+    # (Filament needs the app's token to launch sandbox Jobs). "auto" only
+    # sees that URL, so a bundled-Supabase install (supabase.enabled=true)
+    # that also sets global.supabase.url must set true here to keep Filament.
+    # Its Workflow setup runs as a separate post-install/post-upgrade Job
+    # after the core database migrations; if that setup fails it only logs a
+    # warning and Filament stays unavailable, so the release, core
+    # migrations and later upgrades are unaffected.
+    # The setup's filament_workflow role is server-wide: Filament supports
+    # one Rulebricks install per PostgreSQL server, and a second install's
+    # setup leaves the first one's role alone and logs the conflict.
+    enabled: auto
+    workflow:
+      # Required only when supabase.enabled=false (e.g. enabled=true with
+      # managed Supabase). Keys: host, port, database, username, password.
+      # Provision the private Workflow schemas beforehand.
+      databaseSecret: ""
+      # Resources for the Workflow setup Job (it peaks near 64Mi). Memory
+      # request equals the limit so neither a small LimitRange default nor a
+      # maxLimitRequestRatio can break it; CPU is left to the namespace.
+      bootstrapResources:
+        requests:
+          memory: 256Mi
+        limits:
+          memory: 256Mi
+    sandbox:
+      # Optional image override. Defaults to the release image below and uses
+      # the existing global registry mirror/digest settings.
+      image: ""
+      runtimeClass: ""
+      concurrency: 2
+      cpuRequest: 100m
+      memoryRequest: 256Mi
+      cpuLimit: "1"
+      memoryLimit: 2Gi
+      scratchBytes: 2147483648
+      maxFileBytes: 67108864
+      maxRunBytes: 536870912
+      executionTimeoutSeconds: 300
+      jobDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 60
   # Domain for ingress and TLS certificate generation
   domain: "<rulebricks-subdomain>.<domain-you-control>"
   # Email for TLS certificate registration (required for cert-manager)
@@ -22,6 +68,7 @@ global:
   imageDigests: {}
   # Shared leaf images (init/hook/test utilities) rendered through the image helper.
   images:
+    filamentPython: { registry: docker.io, repository: rulebricks/filament-python, tag: "1.0.0" }
     postgres17: { registry: docker.io, repository: rulebricks/postgres, tag: "17-debian13" }
     node24: { registry: docker.io, repository: rulebricks/node, tag: "24-alpine-r1" }
     rclone: { registry: docker.io, repository: rulebricks/rclone, tag: "1.75.0" }
@@ -414,11 +461,11 @@ rulebricks:
     replicas: 1
     resources:
       requests:
-        cpu: "500m"
-        memory: "512Mi"
+        cpu: "2000m"
+        memory: "4Gi"
       limits:
         cpu: "2000m"
-        memory: "2Gi"
+        memory: "4Gi"
     podDisruptionBudget:
       enabled: false
       minAvailable: ""
@@ -588,7 +635,13 @@ rulebricks:
           memory: "1Gi"
         limits:
           cpu: "1000m"
-          memory: "1Gi"
+          # Headroom above the request for runs that hold a large flow trace.
+          # At 2Gi or more, workers get a 75% heap and a 64 MiB trace budget
+          # (a near-budget trace peaks at ~1.3 GB); see nodeHeapMb below.
+          memory: "2Gi"
+      # Optional overrides; derived from limits.memory when unset.
+      # nodeHeapMb: 1536 # NODE_OPTIONS --max-old-space-size
+      # traceCaptureMaxBytes: 67108864 # PATH_TRACE_SNAPSHOT_MAX_BYTES
       # Partition count of the "solution" request topic. MUST match the topic
       # definition under kafka.topics below, and keda.maxReplicaCount must
       # stay at or below it. Partitions can never be decreased.

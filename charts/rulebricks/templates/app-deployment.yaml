@@ -1,3 +1,8 @@
+{{- $filament := include "rulebricks-chart.filamentEnabled" . -}}
+{{- if and $filament (not .FilamentRenderApp) (not (contains "/charts/" .Template.BasePath)) -}}
+{{- fail "Filament durable execution must be configured through the umbrella chart, which supplies its existing database and migration hook." -}}
+{{- end -}}
+{{- if or (not $filament) .FilamentRenderApp }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -105,6 +110,21 @@ spec:
             timeoutSeconds: {{ .Values.app.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.app.readinessProbe.failureThreshold }}
           env:
+            {{- /* The app also runs flows in-process (tests, simulator, some
+                 API paths). A run near the engine's 64 MiB trace budget peaks
+                 at ~1.3 GB, so below a 4Gi limit (or an unparseable one) keep
+                 the earlier 32 MiB budget. An app.extraEnv entry of the same
+                 name wins (duplicate env names fail server-side apply). */ -}}
+            {{- $traceBudgetOverridden := false }}
+            {{- range .Values.app.extraEnv }}
+              {{- if eq (default "" .name) "PATH_TRACE_SNAPSHOT_MAX_BYTES" }}
+                {{- $traceBudgetOverridden = true }}
+              {{- end }}
+            {{- end }}
+            {{- if and (not $traceBudgetOverridden) (lt (int (include "rulebricks-chart.memoryMiB" ((.Values.app.resources).limits).memory | default 0)) 4096) }}
+            - name: PATH_TRACE_SNAPSHOT_MAX_BYTES
+              value: "33554432"
+            {{- end }}
             {{- /* Next.js standalone (server.js) uses $HOSTNAME as its bind
                  address, and Kubernetes sets HOSTNAME to the pod name. On CNIs
                  where the pod name resolves to an address other than the pod IP
@@ -272,15 +292,31 @@ spec:
             {{- with .Values.app.extraEnvFrom }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- if .Values.global.tlsPrivateCaBundle }}
+          {{- if or .Values.global.tlsPrivateCaBundle .FilamentRuntimeSources }}
           volumeMounts:
+            {{- if .FilamentRuntimeSources }}
+            - name: filament-runtime
+              mountPath: /etc/rulebricks/filament
+              readOnly: true
+            {{- end }}
+            {{- if .Values.global.tlsPrivateCaBundle }}
             - name: private-ca
               mountPath: /etc/rulebricks/ca
               readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if .Values.global.tlsPrivateCaBundle }}
+      {{- if or .Values.global.tlsPrivateCaBundle .FilamentRuntimeSources }}
       volumes:
+        {{- if .FilamentRuntimeSources }}
+        - name: filament-runtime
+          projected:
+            sources:
+              {{- .FilamentRuntimeSources | nindent 14 }}
+        {{- end }}
+        {{- if .Values.global.tlsPrivateCaBundle }}
         - name: private-ca
           configMap:
             name: {{ .Release.Name }}-private-ca
+        {{- end }}
       {{- end }}
+{{- end }}

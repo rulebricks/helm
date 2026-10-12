@@ -114,6 +114,8 @@ images:
   # node24: setup job needs shell/apk/npm at runtime (no DHI fit); bundled npm
   # refreshed. See images/node24/.
   - { name: node24, kind: build, context: images/node24, base: docker.io/library/node:24-alpine, tag: "24-alpine-r1", auth: none, target: rulebricks/node, chartRefs: "values.yaml:global.images.node24.tag", digest: "" }
+  # Filament's temporary Python execution Jobs. See images/filament-python/.
+  - { name: filament-python, kind: build, context: images/filament-python, base: docker.io/library/python:3.13.9-slim-bookworm, tag: "1.0.0", auth: none, chartRefs: "values.yaml:global.images.filamentPython.tag", digest: "" }
   - { name: rclone, kind: mirror, source: docker.io/rclone/rclone, tag: "1.75.0", auth: none, chartRefs: "values.yaml:global.images.rclone.tag", digest: "" }
   # Source rebuild on current Go toolchain. See images/kafka-proxy/.
   - { name: kafka-proxy, kind: build, context: images/kafka-proxy, base: dhi.io/alpine-base:3.22, ref: "317f1d7aca20d80a341a11235d615b185857d9d6", upstream: "github.com/grepplabs/kafka-proxy", tag: "0.4.3-r2", auth: dhi, chartRefs: "values.yaml:kafkaBridge.image", digest: "" }

@@ -9,6 +9,90 @@
       "type": "object",
       "required": ["domain", "email"],
       "properties": {
+        "filament": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "description": "\"auto\" enables Filament unless global.supabase.url is set (managed Supabase).",
+              "enum": [true, false, "auto"],
+              "default": "auto"
+            },
+            "workflow": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "databaseSecret": {
+                  "type": "string"
+                },
+                "bootstrapResources": {
+                  "description": "Kubernetes container resources for the Filament Workflow setup Job.",
+                  "type": "object"
+                }
+              }
+            },
+            "sandbox": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "image": {
+                  "type": "string",
+                  "pattern": "^$|^.+@sha256:[a-f0-9]{64}$"
+                },
+                "runtimeClass": {
+                  "type": "string"
+                },
+                "concurrency": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "cpuRequest": {
+                  "type": "string"
+                },
+                "memoryRequest": {
+                  "type": "string"
+                },
+                "cpuLimit": {
+                  "type": "string"
+                },
+                "memoryLimit": {
+                  "type": "string"
+                },
+                "scratchBytes": {
+                  "type": "integer",
+                  "minimum": 1048576,
+                  "maximum": 9007199254740991
+                },
+                "maxFileBytes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "maxRunBytes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "executionTimeoutSeconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
+                },
+                "jobDeadlineSeconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 600
+                },
+                "ttlSecondsAfterFinished": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 86400
+                }
+              }
+            }
+          }
+        },
         "domain": {
           "type": "string",
           "minLength": 1,
@@ -798,6 +882,16 @@
                 "enabled": { "type": "boolean" },
                 "replicas": { "type": "integer", "minimum": 0 },
                 "resources": { "$ref": "#/definitions/resources" },
+                "nodeHeapMb": {
+                  "type": ["integer", "null"],
+                  "minimum": 128,
+                  "description": "Worker V8 heap in MB (NODE_OPTIONS --max-old-space-size). Unset: 75% of resources.limits.memory when that is at least 2Gi, otherwise the V8 default."
+                },
+                "traceCaptureMaxBytes": {
+                  "type": ["integer", "null"],
+                  "minimum": 1048576,
+                  "description": "Per-run flow-trace capture budget in bytes (PATH_TRACE_SNAPSHOT_MAX_BYTES). Unset: 64 MiB when resources.limits.memory is at least 2Gi, otherwise 32 MiB."
+                },
                 "solutionPartitions": {
                   "type": "integer",
                   "minimum": 1,

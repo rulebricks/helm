@@ -1,0 +1,103 @@
+{{- if include "rulebricks-chart.filamentEnabled" . -}}
+{{- /* Reached only with global.filament.enabled=true: "auto" already turns
+     Filament off when the token is disabled. Same test as the helper. */ -}}
+{{- if eq (toString (dig "app" "serviceAccount" "automount" true .Values.rulebricks)) "false" -}}
+{{- fail "global.filament.enabled=true, but Filament's app service account must mount its Kubernetes token to launch sandbox Jobs (execution pods never receive a token) and rulebricks.app.serviceAccount.automount is false. Set it to true, or set global.filament.enabled to \"auto\" (which leaves Filament off in this case) or false." -}}
+{{- end -}}
+{{- $runtime := include "filament.runtime" . | fromJson -}}
+{{- $secretName := printf "%s-filament-runtime" .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $secretName -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Release.Namespace }}
+type: Opaque
+data:
+  runtime.json: {{ $runtime.config | toJson | b64enc | quote }}
+  {{- if .Subcharts.supabase }}
+  password: {{ if and $existing (index $existing.data "password") }}{{ index $existing.data "password" | quote }}{{ else }}{{ randAlphaNum 48 | b64enc | quote }}{{ end }}
+  {{- end }}
+---
+{{- $app := deepCopy .Subcharts.rulebricks -}}
+{{- $basePath := printf "%s/charts/rulebricks/templates" (trimSuffix "/templates" .Template.BasePath) -}}
+{{- $_ := set $app "Template" (dict "BasePath" $basePath "Name" .Template.Name) -}}
+{{- $_ := set $app "FilamentRenderApp" true -}}
+{{- $_ := set $app "FilamentRuntimeSources" ($runtime.sources | toYaml) -}}
+{{ include (printf "%s/app-deployment.yaml" $basePath) $app }}
+{{- end -}}
+
+{{/* Installation configuration is mounted as files, never an operator env list.
+     Project only host/port/database from the existing DB Secret; the app must
+     never receive the database administrator's password. */}}
+{{- define "filament.runtime" -}}
+{{- $config := .Values.global.filament -}}
+{{- $secretName := printf "%s-filament-runtime" .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- $runtimeItems := list (dict "key" "runtime.json" "path" "runtime.json") -}}
+{{- $sources := list -}}
+{{- $database := dict "user" "filament_workflow" "sslMode" (dig "auth" "environment" "DB_SSL" "disable" .Values.supabase) -}}
+{{- if .Subcharts.supabase -}}
+  {{- $runtimeItems = append $runtimeItems (dict "key" "password" "path" "password") -}}
+  {{- $_ := set $database "password" (dict "file" "password") -}}
+  {{- $fields := concat (include "supabase.db.hostEnv" .Subcharts.supabase | fromYamlArray) (include "supabase.db.portEnv" .Subcharts.supabase | fromYamlArray) -}}
+  {{- range $field := $fields -}}
+    {{- $key := $field.name | trimPrefix "DB_" | lower -}}
+    {{- if $field.valueFrom -}}
+      {{- $_ := set $database $key (dict "file" $key) -}}
+      {{- $ref := $field.valueFrom.secretKeyRef -}}
+      {{- $sources = append $sources (dict "secret" (dict "name" $ref.name "items" (list (dict "key" $ref.key "path" $key)))) -}}
+    {{- else -}}
+      {{- $_ := set $database $key $field.value -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $_ := set $database "database" (dict "file" "database") -}}
+  {{- $sources = append $sources (dict "secret" (dict "name" (include "supabase.db.secretName" .Subcharts.supabase) "items" (list (dict "key" (include "supabase.db.secretKey" (dict "root" .Subcharts.supabase "field" "database" "default" "database")) "path" "database")))) -}}
+{{- else -}}
+  {{- $secret := required "Filament is enabled (global.filament.enabled) but supabase.enabled=false, so there are no bundled Supabase database credentials to reuse. Set global.filament.workflow.databaseSecret to an existing Secret with keys host, port, database, username, password for the PostgreSQL database (with the Workflow schemas provisioned beforehand), or set global.filament.enabled=false. With managed Supabase (global.supabase.url set) the default \"auto\" leaves Filament off." (dig "workflow" "databaseSecret" "" $config) -}}
+  {{- $items := list -}}
+  {{- range $key, $field := dict "host" "host" "port" "port" "database" "database" "username" "user" "password" "password" -}}
+    {{- $_ := set $database $field (dict "file" $field) -}}
+    {{- $items = append $items (dict "key" $key "path" $field) -}}
+  {{- end -}}
+  {{- $sources = append $sources (dict "secret" (dict "name" $secret "items" $items)) -}}
+{{- end -}}
+{{- /* Root certificates for verifying the database server (libpq sslrootcert
+     semantics): the external database's own CA (supabase.externalDatabase.sslRootCert,
+     already stored in the supabase subchart's <fullname>-db-ca Secret for
+     postgres-meta) and/or the private CA bundle mounted at /etc/rulebricks/ca.
+     The private CA is an additive bundle for HTTPS endpoints, not a statement
+     about who signed the database's certificate, so it is a database root
+     only when the sslMode itself asks for verification: with prefer/require
+     and no database CA (e.g. GCP Cloud SQL) the connection stays encrypted
+     but unverified, as libpq does without sslrootcert. */ -}}
+{{- $caFiles := list -}}
+{{- if .Subcharts.supabase -}}
+  {{- $ext := .Subcharts.supabase.Values.externalDatabase | default dict -}}
+  {{- if and $ext.enabled $ext.sslRootCert -}}
+    {{- $sources = append $sources (dict "secret" (dict "name" (printf "%s-db-ca" (include "supabase.fullname" .Subcharts.supabase)) "items" (list (dict "key" "ca.pem" "path" "db-ca.crt")))) -}}
+    {{- $caFiles = append $caFiles "/etc/rulebricks/filament/db-ca.crt" -}}
+  {{- end -}}
+{{- end -}}
+{{- $unverifiedModes := list "disable" "allow" "prefer" "require" -}}
+{{- if and .Values.global.tlsPrivateCaBundle (not (has ($database.sslMode | default "disable" | toString | trim | lower) $unverifiedModes)) -}}
+  {{- $caFiles = append $caFiles "/etc/rulebricks/ca/ca.crt" -}}
+{{- end -}}
+{{- if eq (len $caFiles) 1 -}}
+  {{- $_ := set $database "sslRootCert" (first $caFiles) -}}
+{{- else if $caFiles -}}
+  {{- $_ := set $database "sslRootCert" $caFiles -}}
+{{- end -}}
+{{- $sources = prepend $sources (dict "secret" (dict "name" $secretName "items" $runtimeItems)) -}}
+{{- $sandbox := deepCopy $config.sandbox -}}
+{{- $_ := set $sandbox "namespace" .Release.Namespace -}}
+{{- $_ := set $sandbox "releaseName" .Release.Name -}}
+{{- $_ := set $sandbox "serviceAccount" (include "filament.sandboxName" .) -}}
+{{- $_ := set $sandbox "imagePullSecret" (include "rulebricks-chart.registrySecretName" .Subcharts.rulebricks) -}}
+{{- $_ := set $sandbox "image" ($sandbox.image | default (include "rulebricks.image" (dict "root" . "image" .Values.global.images.filamentPython "name" "filament-python"))) -}}
+{{- dict "config" (dict "database" $database "sandbox" $sandbox) "sources" $sources | toJson -}}
+{{- end -}}
+
+{{/* Reserve room for the numeric Job slot suffix (up to -99). */}}
+{{- define "filament.sandboxName" -}}
+{{- printf "%s-filament" .Release.Name | trunc 60 | trimSuffix "-" -}}
+{{- end -}}

@@ -1,0 +1,243 @@
+{{/*
+Filament Workflow bootstrap: creates the filament_workflow role and the
+Workflow schemas (workflow, workflow_drizzle, graphile_worker) in the existing
+Rulebricks PostgreSQL database.
+
+It is deliberately separate from the core db-migrate Job and can never fail a
+release:
+  - hook-weight 20 (or db-migrate's own weight + 1 when
+    migrations.annotations sets one higher) runs it after db-migrate (weight
+    0) and every other post-install/post-upgrade hook, so core migrations
+    always run first;
+  - the wrapper below always exits 0 and logs a loud warning when the
+    bootstrap fails. The app stays Ready, reports Filament as unavailable, and
+    re-checks for the schemas every 30 seconds; the next upgrade re-runs this
+    Job, which is idempotent;
+  - the script waits for the database, bounds lock and statement waits, and
+    stops at its own deadline plus a short grace period: about 3 minutes as a
+    hook (db-migrate has just reached the database, and Helm's default 5m
+    --timeout applies to each hook), 12 minutes otherwise. Both are well
+    inside activeDeadlineSeconds;
+  - the runtime volume sources are optional, so a missing Secret becomes a
+    logged bootstrap failure rather than a pod stuck in ContainerCreating.
+
+Honors migrations.strategy (hook/deployment/manual) like the db-migrate Job.
+*/}}
+{{- if and .Values.supabase.enabled (include "rulebricks-chart.filamentEnabled" .) -}}
+{{- $strategy := .Values.migrations.strategy | default "hook" }}
+{{- /* BYO database Secret resolution, identical to templates/migration-job.yaml. */}}
+{{- $sbDb := .Values.supabase.secret.db | default dict }}
+{{- $extDb := .Values.supabase.externalDatabase | default dict }}
+{{- $dbSecretName := "" }}
+{{- $dbSecretKeys := dict }}
+{{- if and $extDb.enabled $extDb.secretRef }}
+  {{- $dbSecretName = $extDb.secretRef }}
+  {{- $dbSecretKeys = $extDb.secretRefKey | default dict }}
+{{- else if $sbDb.secretRef }}
+  {{- $dbSecretName = $sbDb.secretRef }}
+  {{- $dbSecretKeys = $sbDb.secretRefKey | default dict }}
+{{- end }}
+{{- /* Same hook keys and user annotations as db-migrate (user keys win, as
+     they do there), built as one map so no key is emitted twice. The weight
+     always follows db-migrate's effective weight. */}}
+{{- $annotations := dict }}
+{{- if eq $strategy "hook" }}
+  {{- $annotations = dict "helm.sh/hook" "post-install,post-upgrade" "helm.sh/hook-delete-policy" "before-hook-creation" }}
+{{- end }}
+{{- $annotations = merge (deepCopy (.Values.migrations.annotations | default dict)) $annotations }}
+{{- $isHook := hasKey $annotations "helm.sh/hook" }}
+{{- if $isHook }}
+  {{- $migrateWeight := index $annotations "helm.sh/hook-weight" | default "0" | toString | atoi }}
+  {{- $_ := set $annotations "helm.sh/hook-weight" (max 20 (add1 $migrateWeight) | toString) }}
+{{- end }}
+{{- $sources := list }}
+{{- range $source := (include "filament.runtime" . | fromJson).sources }}
+  {{- $_ := set $source.secret "optional" true }}
+  {{- $sources = append $sources $source }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-filament-bootstrap-%d" (.Release.Name | trunc 32 | trimSuffix "-") .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}-filament-bootstrap
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: filament-bootstrap
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  {{- with $annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ttlSecondsAfterFinished: {{ .Values.migrations.ttlSecondsAfterFinished | default 2592000 | int }}
+  # Backstop only: the script gives up after at most 12 minutes (about 3 as
+  # a hook) and the wrapper then exits 0.
+  activeDeadlineSeconds: 900
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}-filament-bootstrap
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: Never
+      {{- /* Node selector: migrations-level > global scheduling */ -}}
+      {{- $nodeSelector := .Values.migrations.nodeSelector | default dict }}
+      {{- if and (not $nodeSelector) .Values.global .Values.global.scheduling }}
+        {{- $nodeSelector = .Values.global.scheduling.nodeSelector | default dict }}
+      {{- end }}
+      {{- with $nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- /* Tolerations: migrations-level > global scheduling */ -}}
+      {{- $tolerations := list }}
+      {{- if .Values.migrations.tolerations }}
+        {{- $tolerations = .Values.migrations.tolerations }}
+      {{- else if and .Values.global .Values.global.scheduling .Values.global.scheduling.tolerations }}
+        {{- $tolerations = .Values.global.scheduling.tolerations }}
+      {{- end }}
+      {{- with $tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      imagePullSecrets:
+        - name: {{ include "rulebricks-chart.registrySecretName" . }}
+      containers:
+        - name: filament-workflow-bootstrap
+          image: {{ include "rulebricks.image" (dict "root" . "image" (merge (dict "tag" (include "rulebricks.productVersion" .)) .Values.rulebricks.app.image)) | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              node /app/scripts/filament-workflow-bootstrap.mjs
+              status=$?
+              if [ "$status" -ne 0 ]; then
+                echo "WARNING: Filament Workflow bootstrap FAILED (exit $status); see the error above. Core Rulebricks migrations and this release are NOT affected. Filament stays unavailable until a later upgrade re-runs this Job successfully." >&2
+              fi
+              exit 0
+          {{- /* The wrapper cannot survive an OOM kill of the container, so
+               never inherit a too-small LimitRange default. */}}
+          {{- with dig "workflow" "bootstrapResources" dict (.Values.global.filament | default dict) }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            {{- if $isHook }}
+            # Helm fails the release if a hook outlives --timeout (default
+            # 5m), so give up after 150 s (+ grace) instead of 10 minutes.
+            - name: FILAMENT_BOOTSTRAP_DEADLINE_SECONDS
+              value: "150"
+            {{- end }}
+            - name: DB_HOST
+              {{- if .Values.supabase.db.enabled }}
+              # Internal Supabase DB service
+              value: "{{ .Release.Name }}-supabase-db"
+              {{- else if .Values.migrations.externalDb.host }}
+              # External PostgreSQL - use configured host
+              value: {{ .Values.migrations.externalDb.host | quote }}
+              {{- else if and $dbSecretName $dbSecretKeys.host }}
+              # External PostgreSQL - host sourced from the BYO database Secret
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $dbSecretName }}
+                  key: {{ $dbSecretKeys.host }}
+              {{- else }}
+              value: {{ index .Values.supabase "auth" "environment" "DB_HOST" | default "" | quote }}
+              {{- end }}
+            - name: DB_PORT
+              {{- if .Values.supabase.db.enabled }}
+              value: "5432"
+              {{- else if and $dbSecretName $dbSecretKeys.port }}
+              {{- /* Opt-in Secret port key wins: migrations.externalDb.port has a
+                   non-empty default ("5432") that would otherwise always shadow it. */}}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $dbSecretName }}
+                  key: {{ $dbSecretKeys.port }}
+              {{- else }}
+              value: {{ .Values.migrations.externalDb.port | default "5432" | quote }}
+              {{- end }}
+            - name: DB_USER
+              {{- if .Values.supabase.db.enabled }}
+              # Bundled DB: connect as the image superuser (supabase_admin); the
+              # db-role-init sidecar syncs the shared secret password onto it (the
+              # baked-in postgres role's password is never reconciled).
+              value: {{ .Values.supabase.db.superuserName | default "supabase_admin" | quote }}
+              {{- else if and .Values.migrations.externalDb.existingSecret .Values.migrations.externalDb.existingSecretUserKey }}
+              # Master/app-role username from the SAME Secret as DB_PASSWORD
+              # below. The migrate hook authenticates with the MASTER credential,
+              # and only on AWS RDS is the master literally named "postgres":
+              # Azure Flexible Server / Cloud SQL admins have custom names, so
+              # pairing the db-Secret's username with the master-password fails
+              # authentication there.
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.migrations.externalDb.existingSecret }}
+                  key: {{ .Values.migrations.externalDb.existingSecretUserKey }}
+              {{- else if $dbSecretName }}
+              # External managed Postgres: role sourced from the BYO database Secret.
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $dbSecretName }}
+                  key: {{ $dbSecretKeys.username | default "username" }}
+              {{- else }}
+              # External managed Postgres: the app/owner role (e.g. the RDS master).
+              value: {{ .Values.supabase.secret.db.username | default "postgres" | quote }}
+              {{- end }}
+            - name: DB_NAME
+              {{- if and (not .Values.supabase.db.enabled) $dbSecretName }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $dbSecretName }}
+                  key: {{ $dbSecretKeys.database | default "database" }}
+              {{- else }}
+              value: {{ .Values.supabase.secret.db.database | default "postgres" | quote }}
+              {{- end }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if and .Values.supabase.db.enabled $dbSecretName }}
+                  # Bundled DB with a BYO database Secret (supabase.secret.db.secretRef)
+                  name: {{ $dbSecretName }}
+                  key: {{ $dbSecretKeys.password | default "password" }}
+                  {{- else if .Values.supabase.db.enabled }}
+                  # Internal Supabase chart creates secret named: <release>-supabase-db
+                  name: {{ .Release.Name }}-supabase-db
+                  key: password
+                  {{- else if .Values.migrations.externalDb.existingSecret }}
+                  # External secret reference
+                  name: {{ .Values.migrations.externalDb.existingSecret }}
+                  key: {{ .Values.migrations.externalDb.existingSecretKey | default "password" }}
+                  {{- else if $dbSecretName }}
+                  # BYO database Secret (externalDatabase.secretRef / secret.db.secretRef)
+                  name: {{ $dbSecretName }}
+                  key: {{ $dbSecretKeys.password | default "password" }}
+                  {{- else }}
+                  # Fall back to supabase secret
+                  name: {{ .Release.Name }}-supabase-db
+                  key: password
+                  {{- end }}
+          volumeMounts:
+            - name: filament-runtime
+              mountPath: /etc/rulebricks/filament
+              readOnly: true
+            {{- if .Values.global.tlsPrivateCaBundle }}
+            - name: private-ca
+              mountPath: /etc/rulebricks/ca
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: filament-runtime
+          projected:
+            sources:
+              {{- toYaml $sources | nindent 14 }}
+        {{- if .Values.global.tlsPrivateCaBundle }}
+        - name: private-ca
+          configMap:
+            name: {{ .Release.Name }}-private-ca
+            optional: true
+        {{- end }}
+{{- end }}
