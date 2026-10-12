@@ -52,7 +52,7 @@ app:
   # CPU baseline or startup can overrun the liveness probe window.
   resources:
     requests:
-      cpu: "2000m"
+      cpu: "1000m"
       memory: 4Gi
     limits:
       cpu: "2000m"
