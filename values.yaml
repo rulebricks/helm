@@ -461,7 +461,7 @@ rulebricks:
     replicas: 1
     resources:
       requests:
-        cpu: "2000m"
+        cpu: "1000m"
         memory: "4Gi"
       limits:
         cpu: "2000m"
