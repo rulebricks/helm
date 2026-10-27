@@ -1,7 +1,7 @@
 # check=skip=InvalidDefaultArgInFrom
 # rulebricks/serverless-redis-http — hiett/serverless-redis-http rebuilt from
-# unmodified upstream source on a current Erlang/OTP (clears the 2021-era base,
-# incl. CISA KEV CVE-2025-32433).
+# pinned upstream source on a current Erlang/OTP (clears the 2021-era base,
+# incl. CISA KEV CVE-2025-32433), with the request-size correction below.
 # All pins live in images/manifest.yaml (base/ref plus the Elixir/OTP builder),
 # injected as build args by scripts/images/build.sh. Bumps: images/README.md.
 
@@ -16,6 +16,11 @@ ARG UPSTREAM_REF
 WORKDIR /build
 ADD https://github.com/hiett/serverless-redis-http/archive/${UPSTREAM_REF}.tar.gz /build/src.tar.gz
 RUN tar -xzf src.tar.gz --strip-components=1 && rm src.tar.gz
+
+# Plug's default 8 MB body limit rejects cache entries for large decision
+# tables
+RUN sed -i 's/json_decoder: Jason)/json_decoder: Jason, length: 134217728)/' lib/srh/http/base_router.ex && \
+    grep -q 'json_decoder: Jason, length: 134217728)' lib/srh/http/base_router.ex
 
 # 2021 mix.lock pins a cowlib that no longer compiles on modern OTP; deps
 # re-resolve within upstream's own mix.exs constraints.

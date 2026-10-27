@@ -772,6 +772,11 @@ kafka:
       UseZGC: "true"
       AlwaysPreTouch: "true"
       MaxDirectMemorySize: "256M"
+    # Release large temporary file/socket buffers after I/O instead of
+    # retaining them on broker threads. This does not limit message size.
+    javaSystemProperties:
+      - name: jdk.nio.maxCachedBufferSize
+        value: "1048576"
   # Broker properties, rendered into Kafka.spec.kafka.config.
   config:
     auto.create.topics.enable: "true"
@@ -1255,7 +1260,7 @@ supabase:
         memory: "8Gi"
     persistence:
       enabled: true
-      size: 10Gi
+      size: 20Gi
       storageClassName: gp3
   # Kong API Gateway ingress configuration
   kong:
