@@ -1260,7 +1260,7 @@ supabase:
         memory: "8Gi"
     persistence:
       enabled: true
-      size: 20Gi
+      size: 10Gi
       storageClassName: gp3
   # Kong API Gateway ingress configuration
   kong:
