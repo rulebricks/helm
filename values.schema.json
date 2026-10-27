@@ -897,6 +897,11 @@
                   "minimum": 1,
                   "description": "Partition count of the (prefixed) solution request topic. Must match kafka.provisioning.topics for the solution topic; hard ceiling on worker fleet concurrency, so keda.maxReplicaCount must not exceed it."
                 },
+                "partitionsConsumedConcurrently": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Messages one worker runs at once, at most one per owned partition (WORKER_PARTITIONS_CONSUMED_CONCURRENTLY). Each in-flight message holds its own heap, so size it with resources.limits.memory. Unset keeps the worker default of 4."
+                },
                 "podLabels": {
                   "type": "object",
                   "additionalProperties": { "type": "string" }

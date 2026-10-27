@@ -315,20 +315,24 @@ hps:
     extraEnvFrom: []
     resources:
       requests:
-        # Match a busy worker's real use (one core): the request is what the
-        # cluster autoscaler sees, so a lower value packs CPU-bound workers
-        # onto shared cores instead of adding nodes.
-        cpu: "950m"
-        memory: "1Gi"
+        # The request is what the cluster autoscaler sees: 480m packs 32
+        # workers per 16-vCPU node, and busy ones burst to the limit.
+        cpu: "480m"
+        memory: "1792Mi"
       limits:
-        cpu: "1000m"
-        memory: "1Gi"
+        cpu: "950m"
+        # Above the request; the derived heap is 75% of this (2304 MB).
+        memory: "3Gi"
     # Workers hold each run's flow trace in memory. With limits.memory of 2Gi
     # or more they get a 75% heap and a 64 MiB trace budget automatically;
-    # below that, the V8 heap default and a 32 MiB budget. 
+    # below that, the V8 heap default and a 32 MiB budget. Use whole Mi/Gi
+    # values: fractional ones (3.5Gi) are not parsed and drop the heap flag.
     # Overrides:
-    # nodeHeapMb: 1536 # NODE_OPTIONS --max-old-space-size
+    # nodeHeapMb: 2304 # NODE_OPTIONS --max-old-space-size
     # traceCaptureMaxBytes: 67108864 # PATH_TRACE_SNAPSHOT_MAX_BYTES
+    # Messages one worker runs at once, at most one per owned partition
+    # (WORKER_PARTITIONS_CONSUMED_CONCURRENTLY). Unset keeps the worker's 4.
+    partitionsConsumedConcurrently: 1
 
     # KEDA-based autoscaling for workers
     keda:
