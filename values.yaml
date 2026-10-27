@@ -623,15 +623,12 @@ rulebricks:
         enabled: false
         minAvailable: ""
         maxUnavailable: ""
-      # Workers are single-threaded, so the limit is one core. The request is
-      # what converts replicas into node capacity for the cluster autoscaler,
-      # so keep it near measured mid-load usage.
+      # Set workers to simpler one core limits
       resources:
         requests:
-          # Close to measured sustained usage. This makes the scheduler spread
-          # the 128-worker ceiling across four 16-core burst nodes instead of
-          # packing it onto three nodes that saturate unevenly.
-          cpu: "400m"
+          # One core less scheduling slack: 16 workers fill a 16-vCPU burst
+          # node, so the fleet ceiling below maps 1:1 onto burst nodes.
+          cpu: "950m"
           memory: "1Gi"
         limits:
           cpu: "1000m"
@@ -651,6 +648,12 @@ rulebricks:
         # Baseline fleet that stays ready with zero lag; bursts scale toward
         # the ceiling.
         minReplicaCount: 28
+        # One worker per solution partition. A worker owns
+        # solutionPartitions / replicas partitions and runs up to four of them
+        # at once, so a smaller fleet multiplies per-worker CPU and heap
+        # (a heavy run peaks near 1.3 GB on a 1.5 GB heap). The burst pool
+        # must fit maxReplicaCount x requests.cpu: 128 x 950m is about eight
+        # 16-vCPU nodes.
         maxReplicaCount: 128
         # Poll fast so bursts are detected within seconds.
         pollingInterval: 5
@@ -1497,12 +1500,15 @@ vector:
         group_id: "${KAFKA_CONSUMER_GROUP:-vector-consumers}"
         auto_offset_reset: latest
         # Full-fidelity single-item decision logs can approach the 64 MiB logs
-        # topic cap. Set both the partition and aggregate fetch envelopes;
+        # topic cap. The broker still returns a first message larger than the
+        # per-partition fetch size, so that size only bounds prefetch: at
+        # 64 MiB, a backlog across ~12 partitions per pod pulled several GiB of
+        # decompressed heavy-flow logs into a 4 GiB pod and OOM-looped Vector.
         # librdkafka automatically raises receive.message.max.bytes above the
         # aggregate fetch size plus protocol overhead.
         librdkafka_options:
           message.max.bytes: "67108864"
-          fetch.message.max.bytes: "67108864"
+          fetch.message.max.bytes: "1048576"
           fetch.max.bytes: "134217728"
         # TLS + SASL are driven by env from vector-kafka-env. Disabled by default
         # (in-cluster Kafka and the bridge path both use plaintext).

@@ -315,7 +315,10 @@ hps:
     extraEnvFrom: []
     resources:
       requests:
-        cpu: "400m"
+        # Match a busy worker's real use (one core): the request is what the
+        # cluster autoscaler sees, so a lower value packs CPU-bound workers
+        # onto shared cores instead of adding nodes.
+        cpu: "950m"
         memory: "1Gi"
       limits:
         cpu: "1000m"
