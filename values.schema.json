@@ -902,6 +902,16 @@
                   "minimum": 1,
                   "description": "Messages one worker runs at once, at most one per owned partition (WORKER_PARTITIONS_CONSUMED_CONCURRENTLY). Each in-flight message holds its own heap, so size it with resources.limits.memory. Unset keeps the worker default of 4."
                 },
+                "sessionTimeoutMs": {
+                  "type": "integer",
+                  "minimum": 6000,
+                  "description": "Kafka consumer-group session timeout (WORKER_SESSION_TIMEOUT_MS). A worker that does not heartbeat within it is evicted and the fleet rebalances; size it for a work item running at a fraction of a core. Unset keeps the worker default of 30000."
+                },
+                "heartbeatIntervalMs": {
+                  "type": "integer",
+                  "minimum": 1000,
+                  "description": "Kafka consumer heartbeat interval (WORKER_HEARTBEAT_INTERVAL_MS); keep it under a third of sessionTimeoutMs. Unset keeps the worker default of 3000."
+                },
                 "podLabels": {
                   "type": "object",
                   "additionalProperties": { "type": "string" }
@@ -920,6 +930,7 @@
                     "cooldownPeriod": { "type": "integer", "minimum": 0 },
                     "lagThreshold": { "type": ["integer", "string"] },
                     "cpuThreshold": { "type": ["integer", "string"] },
+                    "fullScaleAtPendingBytes": { "type": "integer", "minimum": 0 },
                     "scalingBehavior": {
                       "type": "object",
                       "description": "Optional HPA scaling behavior override (scaleUp/scaleDown) rendered into the worker ScaledObject; omit to use the chart's exponential scale-up / smooth scale-down defaults."

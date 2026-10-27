@@ -333,6 +333,15 @@ hps:
     # Messages one worker runs at once, at most one per owned partition
     # (WORKER_PARTITIONS_CONSUMED_CONCURRENTLY). Unset keeps the worker's 4.
     partitionsConsumedConcurrently: 1
+    # Consumer-group liveness (WORKER_SESSION_TIMEOUT_MS /
+    # WORKER_HEARTBEAT_INTERVAL_MS). A worker heartbeats as the engine yields,
+    # so a synchronous stretch longer than the session timeout gets it evicted
+    # and the whole fleet rebalances. Under full load a worker shares a core
+    # with its neighbours, so size this for a work item at a fraction of a
+    # core: 60s matches the one-minute work-item assumption. Crash detection
+    # takes up to the session timeout. Unset keeps the worker's 30s / 3s.
+    sessionTimeoutMs: 60000
+    heartbeatIntervalMs: 10000
 
     # KEDA-based autoscaling for workers
     keda:
@@ -341,6 +350,11 @@ hps:
       maxReplicaCount: 50
       lagThreshold: 25 # Scale up before a sustained backlog develops
       cpuThreshold: 75 # Backup: scale on CPU
+      # Bytes of request data dispatched and not yet answered (all HPS
+      # replicas, via the shared Redis ledger) that asks for the whole fleet;
+      # less scales in proportion. Counts what lag cannot: one 100k-row flow
+      # run weighs as much as thousands of small rule calls. 0 disables.
+      fullScaleAtPendingBytes: 10485760
       memoryThreshold: 80
       pollingInterval: 5 # How often to check metrics (seconds)
       cooldownPeriod: 300 # Wait before scaling down (seconds)

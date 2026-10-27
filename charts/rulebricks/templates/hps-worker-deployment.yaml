@@ -265,10 +265,14 @@ spec:
             {{- /* An extraEnv entry of the same name wins; duplicate env names
                  are rejected by server-side apply. */}}
             {{- $concurrency := .Values.hps.workers.partitionsConsumedConcurrently }}
+            {{- $sessionMs := .Values.hps.workers.sessionTimeoutMs }}
+            {{- $heartbeatMs := .Values.hps.workers.heartbeatIntervalMs }}
             {{- range .Values.hps.workers.extraEnv }}
             {{- if eq (default "" .name) "NODE_OPTIONS" }}{{ $heapMb = 0 }}{{ end }}
             {{- if eq (default "" .name) "PATH_TRACE_SNAPSHOT_MAX_BYTES" }}{{ $traceBytes = 0 }}{{ end }}
             {{- if eq (default "" .name) "WORKER_PARTITIONS_CONSUMED_CONCURRENTLY" }}{{ $concurrency = 0 }}{{ end }}
+            {{- if eq (default "" .name) "WORKER_SESSION_TIMEOUT_MS" }}{{ $sessionMs = 0 }}{{ end }}
+            {{- if eq (default "" .name) "WORKER_HEARTBEAT_INTERVAL_MS" }}{{ $heartbeatMs = 0 }}{{ end }}
             {{- end }}
             {{- with $heapMb }}
             {{- /* Replaces the app ConfigMap's NODE_OPTIONS, so its DNS flag is
@@ -284,6 +288,18 @@ spec:
                  own default. Each in-flight message holds its own heap. */}}
             {{- with $concurrency }}
             - name: WORKER_PARTITIONS_CONSUMED_CONCURRENTLY
+              value: {{ . | int | quote }}
+            {{- end }}
+            {{- /* Group liveness: a worker that misses the session timeout is
+                 evicted and the whole fleet rebalances, so the timeout must
+                 cover a work item's longest synchronous stretch at the CPU
+                 share a fully loaded node leaves each worker. */}}
+            {{- with $sessionMs }}
+            - name: WORKER_SESSION_TIMEOUT_MS
+              value: {{ . | int | quote }}
+            {{- end }}
+            {{- with $heartbeatMs }}
+            - name: WORKER_HEARTBEAT_INTERVAL_MS
               value: {{ . | int | quote }}
             {{- end }}
             {{- with .Values.app.logging.kafkaSasl }}

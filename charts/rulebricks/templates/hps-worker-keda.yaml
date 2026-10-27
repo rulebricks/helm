@@ -127,4 +127,22 @@ spec:
       valueLocation: value
       targetValue: "1"
   {{- end }}
+  {{- /* Pending-bytes trigger. HPS reports the serialized bytes of every
+       request message dispatched and not yet answered (all replicas, via
+       the shared Redis dispatch ledger) at /internal/pending-bytes-metric.
+       Lag counts messages, and a 100k-row flow run is one message like a
+       ten-byte rule call; bytes track the work. With targetValue set to
+       fullScaleAtPendingBytes / maxReplicaCount, that much pending data asks
+       for the whole fleet in one HPA step (the bang-bang scale-up above),
+       and less scales in proportion. Needs the warm-up's shared Redis. */}}
+  {{- $pendingBytes := int (.Values.hps.workers.keda.fullScaleAtPendingBytes | default 0) }}
+  {{- if gt $pendingBytes 0 }}
+  {{- $perReplica := div $pendingBytes (int (.Values.hps.workers.keda.maxReplicaCount | default 48)) }}
+  - type: metrics-api
+    metricType: AverageValue
+    metadata:
+      url: http://{{ include "rulebricks-chart.hps.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:80/internal/pending-bytes-metric
+      valueLocation: value
+      targetValue: "{{ max 1 $perReplica }}"
+  {{- end }}
 {{- end }}

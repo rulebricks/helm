@@ -639,6 +639,10 @@ rulebricks:
       # traceCaptureMaxBytes: 67108864 # PATH_TRACE_SNAPSHOT_MAX_BYTES
       # Messages one worker runs at once, one per owned partition; unset keeps the worker's 4
       partitionsConsumedConcurrently: 1
+      # Group liveness: a busy worker at a fraction of a core must heartbeat within
+      # the session timeout or the broker evicts it and the fleet rebalances
+      sessionTimeoutMs: 60000
+      heartbeatIntervalMs: 10000
       # Partition count of the "solution" request topic. MUST match the topic
       # definition under kafka.topics below, and keda.maxReplicaCount must
       # stay at or below it. Partitions can never be decreased.
@@ -662,6 +666,9 @@ rulebricks:
         # in the first polling window.
         lagThreshold: 15
         cpuThreshold: 25
+        # Pending request bytes (all replicas, Redis ledger) that ask for the
+        # whole fleet in one step; 10 MB of heavy items means a burst is on.
+        fullScaleAtPendingBytes: 10485760
         # Optional override for the HPA scaling behavior; leave unset for the
         # chart defaults (fast scale-up, smooth scale-down).
         # scalingBehavior: {}
