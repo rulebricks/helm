@@ -35,19 +35,19 @@ dependencies:
     repository: file://charts/supabase
     condition: supabase.enabled
   - name: kube-prometheus-stack
-    version: 87.3.0
+    version: 87.21.0
     repository: https://prometheus-community.github.io/helm-charts
     condition: monitoring.enabled
   - name: traefik
-    version: 41.0.1
+    version: 41.7.1
     repository: https://traefik.github.io/charts
     condition: traefik.enabled
   - name: keda
-    version: 2.20.1
+    version: 2.20.2
     repository: https://kedacore.github.io/charts
     condition: keda.enabled
   - name: cert-manager
-    version: v1.21.1
+    version: v1.21.3
     repository: https://charts.jetstack.io
     condition: cert-manager.enabled
   - name: vector

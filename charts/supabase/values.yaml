@@ -349,7 +349,7 @@ auth:
     registry: docker.io
     repository: rulebricks/supabase-gotrue
     pullPolicy: IfNotPresent
-    tag: "v2.194.0-r2"
+    tag: "v2.194.0-r3"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""
@@ -566,7 +566,7 @@ realtime:
     registry: docker.io
     repository: rulebricks/supabase-realtime
     pullPolicy: IfNotPresent
-    tag: "v2.121.3-r1"
+    tag: "v2.121.3-r2"
   imagePullSecrets: []
   nameOverride: ""
   fullnameOverride: ""
@@ -733,7 +733,7 @@ kong:
     registry: docker.io
     repository: rulebricks/supabase-kong
     pullPolicy: IfNotPresent
-    tag: "3.9.3-debian13"
+    tag: "3.9.4-debian13"
   imagePullSecrets: []
   replicaCount: 1
   nameOverride: ""

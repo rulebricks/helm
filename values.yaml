@@ -68,14 +68,14 @@ global:
   imageDigests: {}
   # Shared leaf images (init/hook/test utilities) rendered through the image helper.
   images:
-    filamentPython: { registry: docker.io, repository: rulebricks/filament-python, tag: "1.0.0" }
-    postgres17: { registry: docker.io, repository: rulebricks/postgres, tag: "17-debian13" }
-    node24: { registry: docker.io, repository: rulebricks/node, tag: "24-alpine-r1" }
-    rclone: { registry: docker.io, repository: rulebricks/rclone, tag: "1.75.0" }
+    filamentPython: { registry: docker.io, repository: rulebricks/filament-python, tag: "1.0.1" }
+    postgres17: { registry: docker.io, repository: rulebricks/postgres, tag: "17.11-debian13" }
+    node24: { registry: docker.io, repository: rulebricks/node, tag: "24-alpine-r2" }
+    rclone: { registry: docker.io, repository: rulebricks/rclone, tag: "1.75.2" }
     busybox: { registry: docker.io, repository: rulebricks/busybox, tag: "1.38.0-alpine" }
     pause: { registry: docker.io, repository: rulebricks/pause, tag: "3.10.2" }
-    curl: { registry: docker.io, repository: rulebricks/curl, tag: "8.21.0-alpine" }
-    kubectl: { registry: docker.io, repository: rulebricks/kubectl, tag: "1.36.3-debian13" }
+    curl: { registry: docker.io, repository: rulebricks/curl, tag: "8.23.0-alpine" }
+    kubectl: { registry: docker.io, repository: rulebricks/kubectl, tag: "1.36.6-debian13" }
   # Image pull secret for the private rulebricks/* repos (normally the
   # license registry secret <release>-regcred). keda, traefik, vector, and
   # the strimzi operator need the same secret on their own imagePullSecrets
@@ -91,7 +91,7 @@ global:
     existingPullSecret: ""
   # Rulebricks product version used by app, HPS, HPS worker, and migration images.
   # CLI-generated values pin this to a semantic version such as "1.8.17".
-  version: ""
+  version: "2.0.133"
   # Creates release-scoped <release>-critical and <release>-burst
   # PriorityClasses. Workers default to burst; point kafka/clickhouse at
   # critical via their priorityClassName values (the CLI does this).
@@ -1031,7 +1031,7 @@ traefik:
   image:
     registry: docker.io
     repository: rulebricks/traefik
-    tag: "3.7.10-debian13"
+    tag: "3.7.17-debian13"
   deployment:
     podLabels:
       rulebricks.com/workload-group: infrastructure
@@ -1118,15 +1118,15 @@ keda:
     keda:
       registry: docker.io
       repository: rulebricks/keda
-      tag: "2.20.1-debian13"
+      tag: "2.20.2-debian13"
     metricsApiServer:
       registry: docker.io
       repository: rulebricks/keda-metrics-apiserver
-      tag: "2.20.1-debian13"
+      tag: "2.20.2-debian13"
     webhooks:
       registry: docker.io
       repository: rulebricks/keda-admission-webhooks
-      tag: "2.20.1-debian13"
+      tag: "2.20.2-debian13"
   podLabels:
     keda:
       rulebricks.com/workload-group: infrastructure
@@ -1144,7 +1144,7 @@ cert-manager:
   image:
     registry: docker.io
     repository: rulebricks/cert-manager-controller
-    tag: "1.21.1-debian13"
+    tag: "1.21.3-debian13"
   # CRDs are managed in the parent chart's crds/ directory, so the subchart
   # must not template its own (cert-manager v1.15+ uses crds.enabled, not the
   # deprecated installCRDs flag).
@@ -1166,7 +1166,7 @@ cert-manager:
     image:
       registry: docker.io
       repository: rulebricks/cert-manager-webhook
-      tag: "1.21.1-debian13"
+      tag: "1.21.3-debian13"
     podLabels:
       rulebricks.com/workload-group: infrastructure
     tolerations: []
@@ -1181,7 +1181,7 @@ cert-manager:
     image:
       registry: docker.io
       repository: rulebricks/cert-manager-cainjector
-      tag: "1.21.1-debian13"
+      tag: "1.21.3-debian13"
     podLabels:
       rulebricks.com/workload-group: infrastructure
     tolerations: []
@@ -1195,12 +1195,12 @@ cert-manager:
     image:
       registry: docker.io
       repository: rulebricks/cert-manager-startupapicheck
-      tag: "1.21.1-debian13"
+      tag: "1.21.3-debian13"
   acmesolver:
     image:
       registry: docker.io
       repository: rulebricks/cert-manager-acmesolver
-      tag: "1.21.1-debian13"
+      tag: "1.21.3-debian13"
 
 # =============================================================================
 # SELF-HOSTED DATABASE SETTINGS (Supabase)
@@ -1393,7 +1393,7 @@ vector:
   haproxy:
     image:
       repository: docker.io/rulebricks/haproxy
-      tag: "3.4.3-debian13"
+      tag: "3.4.7-debian13"
   podLabels:
     rulebricks.com/workload-group: infrastructure
   role: "Stateless-Aggregator"
@@ -1420,7 +1420,7 @@ vector:
   # sink connection fails and decision logs are dropped. Keep as-is.
   initContainers:
     - name: ca-certs
-      image: docker.io/rulebricks/curl:8.21.0-alpine
+      image: docker.io/rulebricks/curl:8.23.0-alpine
       command:
         - curl
         - -sSf
@@ -1605,7 +1605,7 @@ kafkaBridge:
   brokers: ""
   # Local port the proxy listens on; Vector points KAFKA_BOOTSTRAP_SERVERS here.
   localPort: 19092
-  image: "docker.io/rulebricks/kafka-proxy:0.4.3-r2"
+  image: "docker.io/rulebricks/kafka-proxy:0.4.3-r3"
   # Workload identity used by the bridge. AWS: IRSA role ARN; GCP: Workload
   # Identity service account email. The CLI writes the matching annotation
   # onto the Vector and HPS service accounts.
@@ -1652,7 +1652,7 @@ vector-agent:
   # Same CA-bundle seeding as the vector aggregator above. Keep as-is.
   initContainers:
     - name: ca-certs
-      image: docker.io/rulebricks/curl:8.21.0-alpine
+      image: docker.io/rulebricks/curl:8.23.0-alpine
       command:
         - curl
         - -sSf
@@ -1813,7 +1813,7 @@ clickstack:
     image:
       registry: docker.io
       repository: rulebricks/clickstack-otel-collector
-      tag: "2.33.0-r6"
+      tag: "2.33.0-r7"
     # The limiter's hard cap stays below the pod limit so burst queues and
     # collector RSS cannot OOM the gateway before backpressure engages.
     memoryLimitMiB: 1600
@@ -1852,11 +1852,11 @@ clickstack:
     image:
       registry: docker.io
       repository: rulebricks/ferretdb
-      tag: "2.7.0-r2"
+      tag: "2.7.0-r3"
     postgresImage:
       registry: docker.io
       repository: rulebricks/postgres-documentdb
-      tag: "17-0.107.0-ferretdb-2.7.0-r1"
+      tag: "17-0.107.0-ferretdb-2.7.0-r2"
     auth:
       username: hyperdx
       password: ""
@@ -1904,12 +1904,12 @@ kube-prometheus-stack:
     image:
       registry: docker.io
       repository: rulebricks/grafana
-      tag: "13.1.1-debian13"
+      tag: "13.1.9-debian13"
     sidecar:
       image:
         registry: docker.io
         repository: rulebricks/k8s-sidecar
-        tag: "2.10.0-debian13"
+        tag: "2.14.3-debian13"
       dashboards:
         enabled: true
         label: grafana_dashboard
@@ -1927,7 +1927,7 @@ kube-prometheus-stack:
     downloadDashboardsImage:
       registry: docker.io
       repository: rulebricks/curl
-      tag: "8.21.0-alpine"
+      tag: "8.23.0-alpine"
     initChownData:
       image:
         registry: docker.io
@@ -1937,13 +1937,13 @@ kube-prometheus-stack:
       image:
         registry: docker.io
         repository: rulebricks/grafana-image-renderer
-        tag: "5.10.3-debian13"
+        tag: "5.12.10-debian13"
   prometheus:
     prometheusSpec:
       image:
         registry: docker.io
         repository: rulebricks/prometheus
-        tag: "3.13.2-debian13"
+        tag: "3.15.1-debian13"
       retention: 30d
       serviceMonitorSelectorNilUsesHelmValues: false
       serviceMonitorSelector: {}
@@ -1992,7 +1992,7 @@ kube-prometheus-stack:
         image:
           registry: docker.io
           repository: rulebricks/kube-webhook-certgen
-          tag: "1.8.5-debian13"
+          tag: "1.11.0-debian13"
       deployment:
         image:
           registry: docker.io
@@ -2001,12 +2001,12 @@ kube-prometheus-stack:
     thanosImage:
       registry: docker.io
       repository: rulebricks/thanos
-      tag: "0.42.4-debian13"
+      tag: "0.42.5-debian13"
   kube-state-metrics:
     image:
       registry: docker.io
       repository: rulebricks/kube-state-metrics
-      tag: "2.19.1-debian13"
+      tag: "2.20.0-debian13"
     kubeRBACProxy:
       image:
         registry: docker.io
@@ -2037,7 +2037,7 @@ kube-prometheus-stack:
       image:
         registry: docker.io
         repository: rulebricks/thanos
-        tag: "0.42.4-debian13"
+        tag: "0.42.5-debian13"
   crds:
     upgradeJob:
       image:
@@ -2048,7 +2048,7 @@ kube-prometheus-stack:
         kubectl:
           registry: docker.io
           repository: rulebricks/kubectl
-          tag: "1.36.3-debian13"
+          tag: "1.36.6-debian13"
   prometheus-windows-exporter:
     image:
       registry: docker.io
@@ -2214,7 +2214,7 @@ cluster-autoscaler:
   # global.imageRegistry.
   image:
     repository: docker.io/rulebricks/cluster-autoscaler
-    tag: "1.35.1-debian13"
+    tag: "1.35.2-debian13"
     # Takes secret-name strings (the CLI sets [<release>-regcred]).
     pullSecrets: []
   # REQUIRED when enabling: the autoscaler finds nodegroup ASGs by the
