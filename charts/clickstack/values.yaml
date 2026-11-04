@@ -98,7 +98,7 @@ collector:
   image:
     registry: docker.io
     repository: rulebricks/clickstack-otel-collector
-    tag: "2.33.0-r6"
+    tag: "2.33.0-r7"
     pullPolicy: IfNotPresent
   # Keep the collector's hard limiter well below the container limit. Under
   # burst traffic its queues, Prometheus discovery state, and non-Go RSS add
@@ -211,12 +211,12 @@ ferretdb:
   image:
     registry: docker.io
     repository: rulebricks/ferretdb
-    tag: "2.7.0-r2"
+    tag: "2.7.0-r3"
     pullPolicy: IfNotPresent
   postgresImage:
     registry: docker.io
     repository: rulebricks/postgres-documentdb
-    tag: "17-0.107.0-ferretdb-2.7.0-r1"
+    tag: "17-0.107.0-ferretdb-2.7.0-r2"
     pullPolicy: IfNotPresent
   auth:
     username: hyperdx

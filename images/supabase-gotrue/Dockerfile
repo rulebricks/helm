@@ -4,8 +4,10 @@
 # All pins live in images/manifest.yaml (base/ref/tag), injected as build
 # args by scripts/images/build.sh. Bumps: images/README.md.
 
+# GO-2026-5932 is fixed after v0.58.0; pin the reviewed x/crypto fix
+# until a stable release includes it. Keep the dependency resolution reproducible.
 ARG BASE_IMAGE
-ARG BUILDER_IMAGE=docker.io/library/golang:1.26-alpine
+ARG BUILDER_IMAGE=docker.io/library/golang:1.26.10-alpine
 
 # Cross-compiled from the build platform (no emulation): upstream's `make
 # build` compiles four release binaries, which under QEMU takes the arm64 CI
@@ -22,7 +24,7 @@ ADD https://github.com/supabase/auth/archive/${UPSTREAM_REF}.tar.gz /build/src.t
 RUN tar -xzf src.tar.gz --strip-components=1 && rm src.tar.gz
 
 ENV CGO_ENABLED=0 GOOS=linux GOTOOLCHAIN=local
-RUN go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.59.0 google.golang.org/grpc@v1.84.0 && \
+RUN go get github.com/go-chi/chi/v5@v5.4.0 go.opentelemetry.io/otel@v1.46.0 go.opentelemetry.io/otel/sdk@v1.46.0 go.opentelemetry.io/otel/exporters/otlp/otlptrace@v1.46.0 go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.46.0 go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp@v1.46.0 golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 golang.org/x/net@v0.62.0 google.golang.org/grpc@v1.84.0 && \
     go mod tidy && \
     go mod verify && \
     GOARCH=${TARGETARCH} go build -mod=readonly -o auth -buildvcs=false \

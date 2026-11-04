@@ -7,7 +7,7 @@
 # scripts/images/build.sh. Bumps: images/README.md.
 
 ARG BASE_IMAGE
-ARG BUILDER_IMAGE=docker.io/library/golang:1.25-alpine
+ARG BUILDER_IMAGE=docker.io/library/golang:1.26.10-alpine
 
 FROM ${BUILDER_IMAGE} AS gosu-builder
 ARG GOSU_VERSION

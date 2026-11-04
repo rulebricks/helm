@@ -9,8 +9,10 @@
 # .env at the release tag, GOMPLATE_VERSION), injected as build args by
 # scripts/images/build.sh. Bumps: images/README.md.
 
+# GO-2026-5932 is fixed after v0.58.0; pin the reviewed x/crypto fix
+# until a stable release includes it. Keep the dependency resolution reproducible.
 ARG BASE_IMAGE
-ARG BUILDER_IMAGE=docker.io/library/golang:1.26-alpine
+ARG BUILDER_IMAGE=docker.io/library/golang:1.26.10-alpine
 
 # Upstream source, shared by later stages.
 FROM --platform=$BUILDPLATFORM ${BUILDER_IMAGE} AS src
@@ -35,7 +37,7 @@ COPY --from=src /src/packages/otel-collector/builder-config.yaml .
 RUN sed -i "s/__OTEL_COLLECTOR_VERSION__/${OTEL_COLLECTOR_VERSION}/g; s/__OTEL_COLLECTOR_CORE_VERSION__/${OTEL_COLLECTOR_CORE_VERSION}/g; s|output_path:.*|output_path: /build/output|" builder-config.yaml && \
     CGO_ENABLED=0 builder --config=builder-config.yaml --skip-compilation && \
     cd output && \
-    go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.59.0 google.golang.org/grpc@v1.84.0 && \
+    go get golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 golang.org/x/net@v0.62.0 google.golang.org/grpc@v1.84.0 && \
     go mod tidy && \
     go mod verify && \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -mod=readonly -trimpath -tags grpcnotrace -ldflags="-s -w" -o /out/otelcol-hyperdx .
@@ -50,7 +52,7 @@ WORKDIR /contrib
 ADD https://github.com/open-telemetry/opentelemetry-collector-contrib/archive/refs/tags/v${OTEL_COLLECTOR_VERSION}.tar.gz /tmp/contrib.tar.gz
 RUN tar -xzf /tmp/contrib.tar.gz --strip-components=1 && rm /tmp/contrib.tar.gz && \
     cd cmd/opampsupervisor && \
-    go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.59.0 google.golang.org/grpc@v1.84.0 && \
+    go get golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 golang.org/x/net@v0.62.0 google.golang.org/grpc@v1.84.0 && \
     go mod tidy && \
     go mod verify && \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/opampsupervisor .
@@ -68,8 +70,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go install -trimpath -ldflags=
 WORKDIR /gomplate
 ADD https://github.com/hairyhenderson/gomplate/archive/refs/tags/${GOMPLATE_VERSION}.tar.gz /tmp/gomplate.tar.gz
 RUN tar -xzf /tmp/gomplate.tar.gz --strip-components=1 && rm /tmp/gomplate.tar.gz && \
-    go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.59.0 google.golang.org/grpc@v1.84.0 \
-           github.com/go-jose/go-jose/v4@v4.1.5 github.com/go-git/go-git/v5@v5.19.2 \
+    go get golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 golang.org/x/net@v0.62.0 google.golang.org/grpc@v1.84.0 \
+           github.com/go-jose/go-jose/v4@v4.1.6 github.com/go-git/go-git/v5@v5.19.2 \
            go.opentelemetry.io/otel@v1.46.0 go.opentelemetry.io/otel/sdk@v1.46.0 && \
     go mod tidy && \
     go mod verify && \

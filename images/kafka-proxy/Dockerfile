@@ -4,8 +4,10 @@
 # All pins live in images/manifest.yaml (base/ref), injected as build args
 # by scripts/images/build.sh. Bumps: images/README.md.
 
+# GO-2026-5932 is fixed after v0.58.0; pin the reviewed x/crypto fix
+# until a stable release includes it. Keep the dependency resolution reproducible.
 ARG BASE_IMAGE
-ARG BUILDER_IMAGE=docker.io/library/golang:1.26-alpine
+ARG BUILDER_IMAGE=docker.io/library/golang:1.26.10-alpine
 
 FROM ${BUILDER_IMAGE} AS builder
 
@@ -19,7 +21,7 @@ RUN tar -xzf src.tar.gz --strip-components=1 && rm src.tar.gz
 # Drop upstream's vendored tree so re-resolved module fixes actually land.
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
 RUN rm -rf vendor && \
-    go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.59.0 golang.org/x/oauth2@v0.37.0 google.golang.org/grpc@v1.84.0 && \
+    go get golang.org/x/crypto@v0.58.1-0.20261009181718-2f1f834330b2 golang.org/x/net@v0.62.0 golang.org/x/oauth2@v0.37.0 google.golang.org/grpc@v1.84.0 && \
     go mod tidy && \
     go mod verify && \
     go build -mod=readonly -o build/kafka-proxy -ldflags "-X github.com/grepplabs/kafka-proxy/config.Version=${UPSTREAM_VERSION#v} -w -s" .
