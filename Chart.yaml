@@ -64,7 +64,7 @@ dependencies:
     repository: https://kubernetes-sigs.github.io/external-dns/
     condition: external-dns.enabled
   - name: external-secrets
-    version: 2.8.0
+    version: 2.14.0
     repository: https://charts.external-secrets.io
     condition: externalSecrets.installOperator
   - name: cluster-autoscaler

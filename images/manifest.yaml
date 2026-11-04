@@ -81,7 +81,7 @@ images:
   - { name: vector, kind: mirror, source: dhi.io/vector, tag: "0.57.0-debian13", auth: dhi, chartRefs: "values.yaml:vector.image.tag values.yaml:vector-agent.image.tag", digest: "" }
   - { name: external-dns, kind: mirror, source: dhi.io/external-dns, tag: "0.21.0-debian13", auth: dhi, chartRefs: "values.yaml:external-dns.image.tag", digest: "" }
   # external-secrets: DHI now carries it (previously ghcr-sourced while DHI lacked it).
-  - { name: external-secrets, kind: mirror, source: dhi.io/external-secrets, tag: "2.8.0-debian13", auth: dhi, chartRefs: "values.yaml:external-secrets.image.tag values.yaml:external-secrets.webhook.image.tag values.yaml:external-secrets.certController.image.tag", digest: "" }
+  - { name: external-secrets, kind: mirror, source: dhi.io/external-secrets, tag: "2.14.0-debian13", auth: dhi, chartRefs: "values.yaml:external-secrets.image.tag values.yaml:external-secrets.webhook.image.tag values.yaml:external-secrets.certController.image.tag", digest: "" }
   # cluster-autoscaler: CA minor must match the cluster's k8s minor; confirm the
   # target cluster minor before moving this 1.35 pin.
   - { name: cluster-autoscaler, kind: mirror, source: dhi.io/kubernetes-cluster-autoscaler, tag: "1.35.2-debian13", auth: dhi, chartRefs: "values.yaml:cluster-autoscaler.image.tag", digest: "" }
@@ -113,7 +113,7 @@ images:
   - { name: pause, kind: mirror, source: registry.k8s.io/pause, tag: "3.10.2", auth: none, chartRefs: "values.yaml:global.images.pause.tag", digest: "" }
   # node24: setup job needs shell/apk/npm at runtime (no DHI fit); bundled npm
   # refreshed. See images/node24/.
-  - { name: node24, kind: build, context: images/node24, base: docker.io/library/node:24-alpine, tag: "24-alpine-r2", auth: none, target: rulebricks/node, chartRefs: "values.yaml:global.images.node24.tag", digest: "" }
+  - { name: node24, kind: build, context: images/node24, base: docker.io/library/node:24-alpine, tag: "24-alpine-r3", auth: none, args: "NPM_VERSION=12.2.1 UNDICI_VERSION=6.29.1", target: rulebricks/node, chartRefs: "values.yaml:global.images.node24.tag", digest: "" }
   # Filament's temporary Python execution Jobs. See images/filament-python/.
   - { name: filament-python, kind: build, context: images/filament-python, base: "docker.io/library/python:3.13.18-slim-bookworm", tag: "1.0.1", auth: none, chartRefs: "values.yaml:global.images.filamentPython.tag", digest: "" }
   - { name: rclone, kind: mirror, source: docker.io/rclone/rclone, tag: "1.75.2", auth: none, chartRefs: "values.yaml:global.images.rclone.tag", digest: "" }
