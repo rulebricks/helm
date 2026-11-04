@@ -13,3 +13,5 @@ benchmarks/*.json
 reports/*
 
 .DS_Store
+
+prompts

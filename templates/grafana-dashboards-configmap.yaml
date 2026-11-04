@@ -23,5 +23,5 @@ metadata:
   annotations:
     grafana_folder: "Rulebricks"
 data:
-{{ (.Files.Glob "dashboards/*.json").AsConfig | indent 2 }}
+{{ (.Files.Glob "examples/dashboards/*.json").AsConfig | indent 2 }}
 {{- end }}
