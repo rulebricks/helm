@@ -581,10 +581,6 @@ rulebricks:
       # Cap per single payload inside a bulk array (bytes); must stay under
       # the 32 MiB execution-topic cap with envelope headroom.
       itemMaxBytes: 20971520
-      # Admission gate: at most this many concurrent requests larger than the
-      # threshold per replica; excess is shed with 429 + Retry-After.
-      largeBodyThresholdBytes: 8388608
-      largeBodyMaxConcurrent: 2
       # Max chunk fan-out per bulk request (align with solutionPartitions)
       # and the broker-safe per-chunk byte cap (keep under the Kafka message
       # cap with response headroom).
@@ -761,9 +757,6 @@ kafka:
   # forces every internal replication factor to this value.
   replicas: 1
   storage:
-    # Sized to hold the worst case of every per-topic retention.bytes cap
-    # below plus metadata and segment overhead. Kafka halts on a full disk,
-    # so keep headroom when changing topic caps.
     size: 75Gi
     class: gp3
   resources:
@@ -802,7 +795,7 @@ kafka:
     replica.fetch.max.bytes: "134217728"
     replica.fetch.response.max.bytes: "134217728"
     log.retention.bytes: "536870912"
-    log.segment.bytes: "1073741824"
+    log.segment.bytes: "134217728"
     num.replica.fetchers: "4"
     queued.max.requests: "10000"
     replica.socket.receive.buffer.bytes: "1048576"
@@ -843,9 +836,11 @@ kafka:
       replicas: 1
       config:
         retention.ms: "86400000"
+        segment.bytes: "134217728"
+        segment.ms: "60000"
         # Per-partition byte cap, sized for a hot partition during bursts: a
         # cap smaller than the burst backlog deletes unconsumed decision
-        # logs. Cap times partitions must stay within kafka.storage.size.
+        # logs. Include segment overhead when sizing kafka.storage.size.
         retention.bytes: "1073741824"
         # A full-fidelity single-item log contains request + response inside a
         # second JSON envelope, so it needs more than 2x the 20 MiB item cap.

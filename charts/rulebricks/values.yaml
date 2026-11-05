@@ -243,8 +243,6 @@ hps:
     rpcTimeoutMs: 60000 # RPC_TIMEOUT_MS (whole-request Kafka deadline)
     requestTimeoutMs: 30000 # HTTP_REQUEST_TIMEOUT_MS (body receive)
     itemMaxBytes: 20971520 # ITEM_MAX_BYTES (per payload in a bulk array)
-    largeBodyThresholdBytes: 8388608 # LARGE_BODY_THRESHOLD_BYTES (gate)
-    largeBodyMaxConcurrent: 2 # LARGE_BODY_MAX_CONCURRENT (per replica)
     chunkMaxChunks: 64 # CHUNK_MAX_CHUNKS (max fan-out per request)
     chunkHardMaxBytes: 1048576 # CHUNK_HARD_MAX_BYTES (per-chunk input cap)
     responseFetchMaxBytes: 67108864 # RESPONSE_MAX_BYTES_PER_PARTITION (HPS)

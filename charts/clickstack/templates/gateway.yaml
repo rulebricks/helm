@@ -132,7 +132,10 @@ data:
             action: upsert
       batch:
         timeout: 5s
-        send_batch_size: 1024
+        # Amortize ClickHouse part creation across telemetry from every node.
+        # Quiet streams retain the same five-second flush deadline.
+        send_batch_size: 8192
+        send_batch_max_size: 16384
     exporters:
       clickhouse:
         endpoint: ${env:CLICKHOUSE_NATIVE_ENDPOINT}

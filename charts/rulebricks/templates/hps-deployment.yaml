@@ -253,10 +253,6 @@ spec:
               value: {{ $limits.requestTimeoutMs | default 30000 | int64 | quote }}
             - name: ITEM_MAX_BYTES
               value: {{ $limits.itemMaxBytes | default 20971520 | int64 | quote }}
-            - name: LARGE_BODY_THRESHOLD_BYTES
-              value: {{ $limits.largeBodyThresholdBytes | default 8388608 | int64 | quote }}
-            - name: LARGE_BODY_MAX_CONCURRENT
-              value: {{ $limits.largeBodyMaxConcurrent | default 2 | int64 | quote }}
             - name: CHUNK_MAX_CHUNKS
               value: {{ $limits.chunkMaxChunks | default 64 | int64 | quote }}
             - name: CHUNK_HARD_MAX_BYTES
