@@ -152,6 +152,40 @@ data:
                 - anon
     {{- end }}
     {{- if .Values.realtime.enabled }}
+      {{- /* Realtime's REST broadcast endpoint, which supabase-js posts to when a
+           channel sends without an open websocket (server-side senders). Only
+           /api/broadcast is routed: the rest of Realtime's /api scope includes
+           tenant administration, which Realtime guards with API_JWT_SECRET
+           alone. This chart sets that to the project JWT secret, so the public
+           anon key would pass it. Kong evaluates longer prefixes first, so
+           this wins over /realtime/v1/ below. Realtime picks the tenant from
+           the first label of the Host header; Kong sends the upstream host,
+           which is SELF_HOST_TENANT_NAME, exactly as the websocket route does. */}}
+      - name: realtime-v1-rest
+        _comment: "Realtime: /realtime/v1/api/broadcast* -> http://{{ include "supabase.realtime.fullname" . }}:{{ .Values.realtime.service.port }}/api/broadcast*"
+        url: http://{{ include "supabase.realtime.fullname" . }}:{{ .Values.realtime.service.port }}/api/broadcast
+        routes:
+          - name: realtime-v1-rest-broadcast
+            strip_path: true
+            paths:
+              - /realtime/v1/api/broadcast
+        plugins:
+          - name: cors
+          - name: request-transformer
+            config:
+              remove:
+                headers:
+                  - cookie
+                  - Cookie
+          - name: key-auth
+            config:
+              hide_credentials: false
+          - name: acl
+            config:
+              hide_groups_header: true
+              allow:
+                - admin
+                - anon
       - name: realtime-v1
         _comment: "Realtime: /realtime/v1/* -> ws://{{ include "supabase.realtime.fullname" . }}:{{ .Values.realtime.service.port }}/socket/*"
         url: http://{{ include "supabase.realtime.fullname" . }}:{{ .Values.realtime.service.port }}/socket
