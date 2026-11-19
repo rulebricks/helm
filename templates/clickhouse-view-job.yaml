@@ -46,7 +46,7 @@ spec:
         runAsGroup: 65532
       {{- if $ch.persistence.enabled }}
       initContainers:
-        - name: verify-object-storage
+        - name: verify-local-storage
           image: {{ include "rulebricks.image" (dict "root" $ "image" .Values.global.images.busybox "name" "busybox") | quote }}
           imagePullPolicy: IfNotPresent
           securityContext:
@@ -90,23 +90,17 @@ spec:
                 printf '%s' "${response}"
               }
 
-              # A table with no explicit policy must inherit the global remote
-              # default, and the remote disk must support a complete write/read.
+              # ClickHouse keeps its tables on the PVC: a table created with
+              # no explicit policy must land on the local default policy.
               q "CREATE DATABASE IF NOT EXISTS rulebricks"
-              q "DROP TABLE IF EXISTS rulebricks.__object_storage_probe SYNC" "?max_table_size_to_drop=0&max_partition_size_to_drop=0"
-              q "CREATE TABLE rulebricks.__object_storage_probe (id UInt8) ENGINE = MergeTree ORDER BY id"
-              probe_policy=$(q "SELECT storage_policy FROM system.tables WHERE database = 'rulebricks' AND name = '__object_storage_probe' FORMAT TSVRaw")
-              if [ "${probe_policy}" != "object_storage" ]; then
-                echo "ClickHouse global MergeTree policy is '${probe_policy}', expected object_storage" >&2
+              q "DROP TABLE IF EXISTS rulebricks.__storage_probe SYNC"
+              q "CREATE TABLE rulebricks.__storage_probe (id UInt8) ENGINE = MergeTree ORDER BY id"
+              probe_policy=$(q "SELECT storage_policy FROM system.tables WHERE database = 'rulebricks' AND name = '__storage_probe' FORMAT TSVRaw")
+              q "DROP TABLE rulebricks.__storage_probe SYNC"
+              if [ "${probe_policy}" != "default" ]; then
+                echo "ClickHouse global MergeTree policy is '${probe_policy}', expected default (the PVC)" >&2
                 exit 1
               fi
-              q "INSERT INTO rulebricks.__object_storage_probe VALUES (1)"
-              probe_rows=$(q "SELECT count() FROM rulebricks.__object_storage_probe FORMAT TSVRaw")
-              if [ "${probe_rows}" != "1" ]; then
-                echo "ClickHouse object-storage probe returned '${probe_rows}', expected 1" >&2
-                exit 1
-              fi
-              q "DROP TABLE rulebricks.__object_storage_probe SYNC" "?max_table_size_to_drop=0&max_partition_size_to_drop=0"
         {{- if .Values.global.clickstack.enabled }}
         - name: seed-clickstack-schema
           image: {{ include "rulebricks.image" (dict "root" $ "image" .Values.clickstack.collector.image "name" "clickstack-otel-collector") | quote }}
@@ -180,8 +174,8 @@ spec:
 
               [ "${PERSISTENT_MODE}" = "true" ] || exit 0
 
-              # Every MergeTree, including TimeSeries inner tables, must inherit
-              # or explicitly select the remote policy.
+              # No MergeTree may be backed by object storage: the PVC is the
+              # only place ClickHouse keeps table data.
               violations="$(
                 clickhouse-client \
                   --host "${CLICKHOUSE_HOST}" \
@@ -193,13 +187,13 @@ spec:
                     FROM system.tables
                     WHERE database != 'system'
                       AND engine LIKE '%MergeTree%'
-                      AND storage_policy != 'object_storage'
+                      AND storage_policy = 'object_storage'
                     ORDER BY database, name
                     FORMAT TSVRaw
                   "
               )"
               if [ -n "${violations}" ]; then
-                echo "ClickHouse post-seed audit failed; non-system MergeTree tables are not remote-backed:" >&2
+                echo "ClickHouse post-seed audit failed; MergeTree tables are backed by object storage:" >&2
                 printf '%s\n' "${violations}" >&2
                 exit 1
               fi

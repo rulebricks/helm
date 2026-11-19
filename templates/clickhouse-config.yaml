@@ -39,9 +39,16 @@ data:
       <!-- Bound the single server below its pod memory limit and shed excess
            query load instead of relying on the kernel OOM killer. -->
       <max_server_memory_usage_to_ram_ratio>0.75</max_server_memory_usage_to_ram_ratio>
+      <!-- Merges may hold at most this share of the pod's memory; past it, new
+           merges wait. The rest of the server limit stays free for inserts
+           and reads. -->
+      <merges_mutations_memory_usage_to_ram_ratio>0.3</merges_mutations_memory_usage_to_ram_ratio>
       <max_concurrent_queries>64</max_concurrent_queries>
       <max_concurrent_select_queries>48</max_concurrent_select_queries>
-      <max_concurrent_insert_queries>16</max_concurrent_insert_queries>
+      <!-- Above what the fixed-concurrency writers (Vector's decision-log
+           inserts, the telemetry collector) can have in flight together, so
+           none is refused and left to retry. -->
+      <max_concurrent_insert_queries>32</max_concurrent_insert_queries>
     </clickhouse>
   05-server-logging.xml: |
     <clickhouse>
@@ -53,10 +60,6 @@ data:
         <count>3</count>
       </logger>
     </clickhouse>
-  {{- if .Values.clickhouse.persistence.enabled }}
-  08-object-storage.xml: |
-{{ include "rulebricks.clickhouse.objectStorageXml" $cctx | indent 4 }}
-  {{- end }}
   09-decision-log-storage.xml: |
 {{ include "rulebricks.clickhouse.decisionLogStorageXml" $cctx | indent 4 }}
   zz-disable-system-logs.xml: |

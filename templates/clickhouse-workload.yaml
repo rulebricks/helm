@@ -10,11 +10,11 @@
 {{- if and (not $ch.persistence.enabled) .Values.global.clickstack.enabled }}
 {{- fail "clickhouse.persistence.enabled=false requires the ClickStack observability backend to be disabled (global.clickstack.enabled=false): ClickStack stores telemetry in local MergeTree tables that would be lost on every ClickHouse pod restart. Enable persistence or disable ClickStack." }}
 {{- end }}
-{{- /* Persistence is the statefulness switch. The original StatefulSet PVC
-     remains dedicated to the catalog and object metadata. A standalone PVC
-     holds the bounded cache and a size-limited emptyDir holds temporary spill;
-     native MergeTree parts live in object storage. Disabling persistence
-     selects the archive-backed Deployment + emptyDir mode. */}}
+{{- /* Persistence is the statefulness switch. The StatefulSet PVC is the hot
+     store: it holds the decision-log table (the most recent logs that fit)
+     and ClickStack telemetry, and a size-limited emptyDir holds temporary
+     spill. ClickHouse writes no tables to object storage. Disabling
+     persistence selects the archive-backed Deployment + emptyDir mode. */}}
 {{- $stateful := $ch.persistence.enabled }}
 {{- /* Stateless mode renders a Deployment, not a StatefulSet: there are no
      volume claims and no reliance on stable pod identity (the ClusterIP
@@ -105,24 +105,22 @@ spec:
           command: ["/bin/sh", "-ec"]
           args:
             - |
-              # The cache and temp paths lived on the catalog PVC in older
-              # releases. Remove only those disposable bytes before nested
-              # mounts hide them, then preserve/create the metadata directory.
+              # Older releases kept a read cache, temporary spill, and the
+              # metadata of object-storage tables on this PVC. Tables now live
+              # on the PVC itself and the pre-upgrade reset has dropped every
+              # object-storage table, so those directories hold only disposable
+              # bytes: clear them before the temp mount hides one of them.
               for path in \
                 /clickhouse-data/disks/object_storage_cache \
+                /clickhouse-data/disks/object_storage \
                 /clickhouse-data/tmp; do
                 if [ -d "${path}" ]; then
                   find "${path}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
                 fi
               done
-              mkdir -p /clickhouse-data/disks/object_storage
-              touch /clickhouse-cache/.write-test
-              rm /clickhouse-cache/.write-test
           volumeMounts:
             - name: data
               mountPath: /clickhouse-data
-            - name: object-storage-cache
-              mountPath: /clickhouse-cache
       {{- end }}
       containers:
         - name: clickhouse
@@ -220,10 +218,6 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/clickhouse
-            {{- if $stateful }}
-            - name: object-storage-cache
-              mountPath: /var/lib/clickhouse/disks/object_storage_cache
-            {{- end }}
             - name: temp
               mountPath: /var/lib/clickhouse/tmp
             - name: logs
@@ -249,11 +243,6 @@ spec:
         - name: users-d
           configMap:
             name: {{ include "rulebricks.clickhouse.fullname" . }}-users-d
-        {{- if $stateful }}
-        - name: object-storage-cache
-          persistentVolumeClaim:
-            claimName: {{ include "rulebricks.clickhouse.fullname" . }}-cache
-        {{- end }}
         {{- if not $stateful }}
         {{- /* Stateless mode: /var/lib/clickhouse only holds the decision-log
              view definitions (metadata) plus scratch space for queries. The

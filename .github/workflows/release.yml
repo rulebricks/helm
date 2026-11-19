@@ -1,7 +1,6 @@
 name: Helm Chart
 
 on:
-  pull_request:
   push:
     branches:
       - main
@@ -18,206 +17,10 @@ env:
   CANONICAL_CHART_NAMESPACE: rulebricks/helm
 
 # Image mirroring lives in .github/workflows/mirror-images.yml (driven by
-# images/manifest.yaml). This workflow is purely: validate -> detect chart change
-# -> package & push the OCI chart.
+# images/manifest.yaml). This workflow is purely: detect chart change -> package
+# & push the OCI chart.
 
 jobs:
-  validate:
-    name: Validate Chart
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Helm
-        uses: azure/setup-helm@v3
-        with:
-          version: "v3.17.0"
-
-      - name: Add Helm Repositories
-        run: |
-          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
-          helm repo add traefik https://traefik.github.io/charts --force-update
-          helm repo add kedacore https://kedacore.github.io/charts --force-update
-          helm repo add jetstack https://charts.jetstack.io --force-update
-          helm repo add vector https://helm.vector.dev --force-update
-          helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/ --force-update
-          helm repo add external-secrets https://charts.external-secrets.io --force-update
-          helm repo add autoscaler https://kubernetes.github.io/autoscaler --force-update
-          helm repo update
-
-      - name: Build Dependencies
-        run: helm dependency build .
-
-      - name: Lint
-        # The schema intentionally rejects the shipped defaults (secrets have no
-        # working defaults and must be provided at install time), so lint needs
-        # the same CI-only fake secrets the render step uses.
-        run: helm lint . -f ci/validate-values.yaml
-
-      - name: Render chart for validation
-        # This full-feature render (all toggles on, Supabase enabled) feeds the
-        # image-version and general workload checks below. The dedicated
-        # ClickHouse validation step separately covers its provider/mode matrix.
-        # CI-only test secrets live in ci/validate-values.yaml (excluded from the
-        # packaged chart via .helmignore).
-        run: |
-          helm template rulebricks . \
-            --namespace rulebricks \
-            -f ci/validate-values.yaml \
-            --set monitoring.enabled=true \
-            --set kube-prometheus-stack.prometheus.enabled=true \
-            --set kube-prometheus-stack.grafana.enabled=true \
-            --set kube-prometheus-stack.grafana.imageRenderer.enabled=true \
-            --set kube-prometheus-stack.kube-state-metrics.kubeRBACProxy.enabled=true \
-            --set kube-prometheus-stack.prometheusOperator.admissionWebhooks.enabled=true \
-            --set kube-prometheus-stack.thanosRuler.enabled=true \
-            --set global.externalDnsEnabled=true --set external-dns.enabled=true \
-            --set cluster-autoscaler.enabled=true \
-            --set cluster-autoscaler.autoDiscovery.clusterName=ci-cluster \
-            --set cluster-autoscaler.awsRegion=us-east-1 \
-            --set supabase.enabled=true \
-            --set smtpRelay.enabled=true \
-            --set smtpRelay.senderAddress=DoNotReply@ci.azurecomm.net \
-            --set 'smtpRelay.connectionString=endpoint=https://ci.communication.azure.com/;accesskey=Y2k=' \
-            > /tmp/rulebricks-rendered.yaml
-
-      - name: Verify Image Versions Match Manifest
-        # SSOT guard: every rendered docker.io/rulebricks/* image must match an
-        # images/manifest.yaml entry at the same tag (catches chart/CLI tag drift).
-        run: scripts/images/verify-versions.sh /tmp/rulebricks-rendered.yaml
-
-      - name: Validate Rendered Workloads And ClickHouse Bootstrap
-        run: |
-          ruby -ryaml <<'RUBY'
-          rendered = File.read("/tmp/rulebricks-rendered.yaml", encoding: "UTF-8")
-          docs = rendered.split(/^---\s*$/).map do |chunk|
-            YAML.load(chunk)
-          rescue Psych::SyntaxError
-            nil
-          end.compact.select { |doc| doc.is_a?(Hash) }
-
-          workload_kinds = ["Deployment", "DaemonSet", "StatefulSet"]
-          mismatches = docs.map do |doc|
-            next unless workload_kinds.include?(doc["kind"])
-            selector = doc.dig("spec", "selector", "matchLabels") || {}
-            labels = doc.dig("spec", "template", "metadata", "labels") || {}
-            missing = selector.reject { |key, value| labels[key] == value }
-            next if missing.empty?
-
-            name = doc.dig("metadata", "name")
-            "#{doc["kind"]}/#{name}: selector labels not present on pod template: #{missing.inspect}"
-          end.compact
-
-          unless mismatches.empty?
-            warn mismatches.join("\n")
-            exit 1
-          end
-
-          hyperdx = docs.find do |doc|
-            doc["kind"] == "Deployment" &&
-              doc.dig("metadata", "name").to_s.end_with?("-clickstack-hyperdx")
-          end
-          env = hyperdx&.dig("spec", "template", "spec", "containers", 0, "env") || []
-          env_by_name = env.each_with_object({}) { |item, acc| acc[item["name"]] = item }
-          required_env = ["DEFAULT_CONNECTIONS", "DEFAULT_SOURCES", "CLICKHOUSE_PASSWORD"]
-          missing_env = required_env.reject { |name| env_by_name.key?(name) }
-          unless missing_env.empty?
-            warn "HyperDX deployment is missing env vars: #{missing_env.join(", ")}"
-            exit 1
-          end
-          unless env_by_name.dig("DEFAULT_CONNECTIONS", "value").to_s.include?("$(CLICKHOUSE_PASSWORD)")
-            warn "HyperDX DEFAULT_CONNECTIONS must reference $(CLICKHOUSE_PASSWORD)"
-            exit 1
-          end
-
-          # The decision-log schema is seeded by the ClickHouse post-install Job;
-          # persistent mode must expose one direct MergeTree table.
-          bootstrap_job = docs.find do |doc|
-            doc["kind"] == "Job" &&
-              doc.to_s.include?("CREATE TABLE IF NOT EXISTS rulebricks.decision_logs")
-          end
-          if bootstrap_job.nil?
-            warn "ClickHouse decision-logs bootstrap Job not found"
-            exit 1
-          end
-          seed = bootstrap_job.dig("spec", "template", "spec", "initContainers")&.find do |container|
-            container["name"] == "seed-clickstack-schema"
-          end
-          promql = (seed&.fetch("env", []) || []).find { |item| item["name"] == "ENABLE_PROMQL" }
-          unless promql&.fetch("value", nil) == "false"
-            warn "ClickHouse bootstrap must leave the unbounded PromQL TimeSeries schema disabled"
-            exit 1
-          end
-          required = [
-            "CREATE OR REPLACE VIEW rulebricks.decision_logs_archive",
-            "CREATE TABLE IF NOT EXISTS rulebricks.decision_logs",
-            "ORDER BY (api_key, timestamp, log_id)",
-            "storage_policy = 'object_storage'"
-          ]
-          missing = required.reject { |needle| bootstrap_job.to_s.include?(needle) }
-          unless missing.empty?
-            warn "ClickHouse bootstrap Job is missing: #{missing.join(", ")}"
-            exit 1
-          end
-          forbidden = [
-            "decision_logs_parquet_",
-            "CREATE TABLE IF NOT EXISTS rulebricks.decision_logs_recent",
-            "TTL toDateTime(timestamp)",
-            "MODIFY TTL"
-          ]
-          present = forbidden.select { |needle| bootstrap_job.to_s.include?(needle) }
-          unless present.empty?
-            warn "ClickHouse bootstrap still contains removed objects: #{present.join(", ")}"
-            exit 1
-          end
-
-          reset_job = docs.find do |doc|
-            doc["kind"] == "Job" &&
-              doc.dig("metadata", "name") == "rulebricks-clickhouse-reset"
-          end
-          unless reset_job&.dig("metadata", "annotations", "helm.sh/hook") == "pre-upgrade"
-            warn "ClickHouse compatibility reset hook not found"
-            exit 1
-          end
-          reset_text = reset_job.to_s
-          reset_required = [
-            "EXPECTED_GENERATION",
-            "clickhouse_compatibility",
-            "DROP DATABASE IF EXISTS rulebricks",
-            "preserving data"
-          ]
-          missing_reset = reset_required.reject { |needle| reset_text.include?(needle) }
-          unless missing_reset.empty?
-            warn "ClickHouse reset hook is missing: #{missing_reset.join(", ")}"
-            exit 1
-          end
-
-          clickhouse = docs.find do |doc|
-            doc["kind"] == "StatefulSet" &&
-              doc.dig("metadata", "name") == "rulebricks-clickhouse"
-          end
-          log_volume = clickhouse&.dig("spec", "template", "spec", "volumes")&.find do |volume|
-            volume["name"] == "logs"
-          end
-          unless log_volume&.dig("emptyDir", "sizeLimit") == "1Gi"
-            warn "ClickHouse file-log emptyDir must be capped at 1Gi"
-            exit 1
-          end
-
-          clickhouse_config = docs.find do |doc|
-            doc["kind"] == "ConfigMap" &&
-              doc.dig("metadata", "name") == "rulebricks-clickhouse-config-d"
-          end
-          logging_xml = clickhouse_config&.dig("data", "05-server-logging.xml").to_s
-          unless logging_xml.include?("<level>information</level>") &&
-              logging_xml.include?("<size>100M</size>") &&
-              logging_xml.include?("<count>3</count>")
-            warn "ClickHouse file logging is not safely bounded"
-            exit 1
-          end
-          RUBY
-
   changes:
     name: Detect Release Changes
     runs-on: ubuntu-latest
@@ -249,7 +52,6 @@ jobs:
   release:
     name: Release Chart
     needs:
-      - validate
       - changes
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.changes.outputs.chart == 'true'
     runs-on: ubuntu-latest

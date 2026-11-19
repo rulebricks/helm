@@ -37,7 +37,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
 {{- define "rulebricks.clickhouse.compatibilityGeneration" -}}
-object-storage-v1
+pvc-hot-store-v1
 {{- end -}}
 
 {{- define "rulebricks.clickhouse.adminDatabase" -}}

@@ -25,7 +25,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 30
-  activeDeadlineSeconds: 900
+  activeDeadlineSeconds: 3600
   template:
     metadata:
       labels:
@@ -98,15 +98,22 @@ spec:
                 )"
               fi
               incompatible="$(
-                q "SELECT count() FROM system.tables WHERE database NOT IN ('system', '${ADMIN_DATABASE}') AND engine LIKE '%MergeTree%' AND storage_policy != 'object_storage' FORMAT TSVRaw"
+                q "SELECT count() FROM system.tables WHERE database != '${ADMIN_DATABASE}' AND engine LIKE '%MergeTree%' AND storage_policy = 'object_storage' FORMAT TSVRaw"
               )"
 
-              if [ "${current_generation}" = "${EXPECTED_GENERATION}" ] && [ "${incompatible}" = "0" ]; then
-                echo "ClickHouse compatibility generation ${EXPECTED_GENERATION} is current; preserving data"
+              # Only object-storage tables (releases 0.3.78 up to this change)
+              # cannot be carried over: the new server has no object-storage
+              # disk and could not load them, system log tables included.
+              # Tables already on the PVC are kept whatever the marker says.
+              if [ "${incompatible}" = "0" ]; then
+                echo "No object-storage tables (generation '${current_generation:-unset}', expected ${EXPECTED_GENERATION}); preserving data"
                 exit 0
               fi
 
-              echo "Resetting ClickHouse databases for compatibility generation ${EXPECTED_GENERATION}; previous generation was '${current_generation:-unset}'"
+              # Dropping the tables also deletes their objects under the
+              # ClickHouse prefix in object storage. The raw decision-log
+              # archive is a different prefix and is not touched.
+              echo "Dropping ${incompatible} object-storage tables for generation ${EXPECTED_GENERATION}; previous generation was '${current_generation:-unset}'"
               q "DROP DATABASE IF EXISTS rulebricks SYNC" "?max_table_size_to_drop=0&max_partition_size_to_drop=0"
               q "DROP DATABASE IF EXISTS \`${CLICKSTACK_DATABASE}\` SYNC" "?max_table_size_to_drop=0&max_partition_size_to_drop=0"
 
@@ -124,10 +131,10 @@ spec:
               done
 
               remaining="$(
-                q "SELECT database, name, storage_policy FROM system.tables WHERE database NOT IN ('system', '${ADMIN_DATABASE}') AND engine LIKE '%MergeTree%' AND storage_policy != 'object_storage' ORDER BY database, name FORMAT TSVRaw"
+                q "SELECT database, name, storage_policy FROM system.tables WHERE database != '${ADMIN_DATABASE}' AND engine LIKE '%MergeTree%' AND storage_policy = 'object_storage' ORDER BY database, name FORMAT TSVRaw"
               )"
               if [ -n "${remaining}" ]; then
-                echo "Incompatible local MergeTree tables remain after the ClickHouse reset:" >&2
+                echo "Object-storage MergeTree tables remain after the ClickHouse reset:" >&2
                 printf '%s\n' "${remaining}" >&2
                 exit 1
               fi

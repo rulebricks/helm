@@ -224,10 +224,9 @@
             },
             "paths": {
               "type": "object",
-              "description": "Per-purpose key prefixes within the single bucket/container. The ClickHouse prefix contains native database objects and must not be lifecycle-deleted outside ClickHouse.",
+              "description": "Per-purpose key prefixes within the single bucket/container.",
               "properties": {
                 "decisionLogs": { "type": "string" },
-                "clickhouse": { "type": "string", "minLength": 1 },
                 "dbBackups": { "type": "string" }
               }
             }
@@ -1322,25 +1321,16 @@
         "enabled": { "type": "boolean", "default": true },
         "persistence": {
           "type": "object",
-          "description": "Statefulness switch. Enabled keeps ClickHouse catalog/object metadata on the original StatefulSet PVC and defaults MergeTree tables to object storage. An incompatible internal storage generation triggers a ClickHouse-only reset before upgrade; ordinary upgrades preserve data. Disabled selects the archive-backed Deployment with emptyDir; ClickStack requires persistence.",
+          "description": "Statefulness switch. Enabled stores the decision_logs table and ClickStack telemetry on the StatefulSet PVC as a hot store of the most recent logs; a retention CronJob drops the oldest day partitions at 75% disk usage. ClickHouse writes no tables to object storage. Disabled runs the stateless archive-view mode.",
           "properties": {
             "enabled": { "type": "boolean", "default": true },
             "size": { "type": "string" },
-            "storageClass": { "type": "string" },
-            "keepFreeSpaceBytes": { "type": "integer", "minimum": 1048576, "default": 21474836480 }
-          }
-        },
-        "cache": {
-          "type": "object",
-          "description": "Disposable ClickHouse object-storage read cache on a standalone release-scoped PVC.",
-          "properties": {
-            "size": { "type": "string", "default": "100Gi" },
             "storageClass": { "type": "string" }
           }
         },
         "temp": {
           "type": "object",
-          "description": "Node-ephemeral ClickHouse query spill, isolated from persistent metadata and cache.",
+          "description": "Node-ephemeral ClickHouse query spill, isolated from the persistent volume.",
           "properties": {
             "sizeLimit": { "type": "string", "default": "20Gi" }
           }

@@ -153,10 +153,6 @@ global:
     # Per-purpose key prefixes within the single bucket/container.
     paths:
       decisionLogs: "decision-logs"
-      # Native ClickHouse MergeTree objects. Keep this separate from the raw
-      # decision-log archive above. Never attach an external lifecycle deletion
-      # policy to this prefix; ClickHouse owns object creation and deletion.
-      clickhouse: "clickhouse"
       dbBackups: "db-backups"
   # Switch for the built-in ClickStack observability backend (lives under
   # global so all subcharts can read it).
@@ -963,29 +959,22 @@ clickhouse:
     # clickstack.clickhouse.existingSecret.
     existingSecret: '{{ printf "%s-clickhouse-credentials" .Release.Name }}'
     existingSecretKey: admin-password
-  # enabled=true keeps ClickHouse metadata on a PVC and stores native MergeTree
-  # objects under global.storage.paths.clickhouse. The original StatefulSet PVC
-  # remains catalog/metadata-only; cache and temporary spill are isolated below.
-  # Persistent MergeTrees default to object_storage. An incompatible storage
-  # generation triggers a ClickHouse-only pre-upgrade reset before that default
-  # is applied; ordinary upgrades preserve data.
-  # enabled=false runs the existing stateless archive-view mode on emptyDir.
-  # ClickStack telemetry requires persistence.
+  # enabled=true: decision logs (and ClickStack telemetry) are stored on a PVC
+  # as a hot store of the most recent logs; older logs are read from the
+  # archive, which is the durable copy. `size` is how much stays hot:
+  # ClickHouse uses up to 75% of it, then the retention CronJob drops the
+  # oldest days until 25% is free. Decision logs leave the hot store after 30
+  # days in any case.
+  # enabled=false: stateless archive-view mode on emptyDir, no PVC. ClickStack
+  # telemetry requires persistence.
   #
-  # Native object paths are ClickHouse-managed and must not have lifecycle expiry.
+  # Upgrading from 0.3.78 or later (tables in object storage): a pre-upgrade
+  # hook drops those tables once and the hot store refills from new logs. The
+  # archive is not touched.
   persistence:
     enabled: true
     size: 100Gi
-    # ClickHouse refuses new local reservations before the catalog disk reaches
-    # zero bytes. This does not resize or replace the StatefulSet claim.
-    keepFreeSpaceBytes: 21474836480
-  # Disposable read-through cache on a standalone release-scoped PVC. It is not
-  # part of volumeClaimTemplates, so adding it is safe for existing StatefulSets.
-  cache:
-    size: 100Gi
-    # Empty inherits persistence.storageClass.
-    storageClass: ""
-  # Query spill is node-ephemeral and cannot consume either persistent volume.
+  # Query spill is node-ephemeral and cannot consume the persistent volume.
   temp:
     sizeLimit: 20Gi
   resources:
@@ -1374,11 +1363,33 @@ smtpRelay:
   tolerations: []
   affinity: {}
 
+kafkaBridge:
+  enabled: false
+  # Cloud provider for the upstream auth method: "aws" | "gcp"
+  provider: ""
+  # Region (required for AWS MSK IAM signing)
+  region: ""
+  # Comma-separated upstream broker list (the real managed-Kafka brokers).
+  brokers: ""
+  # Local port the proxy listens on; Vector points KAFKA_BOOTSTRAP_SERVERS here.
+  localPort: 19092
+  image: "docker.io/rulebricks/kafka-proxy:0.4.3-r3"
+  # Workload identity used by the bridge. AWS: IRSA role ARN; GCP: Workload
+  # Identity service account email. The CLI writes the matching annotation
+  # onto the Vector and HPS service accounts.
+  awsRoleArn: ""
+  gcpServiceAccountEmail: ""
+
 # =============================================================================
 # DECISION LOGS (Vector)
-# Aggregates and forwards rule execution logs to one or more configurable sinks (console, S3, etc.)
-# The Kafka broker address is automatically configured via the vector-env-configmap.yaml template.
+# Reads decision logs from Kafka and writes them to:
+# 1. Object storage: the durable archive, for long-term retention
+# 2. ClickHouse (with clickhouse.persistence.enabled): the hot store of recent
+#    logs that the app lists and searches
+# Pod logs are shipped separately by vector-agent further down (off by default).
+# The Kafka broker address is configured by the vector-env-configmap.yaml template.
 # =============================================================================
+
 vector:
   enabled: true
   image:
@@ -1401,7 +1412,9 @@ vector:
       cpu: "500m"
       memory: "1Gi"
     limits:
-      cpu: "2"
+      # Both decision-log pipelines together peak near 2.5 cores per pod at
+      # 30k logs/s.
+      cpu: "3"
       memory: "4Gi"
   service:
     enabled: true
@@ -1486,6 +1499,18 @@ vector:
           name: vector-kafka-credentials
           key: KAFKA_SASL_PASSWORD
           optional: true
+    # For the ClickHouse pipeline below (the CLI adds it with the pipeline):
+    # - name: CLICKHOUSE_PASSWORD
+    #   valueFrom:
+    #     secretKeyRef:
+    #       name: "<release>-clickhouse-credentials"
+    #       key: admin-password
+  # Two independent pipelines share these pods and nothing else: each has its
+  # own Kafka consumer group, source, sink and acknowledgements.
+  #   kafka            -> normalize_logs -> decision_logs    (archive)
+  #   kafka_clickhouse -> decision_logs_clickhouse           (hot store)
+  # A slow or restarting ClickHouse only makes the second one wait, with its
+  # backlog held in Kafka. The archive never waits on it.
   customConfig:
     sources:
       kafka:
@@ -1511,6 +1536,9 @@ vector:
           message.max.bytes: "67108864"
           fetch.message.max.bytes: "1048576"
           fetch.max.bytes: "134217728"
+          # Read-ahead cap in bytes per partition: a reader that falls behind
+          # holds a fixed amount however far behind it is.
+          queued.max.messages.kbytes: "16384"
         # TLS + SASL are driven by env from vector-kafka-env. Disabled by default
         # (in-cluster Kafka and the bridge path both use plaintext).
         tls:
@@ -1520,6 +1548,31 @@ vector:
           mechanism: "${KAFKA_SASL_MECHANISM:-PLAIN}"
           # username/password are intentionally omitted; the CLI injects them
           # for external SASL Kafka. Do not add empty-string defaults here.
+      # ==== ClickHouse pipeline: source ====
+      # Add with the decision_logs_clickhouse sink below, and only when
+      # clickhouse.persistence.enabled=true (the stateless mode has no table
+      # to insert into). Same topic, its own consumer group: no new topic,
+      # but Kafka ACLs/IAM must allow this group name too.
+      # Every limit is in bytes, because one log record can be megabytes.
+      # fetch.max.bytes must be >= message.max.bytes or the client won't start.
+      #
+      # kafka_clickhouse:
+      #   type: kafka
+      #   bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-rulebricks-kafka-kafka-bootstrap:9092}"
+      #   group_id: "${KAFKA_CONSUMER_GROUP:-vector-consumers}-clickhouse"
+      #   topics:
+      #     - "${KAFKA_LOG_TOPIC:-logs}"
+      #   auto_offset_reset: latest
+      #   librdkafka_options:
+      #     message.max.bytes: "67108864"
+      #     fetch.message.max.bytes: "4194304"
+      #     fetch.max.bytes: "67108864"
+      #     queued.max.messages.kbytes: "16384"
+      #   tls:
+      #     enabled: ${KAFKA_TLS_ENABLED:-false}
+      #   sasl:
+      #     enabled: ${KAFKA_SASL_ENABLED:-false}
+      #     mechanism: "${KAFKA_SASL_MECHANISM:-PLAIN}"
     transforms:
       normalize_logs:
         type: remap
@@ -1580,6 +1633,48 @@ vector:
       #     when_full: block
       #   # Authentication via IRSA (recommended) - no credentials needed in config.
       #   # Vector will use the IAM role attached to its service account.
+      #
+      # ==== ClickHouse pipeline: sink ====
+      # Fed by kafka_clickhouse above, never by normalize_logs. Each Kafka
+      # record is forwarded unchanged and ClickHouse parses it, so the buffer
+      # and batch limits are real bytes for large and small records alike.
+      # Acknowledged with a blocking buffer: nothing is dropped, and a slow
+      # ClickHouse shows up as Kafka lag (bounded by the topic's retention).
+      # A small fixed number of large inserts, one connection each. Spaces in
+      # the uri are "+" because the sink reads "%" as a time format.
+      #
+      # decision_logs_clickhouse:
+      #   type: http
+      #   inputs:
+      #     - kafka_clickhouse
+      #   method: post
+      #   uri: "http://{{ .Release.Name }}-clickhouse:8123/?query=INSERT+INTO+rulebricks.decision_logs+FORMAT+JSONEachRow&input_format_skip_unknown_fields=1&date_time_input_format=best_effort&input_format_allow_errors_num=100&input_format_allow_errors_ratio=0.001"
+      #   healthcheck:
+      #     enabled: true
+      #     uri: "http://{{ .Release.Name }}-clickhouse:8123/ping"
+      #   auth:
+      #     strategy: basic
+      #     user: rulebricks
+      #     password: "${CLICKHOUSE_PASSWORD}"
+      #   encoding:
+      #     codec: text
+      #   framing:
+      #     method: newline_delimited
+      #   compression: zstd
+      #   acknowledgements:
+      #     enabled: true
+      #   buffer:
+      #     type: memory
+      #     max_size: 134217728
+      #     when_full: block
+      #   batch:
+      #     max_bytes: 67108864
+      #     timeout_secs: 5
+      #   request:
+      #     concurrency: 4
+      #     timeout_secs: 600
+      #     headers:
+      #       Connection: close
 
 # =============================================================================
 # VECTOR KAFKA BRIDGE (token-auth managed Kafka)
@@ -1590,22 +1685,7 @@ vector:
 # sidecar to vector.extraContainers (example below), and annotate the Vector
 # service account with the cloud identity.
 # =============================================================================
-kafkaBridge:
-  enabled: false
-  # Cloud provider for the upstream auth method: "aws" | "gcp"
-  provider: ""
-  # Region (required for AWS MSK IAM signing)
-  region: ""
-  # Comma-separated upstream broker list (the real managed-Kafka brokers).
-  brokers: ""
-  # Local port the proxy listens on; Vector points KAFKA_BOOTSTRAP_SERVERS here.
-  localPort: 19092
-  image: "docker.io/rulebricks/kafka-proxy:0.4.3-r3"
-  # Workload identity used by the bridge. AWS: IRSA role ARN; GCP: Workload
-  # Identity service account email. The CLI writes the matching annotation
-  # onto the Vector and HPS service accounts.
-  awsRoleArn: ""
-  gcpServiceAccountEmail: ""
+
 #
 # Example vector.extraContainers entry for AWS MSK IAM (generated by the CLI):
 #
@@ -1765,9 +1845,9 @@ vector-agent:
 # CLICKSTACK OBSERVABILITY BACKEND
 # Built-in logs, traces, and mirrored metrics via ClickHouse + HyperDX. When
 # enabled, the ClickStack OTel gateway owns the <release>-otel-collector service
-# that app/HPS/worker/Traefik already send OTLP to. Persistent ClickStack and
-# decision-log MergeTree objects use the native ClickHouse object-storage prefix;
-# the independent raw NDJSON decision archive remains available for fallback.
+# that app/HPS/worker/Traefik already send OTLP to. ClickStack telemetry and
+# the decision-log hot store share the ClickHouse PVC; the independent raw
+# NDJSON decision archive in object storage is the durable decision-log copy.
 # =============================================================================
 clickstack:
   # NOTE: the on/off switch is global.clickstack.enabled (the subchart's

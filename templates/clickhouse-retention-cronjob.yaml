@@ -1,0 +1,197 @@
+{{- if and .Values.clickhouse.enabled .Values.clickhouse.persistence.enabled }}
+{{- $ch := .Values.clickhouse }}
+{{- $clickstack := .Values.clickstack | default dict -}}
+{{- $clickstackClickhouse := $clickstack.clickhouse | default dict -}}
+{{- $otelDb := $clickstackClickhouse.database | default "otel" }}
+{{- /* The ClickHouse PVC is a hot store of the most recent logs; the archive
+     in object storage is the durable copy. TTLs cap age while there is room.
+     Above 75% disk usage this job drops the oldest day partition on the PVC
+     (decision logs or ClickStack telemetry) until 25% is free. Under an
+     extreme burst that can include the current day: keeping ingestion alive
+     matters more than a particular local window, and the archive is
+     unaffected. A dropped decision-log day is dropped from the list index
+     (decision_log_index, where a deployment has it) in the same step.
+
+     The clickhouse-server image has no shell, so this runs busybox against
+     the HTTP interface, with POST because ClickHouse rejects ALTER over GET. */}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-retention" (include "rulebricks.clickhouse.fullname" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 240
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: clickhouse-retention
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/component: retention
+            app.kubernetes.io/managed-by: {{ .Release.Service }}
+            rulebricks.com/workload-group: infrastructure
+            {{- with .Values.global.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: {{ include "rulebricks-chart.registrySecretName" . }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+          containers:
+            - name: retention
+              image: {{ include "rulebricks.image" (dict "root" . "image" .Values.global.images.busybox "name" "busybox") | quote }}
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: CLICKHOUSE_HOST
+                  value: {{ include "rulebricks.clickhouse.fullname" . | quote }}
+                - name: CLICKHOUSE_USER
+                  value: {{ $ch.auth.username | default "rulebricks" | quote }}
+                - name: CLICKSTACK_DATABASE
+                  value: {{ $otelDb | quote }}
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "rulebricks.clickhouse.credentialSecret" . }}
+                      key: {{ $ch.auth.existingSecretKey | default "admin-password" }}
+              resources:
+                requests:
+                  cpu: "10m"
+                  memory: "32Mi"
+                limits:
+                  cpu: "100m"
+                  memory: "64Mi"
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  set -f
+                  q() {
+                    query="$1"
+                    settings="${2:-}"
+                    headers="/tmp/clickhouse-headers.$$"
+                    response=""
+                    if ! response=$(wget -S -O - \
+                      --header "X-ClickHouse-User: ${CLICKHOUSE_USER}" \
+                      --header "X-ClickHouse-Key: ${CLICKHOUSE_PASSWORD}" \
+                      --post-data "${query}" \
+                      "http://${CLICKHOUSE_HOST}:8123/${settings}" \
+                      2>"${headers}"); then
+                      echo "ClickHouse query failed: ${query}" >&2
+                      # BusyBox wget does not reliably print ClickHouse's 500
+                      # response body, but -S preserves the status and
+                      # X-ClickHouse-Exception-Code header. Print both when
+                      # available so retention failures are diagnosable.
+                      cat "${headers}" >&2
+                      if [ -n "${response}" ]; then
+                        printf '%s\n' "${response}" >&2
+                      fi
+                      rm -f "${headers}"
+                      return 1
+                    fi
+                    rm -f "${headers}"
+                    printf '%s' "${response}"
+                  }
+
+                  case "${CLICKSTACK_DATABASE}" in
+                    ""|system|rulebricks|*[!a-zA-Z0-9_]*)
+                      echo "unsafe ClickStack database name '${CLICKSTACK_DATABASE}'" >&2
+                      exit 1
+                      ;;
+                  esac
+
+                  i=0
+                  while [ "$i" -lt 128 ]; do
+                    free_ok=$(q "SELECT free_space >= 0.25 * total_space FROM system.disks WHERE name = 'default' FORMAT TSVRaw")
+                    if [ "$free_ok" = "1" ]; then
+                      echo "ClickHouse hot store healthy (below 75% used)"
+                      exit 0
+                    fi
+                    if [ "$free_ok" != "0" ]; then
+                      echo "unexpected system.disks response '${free_ok}'" >&2
+                      exit 1
+                    fi
+
+                    candidate=$(q "SELECT database, table, partition_id
+                  FROM (
+                    SELECT
+                      database,
+                      table,
+                      partition_id,
+                      if(
+                        match(partition_id, '^[0-9]{8}$'),
+                        toDateTime(concat(substring(partition_id, 1, 4), '-', substring(partition_id, 5, 2), '-', substring(partition_id, 7, 2))) + INTERVAL 1 DAY - INTERVAL 1 SECOND,
+                        max(max_time)
+                      ) AS newest_time,
+                      sum(bytes_on_disk) AS partition_bytes
+                    FROM system.parts
+                    WHERE active
+                      AND (
+                        (database = 'rulebricks' AND table = 'decision_logs')
+                        OR database = '${CLICKSTACK_DATABASE}'
+                      )
+                    GROUP BY database, table, partition_id
+                  )
+                  ORDER BY newest_time ASC, partition_bytes DESC, database ASC, table ASC, partition_id ASC
+                  LIMIT 1
+                  FORMAT TSVRaw")
+                    if [ -z "$candidate" ]; then
+                      echo "ClickHouse hot store is above 75% used but has no evictable partitions"
+                      exit 0
+                    fi
+
+                    old_ifs="$IFS"
+                    IFS="$(printf '\t')"
+                    set -- $candidate
+                    IFS="$old_ifs"
+                    if [ "$#" -ne 3 ]; then
+                      echo "unexpected cache candidate '${candidate}'" >&2
+                      exit 1
+                    fi
+                    cache_database="$1"
+                    cache_table="$2"
+                    partition_id="$3"
+                    case "${cache_database}" in *[!a-zA-Z0-9_]*) exit 1 ;; esac
+                    case "${cache_table}" in *[!a-zA-Z0-9_]*) exit 1 ;; esac
+                    case "${partition_id}" in *[!a-zA-Z0-9_-]*) exit 1 ;; esac
+                    case "${cache_database}.${cache_table}" in
+                      rulebricks.decision_logs|"${CLICKSTACK_DATABASE}".*) ;;
+                      *)
+                        echo "refusing non-cache candidate ${cache_database}.${cache_table}" >&2
+                        exit 1
+                        ;;
+                    esac
+
+                    echo "ClickHouse hot store above 75% used; dropping ${cache_database}.${cache_table} partition ${partition_id}"
+                    # A day of logs can exceed ClickHouse's default 50 GB DROP
+                    # guard under load; override it for this eviction only.
+                    q "ALTER TABLE \`${cache_database}\`.\`${cache_table}\` DROP PARTITION ID '${partition_id}'" "?max_partition_size_to_drop=0"
+                    # The list index of that day goes with it. It is keyed
+                    # by the same day, and the app never reads index rows
+                    # older than the oldest decision log still held.
+                    if [ "${cache_database}.${cache_table}" = "rulebricks.decision_logs" ]; then
+                      has_index=$(q "SELECT count() FROM system.tables WHERE database = 'rulebricks' AND name = 'decision_log_index' FORMAT TSVRaw")
+                      if [ "${has_index}" = "1" ]; then
+                        q "ALTER TABLE rulebricks.decision_log_index DROP PARTITION ID '${partition_id}'" "?max_partition_size_to_drop=0"
+                      fi
+                    fi
+                    i=$((i + 1))
+                  done
+                  echo "cache eviction cap reached; continuing next schedule"
+{{- end }}

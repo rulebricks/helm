@@ -22,8 +22,6 @@
 *.tmproj
 .vscode/
 benchmarks/
-# CI-only template-validation values (not part of the chart)
-ci/
 # CI and image-build sources are not runtime chart content.
 scripts/
 .github/
