@@ -3,17 +3,8 @@
 {{- $clickstack := .Values.clickstack | default dict -}}
 {{- $clickstackClickhouse := $clickstack.clickhouse | default dict -}}
 {{- $otelDb := $clickstackClickhouse.database | default "otel" }}
-{{- /* The ClickHouse PVC is a hot store of the most recent logs; the archive
-     in object storage is the durable copy. TTLs cap age while there is room.
-     Above 75% disk usage this job drops the oldest day partition on the PVC
-     (decision logs or ClickStack telemetry) until 25% is free. Under an
-     extreme burst that can include the current day: keeping ingestion alive
-     matters more than a particular local window, and the archive is
-     unaffected. A dropped decision-log day is dropped from the list index
-     (decision_log_index, where a deployment has it) in the same step.
-
-     The clickhouse-server image has no shell, so this runs busybox against
-     the HTTP interface, with POST because ClickHouse rejects ALTER over GET. */}}
+{{- /* The existing cleanup releases only enough of the oldest local parts to
+     restore headroom. Decision-log indexes live inside those same parts. */}}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -22,7 +13,7 @@ metadata:
   labels:
     {{- include "rulebricks.clickhouse.labels" . | nindent 4 }}
 spec:
-  schedule: "*/5 * * * *"
+  schedule: "* * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
@@ -106,7 +97,9 @@ spec:
                       return 1
                     fi
                     rm -f "${headers}"
-                    printf '%s' "${response}"
+                    if [ -n "${response}" ]; then
+                      printf '%s\n' "${response}"
+                    fi
                   }
 
                   case "${CLICKSTACK_DATABASE}" in
@@ -116,82 +109,51 @@ spec:
                       ;;
                   esac
 
-                  i=0
-                  while [ "$i" -lt 128 ]; do
-                    free_ok=$(q "SELECT free_space >= 0.25 * total_space FROM system.disks WHERE name = 'default' FORMAT TSVRaw")
-                    if [ "$free_ok" = "1" ]; then
-                      echo "ClickHouse hot store healthy (below 75% used)"
+                  # Start above 75% used and restore 30% free. Plan from one
+                  # snapshot so a delay releasing files cannot empty the store.
+                  needed=$(q "SELECT if(free_space < intDiv(total_space, 4),
+                    intDiv(total_space * 3, 10) - free_space, 0)
+                    FROM system.disks WHERE name = 'default' FORMAT TSVRaw")
+                  case "$needed" in 0) exit 0 ;; ''|*[!0-9]*) exit 1 ;; esac
+
+                  # Helm installs the CronJob before the post-upgrade hook.
+                  # Wait for the old separately stored index to be replaced.
+                  kind=$(q "SELECT engine FROM system.tables WHERE database='rulebricks' AND name='decision_log_index' FORMAT TSVRaw")
+                  [ "$kind" = View ] || exit 0
+
+                  plan=/tmp/evictable-parts
+                  # Merge copies of live data occupy working space. Once their block
+                  # range is evicted, count those files toward the same eviction.
+                  q "WITH eligible AS (
+                      SELECT database, table, name, active, bytes_on_disk, max_block_number,
+                        maxOrNullIf(max_block_number, active) OVER (
+                          PARTITION BY database, table, partition_id ORDER BY min_block_number, active DESC, max_block_number DESC
+                          ROWS UNBOUNDED PRECEDING) AS live_range_end,
+                        multiIf(max_time > toDateTime(0, 'UTC'), max_time,
+                          max_date > toDate(0), toDateTime(max_date, 'UTC'), modification_time) AS newest
+                      FROM system.parts
+                      WHERE disk_name = 'default' AND bytes_on_disk > 0 AND rows > 0 AND
+                        ((database = 'rulebricks' AND table = 'decision_logs') OR database = '${CLICKSTACK_DATABASE}')
+                    ),
+                    (SELECT sum(bytes_on_disk) FROM eligible WHERE NOT active AND
+                      (isNull(live_range_end) OR live_range_end < max_block_number)) AS pending
+                    SELECT database, table, name FROM eligible WHERE active
+                    WINDOW oldest AS (ORDER BY newest, database, table, max_block_number, name ROWS UNBOUNDED PRECEDING)
+                    QUALIFY pending + sum(bytes_on_disk) OVER oldest - bytes_on_disk < ${needed}
+                    ORDER BY newest, database, table, max_block_number, name FORMAT TSVRaw" > "$plan"
+
+                  while IFS="$(printf '\t')" read -r db table part; do
+                    case "$db" in rulebricks|"${CLICKSTACK_DATABASE}") ;; *) exit 1 ;; esac
+                    case "$table" in ''|*[!a-zA-Z0-9_]*) exit 1 ;; esac
+                    case "$part" in ''|*[!a-zA-Z0-9_-]*) exit 1 ;; esac
+                    [ "$db" != rulebricks ] || [ "$table" = decision_logs ] || exit 1
+                    echo "Releasing ${db}.${table} part ${part}"
+                    if ! q "ALTER TABLE \`${db}\`.\`${table}\` DROP PART '${part}'" "?max_partition_size_to_drop=0"; then
+                      # A background merge can replace the selected part. Build
+                      # a fresh plan next minute rather than dropping its successor.
+                      active=$(q "SELECT count() FROM system.parts WHERE active AND database='${db}' AND table='${table}' AND name='${part}' FORMAT TSVRaw")
+                      [ "$active" = 0 ] || exit 1
                       exit 0
                     fi
-                    if [ "$free_ok" != "0" ]; then
-                      echo "unexpected system.disks response '${free_ok}'" >&2
-                      exit 1
-                    fi
-
-                    candidate=$(q "SELECT database, table, partition_id
-                  FROM (
-                    SELECT
-                      database,
-                      table,
-                      partition_id,
-                      if(
-                        match(partition_id, '^[0-9]{8}$'),
-                        toDateTime(concat(substring(partition_id, 1, 4), '-', substring(partition_id, 5, 2), '-', substring(partition_id, 7, 2))) + INTERVAL 1 DAY - INTERVAL 1 SECOND,
-                        max(max_time)
-                      ) AS newest_time,
-                      sum(bytes_on_disk) AS partition_bytes
-                    FROM system.parts
-                    WHERE active
-                      AND (
-                        (database = 'rulebricks' AND table = 'decision_logs')
-                        OR database = '${CLICKSTACK_DATABASE}'
-                      )
-                    GROUP BY database, table, partition_id
-                  )
-                  ORDER BY newest_time ASC, partition_bytes DESC, database ASC, table ASC, partition_id ASC
-                  LIMIT 1
-                  FORMAT TSVRaw")
-                    if [ -z "$candidate" ]; then
-                      echo "ClickHouse hot store is above 75% used but has no evictable partitions"
-                      exit 0
-                    fi
-
-                    old_ifs="$IFS"
-                    IFS="$(printf '\t')"
-                    set -- $candidate
-                    IFS="$old_ifs"
-                    if [ "$#" -ne 3 ]; then
-                      echo "unexpected cache candidate '${candidate}'" >&2
-                      exit 1
-                    fi
-                    cache_database="$1"
-                    cache_table="$2"
-                    partition_id="$3"
-                    case "${cache_database}" in *[!a-zA-Z0-9_]*) exit 1 ;; esac
-                    case "${cache_table}" in *[!a-zA-Z0-9_]*) exit 1 ;; esac
-                    case "${partition_id}" in *[!a-zA-Z0-9_-]*) exit 1 ;; esac
-                    case "${cache_database}.${cache_table}" in
-                      rulebricks.decision_logs|"${CLICKSTACK_DATABASE}".*) ;;
-                      *)
-                        echo "refusing non-cache candidate ${cache_database}.${cache_table}" >&2
-                        exit 1
-                        ;;
-                    esac
-
-                    echo "ClickHouse hot store above 75% used; dropping ${cache_database}.${cache_table} partition ${partition_id}"
-                    # A day of logs can exceed ClickHouse's default 50 GB DROP
-                    # guard under load; override it for this eviction only.
-                    q "ALTER TABLE \`${cache_database}\`.\`${cache_table}\` DROP PARTITION ID '${partition_id}'" "?max_partition_size_to_drop=0"
-                    # The list index of that day goes with it. It is keyed
-                    # by the same day, and the app never reads index rows
-                    # older than the oldest decision log still held.
-                    if [ "${cache_database}.${cache_table}" = "rulebricks.decision_logs" ]; then
-                      has_index=$(q "SELECT count() FROM system.tables WHERE database = 'rulebricks' AND name = 'decision_log_index' FORMAT TSVRaw")
-                      if [ "${has_index}" = "1" ]; then
-                        q "ALTER TABLE rulebricks.decision_log_index DROP PARTITION ID '${partition_id}'" "?max_partition_size_to_drop=0"
-                      fi
-                    fi
-                    i=$((i + 1))
-                  done
-                  echo "cache eviction cap reached; continuing next schedule"
+                  done < "$plan"
 {{- end }}

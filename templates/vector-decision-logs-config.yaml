@@ -1,0 +1,54 @@
+{{- $vector := .Values.vector -}}
+{{- if $vector.enabled -}}
+{{- $maps := $vector.existingConfigMaps | default list -}}
+{{- $original := $vector.customConfig | default dict -}}
+{{- $config := deepCopy $original -}}
+{{- with $kafka := get ($config.sources | default dict) "kafka" -}}
+  {{- if eq $kafka.type "kafka" -}}
+    {{- /* A group can restart before its first successful commit. */ -}}
+    {{- $_ := set $kafka "auto_offset_reset" "earliest" -}}
+  {{- end -}}
+{{- end -}}
+{{- with $sink := get ($config.sinks | default dict) "decision_logs_clickhouse" -}}
+  {{- if eq $sink.type "clickhouse" -}}
+    {{- /* Older saved Helm values contain an unacknowledged 4 GiB emptyDir
+          buffer. Kafka is the durable queue when a pod is replaced. */ -}}
+    {{- $_ := set $sink "acknowledgements" (dict "enabled" true) -}}
+    {{- $buffer := $sink.buffer | default dict -}}
+    {{- if or (not (kindIs "map" $buffer)) (ne $buffer.type "memory") -}}
+      {{- $buffer = dict "type" "memory" "max_size" 67108864 -}}
+    {{- end -}}
+    {{- $_ := set $sink "buffer" (set $buffer "when_full" "block") -}}
+    {{- /* --reuse-values can restore the previous subchart defaults, bypassing
+          this ConfigMap and silently deploying the old loss policy. */ -}}
+    {{- if and (empty $maps) (not (deepEqual $config $original)) -}}
+      {{- fail "Saved Vector settings bypass decision-log retries. Upgrade with the new chart defaults and your release values (--reset-then-reuse-values for saved overrides). Remove an explicit empty vector.existingConfigMaps override." -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if has "vector-decision-logs" $maps -}}
+{{- with $archive := get ($config.sinks | default dict) "decision_logs" -}}
+  {{- if has $archive.type (list "aws_s3" "azure_blob" "gcp_cloud_storage") -}}
+    {{- /* The archive already has the original payloads and trace pages. */ -}}
+    {{- $encoding := $archive.encoding | default (dict "codec" "json") -}}
+    {{- if hasKey $encoding "only_fields" -}}
+      {{- $_ := set $encoding "only_fields" (without $encoding.only_fields "request_fields" "response_fields" "search_record_id") -}}
+    {{- else -}}
+      {{- $_ := set $encoding "except_fields" (concat ($encoding.except_fields | default list) (list "request_fields" "response_fields" "search_record_id") | uniq) -}}
+    {{- end -}}
+    {{- $_ := set $archive "encoding" $encoding -}}
+  {{- end -}}
+{{- end -}}
+{{- $context := merge (dict "Template" .Template) .Subcharts.vector -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-decision-logs
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "vector.labels" $context | nindent 4 }}
+data:
+  vector.yaml: |
+    {{- tpl (toYaml $config) $context | nindent 4 }}
+{{- end }}
+{{- end }}

@@ -164,25 +164,102 @@ spec:
           command: ["/bin/sh", "-ec"]
           args:
             - |
-              clickhouse-client \
-                --host "${CLICKHOUSE_HOST}" \
-                --port 9000 \
-                --user "${CLICKHOUSE_USER}" \
-                --password "${CLICKHOUSE_PASSWORD}" \
-                --multiquery \
-                --query "${BOOTSTRAP_SQL}"
-
-              [ "${PERSISTENT_MODE}" = "true" ] || exit 0
-
-              # No MergeTree may be backed by object storage: the PVC is the
-              # only place ClickHouse keeps table data.
-              violations="$(
+              ch() {
                 clickhouse-client \
                   --host "${CLICKHOUSE_HOST}" \
                   --port 9000 \
                   --user "${CLICKHOUSE_USER}" \
                   --password "${CLICKHOUSE_PASSWORD}" \
-                  --query "
+                  "$@"
+              }
+              ch --multiquery --query "${BOOTSTRAP_SQL}"
+              [ "${PERSISTENT_MODE}" = "true" ] || exit 0
+
+              # Upgrades must clear a deadline already stored in the table metadata.
+              # REMOVE TTL is only valid on a table that currently has one.
+              changes=$(ch --query "
+                SELECT concat('ALTER TABLE rulebricks.', name, ' ',
+                  if(position(engine_full, ' TTL ') > 0, 'REMOVE TTL, ', ''),
+                  'RESET SETTING ttl_only_drop_parts;')
+                FROM system.tables
+                WHERE database = 'rulebricks' AND name IN ('decision_logs', 'decision_log_index')
+                  AND engine LIKE '%MergeTree'
+                  AND (position(engine_full, ' TTL ') > 0 OR position(engine_full, 'ttl_only_drop_parts') > 0)
+                FORMAT TSVRaw")
+              if [ -n "${changes}" ]; then
+                ch --multiquery --query "${changes}"
+              fi
+
+              # Native indexes belong to the log part. Adding their definitions
+              # indexes new parts and normal merges without rewriting the PVC.
+              # Bound normal merges on small volumes too. A single hour can
+              # occupy many independently evictable parts on any PVC size.
+              merge_bytes=$(ch --query "SELECT least(268435456, intDiv(total_space, 32)) FROM system.disks WHERE name='default' FORMAT TSVRaw")
+              case "$merge_bytes" in ''|0|*[!0-9]*) exit 1 ;; esac
+              ch --query "ALTER TABLE rulebricks.decision_logs MODIFY SETTING
+                min_free_disk_ratio_to_perform_insert = 0.2, max_bytes_to_merge_at_max_space_in_pool = ${merge_bytes}"
+              ch --query "ALTER TABLE rulebricks.decision_logs
+                ADD INDEX IF NOT EXISTS idx_legacy_search (isNull(search_record_id) AND ifNull(operation, '') NOT IN ('flow-trace', 'flow-trace-chunk', 'flow-values')) TYPE minmax GRANULARITY 1,
+                ADD INDEX IF NOT EXISTS idx_asset (rule_name, rule_id, rule_slug, flow_slug, flow_name, operation) TYPE set(2000) GRANULARITY 1,
+                ADD INDEX IF NOT EXISTS idx_parallel_execution_id parallel_execution_id TYPE bloom_filter(0.001) GRANULARITY 1,
+                ADD INDEX IF NOT EXISTS idx_request_fields ifNull(request_fields, '') TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 100000000,
+                ADD INDEX IF NOT EXISTS idx_response_fields ifNull(response_fields, '') TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 100000000,
+                ADD INDEX IF NOT EXISTS idx_rule_name rule_name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 100000000,
+                ADD INDEX IF NOT EXISTS idx_flow_name flow_name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 100000000"
+
+              # Keep the existing app-facing name. Only the old derived table
+              # is replaced. Concurrent log inserts always target decision_logs.
+              kind=$(ch --query "SELECT if(engine='View' AND (SELECT count() FROM system.columns
+                WHERE database='rulebricks' AND table='decision_log_index' AND name='search_has_data')=1,
+                'ready', engine) FROM system.tables WHERE database='rulebricks' AND name='decision_log_index' FORMAT TSVRaw")
+              case "$kind" in
+                ''|MergeTree|View)
+                  ch --query "CREATE VIEW IF NOT EXISTS rulebricks.decision_log_index_cutover AS
+                    SELECT timestamp, api_key, user_id, environment, ip, method, url, status,
+                      rule_name, rule_id, rule_slug, rule_version, operation, error, trace_id,
+                      span_id, flow_execution_id, flow_name, flow_slug, flow_node_id,
+                      parallel_execution_id, parallel_path, log_id, search_record_id,
+                      isNotNull(decision_logs.request_fields) AS search_has_data,
+                      ifNull(decision_logs.request_fields, '') AS request_fields, ifNull(decision_logs.response_fields, '') AS response_fields
+                    FROM rulebricks.decision_logs
+                    WHERE ifNull(operation, '') NOT IN ('flow-trace', 'flow-trace-chunk', 'flow-values')"
+                  ch --query "ALTER TABLE rulebricks.decision_log_index_cutover MODIFY COMMENT 'covers:0'"
+                  if [ -n "$kind" ]; then
+                    # Preserve the previous writer's payload coverage boundary.
+                    fields=$(ch --query "SELECT comment FROM system.columns WHERE database='rulebricks' AND table='decision_log_index' AND name='request_fields' AND match(comment, '^covers:[0-9]+$') FORMAT TSVRaw")
+                    if [ -n "$fields" ]; then
+                      ch --query "ALTER TABLE rulebricks.decision_log_index_cutover COMMENT COLUMN request_fields '$fields'"
+                    fi
+                    # Readers can use the main table if the hook is interrupted
+                    # after the old writer stops and before the names switch.
+                    ch --query "ALTER TABLE rulebricks.decision_log_index MODIFY COMMENT ''"
+                    ch --query "DROP VIEW IF EXISTS rulebricks.decision_log_index_mv SYNC"
+                    if ! error=$(ch --query "EXCHANGE TABLES rulebricks.decision_log_index AND rulebricks.decision_log_index_cutover" 2>&1); then
+                      case "$error" in
+                        *UNSUPPORTED_METHOD*)
+                          # Filesystems without atomic exchange support ordinary
+                          # renames. A retry can publish the prepared view if
+                          # only the first rename succeeded.
+                          ch --query "RENAME TABLE rulebricks.decision_log_index TO rulebricks.decision_log_index_previous,
+                            rulebricks.decision_log_index_cutover TO rulebricks.decision_log_index" ;;
+                        *) echo "$error" >&2; exit 1 ;;
+                      esac
+                    fi
+                  else
+                    ch --query "RENAME TABLE rulebricks.decision_log_index_cutover TO rulebricks.decision_log_index"
+                  fi ;;
+                ready) ;;
+                *) echo "Unexpected decision_log_index engine: $kind" >&2; exit 1 ;;
+              esac
+              # Also completes an upgrade interrupted immediately after EXCHANGE.
+              ch --max_table_size_to_drop=0 --multiquery --query "
+                DROP TABLE IF EXISTS rulebricks.decision_log_index_cutover SYNC;
+                DROP TABLE IF EXISTS rulebricks.decision_log_index_previous SYNC;"
+
+              # No MergeTree may be backed by object storage: the PVC is the
+              # only place ClickHouse keeps table data.
+              violations="$(
+                ch --query "
                     SELECT database, name, engine, storage_policy
                     FROM system.tables
                     WHERE database != 'system'
@@ -198,12 +275,7 @@ spec:
                 exit 1
               fi
 
-              clickhouse-client \
-                --host "${CLICKHOUSE_HOST}" \
-                --port 9000 \
-                --user "${CLICKHOUSE_USER}" \
-                --password "${CLICKHOUSE_PASSWORD}" \
-                --multiquery \
+              ch --multiquery \
                 --query "
                   CREATE DATABASE IF NOT EXISTS \`${ADMIN_DATABASE}\`;
                   DROP TABLE IF EXISTS \`${ADMIN_DATABASE}\`.clickhouse_compatibility SYNC;

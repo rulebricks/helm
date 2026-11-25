@@ -289,15 +289,8 @@ retained rotations, and a separate 1 GiB `emptyDir`. With persistence
 disabled, ClickHouse is the stateless Deployment/`emptyDir` archive-view mode
 with no PVC, and ClickStack must also be disabled.
 
-The PVC holds as many recent logs as fit. `clickhouse.persistence.size` is the
-size of the hot store; ClickHouse uses up to 75% of it. Every five minutes the
-`<release>-clickhouse-retention` CronJob checks the disk and, above 75% used,
-drops the oldest day partitions (decision logs or ClickStack telemetry,
-whichever is oldest) until 25% is free. Decision logs also leave the hot store
-after 30 days, a maximum age applied by normal merges when the disk is not
-under pressure. Under an extreme burst the current day is eligible too: keeping ingestion
-alive matters more than a particular local window, and the archive is
-unaffected. Logs that have left the PVC are read from the archive.
+`clickhouse.persistence.size` sets the volume available for recent logs and
+ClickStack telemetry. 
 
 Releases 0.3.78 and later kept ClickHouse tables in object storage under
 `paths.clickhouse`, with a read cache on a second PVC and no eviction. A
@@ -309,17 +302,16 @@ the PVC are kept. Supabase, backups, and the raw decision-log archive are not
 touched. The read-cache PVC (`<release>-clickhouse-cache`) is removed by the
 upgrade.
 
-An existing release needs one ordinary upgrade: `rulebricks upgrade`, or
-`helm upgrade` with the release's own values. The drop is quick (a 623 GiB,
+An existing release needs one ordinary upgrade with `rulebricks upgrade` or
+`helm upgrade` with the release's own values file. To reuse overrides saved by
+Helm, use `--reset-then-reuse-values` so the new Vector defaults take effect.
+The drop is quick (a 623 GiB,
 164,000-object store on Azure Blob took under a minute, the whole upgrade
-seven). The log tables are recreated at the end of the upgrade, so for those
-minutes the hot store takes no logs and Decision Logs cannot list recent
-ones; the archive keeps receiving every log.
+seven). The log tables are recreated at the end of the upgrade. Vector resumes
+pending writes once the tables are ready.
 
-Afterwards the hot store holds only logs written since the upgrade. Earlier
-logs are read from the archive: Decision Logs lists them for a date range,
-and run links opened from Decision Logs still open, more slowly for an hour
-that holds several GiB of logs.
+After an object-storage cutover, the hot store holds logs written since the
+upgrade. Links to earlier executions read their traces from the archive.
 
 A rollback does not undo the drop. If an upgrade fails after it, run the
 upgrade again: the compatibility marker advances only after schema seeding
@@ -639,6 +631,7 @@ To send rule execution logs to S3:
            compression: gzip
            encoding:
              codec: json
+             except_fields: [request_fields, response_fields, search_record_id]
    ```
 
 > For GCS or Azure Blob, see the [Vector sinks documentation](https://vector.dev/docs/reference/configuration/sinks/).

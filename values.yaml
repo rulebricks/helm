@@ -960,11 +960,8 @@ clickhouse:
     existingSecret: '{{ printf "%s-clickhouse-credentials" .Release.Name }}'
     existingSecretKey: admin-password
   # enabled=true: decision logs (and ClickStack telemetry) are stored on a PVC
-  # as a hot store of the most recent logs; older logs are read from the
-  # archive, which is the durable copy. `size` is how much stays hot:
-  # ClickHouse uses up to 75% of it, then the retention CronJob drops the
-  # oldest days until 25% is free. Decision logs leave the hot store after 30
-  # days in any case.
+  # for recent queries. Above 75% disk usage cleanup frees the oldest parts
+  # and their indexes. Timestamped trace links can read the durable archive.
   # enabled=false: stateless archive-view mode on emptyDir, no PVC. ClickStack
   # telemetry requires persistence.
   #
@@ -1392,6 +1389,14 @@ kafkaBridge:
 
 vector:
   enabled: true
+  # The chart renders the existing primary pipeline, including saved values
+  # from older releases. Vector reloads the projected file on config changes.
+  existingConfigMaps: [vector-decision-logs]
+  dataDir: /vector-data-dir
+  rollWorkload: false
+  args: [--config-dir, /etc/vector/, --watch-config, --watch-config-method, poll]
+  containerPorts:
+    - { name: api, containerPort: 8686, protocol: TCP }
   image:
     repository: docker.io/rulebricks/vector
     tag: "0.57.0-debian13"
@@ -1499,18 +1504,14 @@ vector:
           name: vector-kafka-credentials
           key: KAFKA_SASL_PASSWORD
           optional: true
-    # For the ClickHouse pipeline below (the CLI adds it with the pipeline):
+    # Used by the persistent ClickHouse sink (the CLI adds this reference):
     # - name: CLICKHOUSE_PASSWORD
     #   valueFrom:
     #     secretKeyRef:
     #       name: "<release>-clickhouse-credentials"
     #       key: admin-password
-  # Two independent pipelines share these pods and nothing else: each has its
-  # own Kafka consumer group, source, sink and acknowledgements.
-  #   kafka            -> normalize_logs -> decision_logs    (archive)
-  #   kafka_clickhouse -> decision_logs_clickhouse           (hot store)
-  # A slow or restarting ClickHouse only makes the second one wait, with its
-  # backlog held in Kafka. The archive never waits on it.
+  # The same Vector pods read Kafka once. Both the archive and the
+  # optional ClickHouse sink consume normalize_logs.
   customConfig:
     sources:
       kafka:
@@ -1524,7 +1525,8 @@ vector:
         # KAFKA_CONSUMER_GROUP carries the same prefix so co-tenant
         # deployments on a shared cluster don't rebalance each other.
         group_id: "${KAFKA_CONSUMER_GROUP:-vector-consumers}"
-        auto_offset_reset: latest
+        # Only used when the group has no valid committed offset.
+        auto_offset_reset: earliest
         # Full-fidelity single-item decision logs can approach the 64 MiB logs
         # topic cap. The broker still returns a first message larger than the
         # per-partition fetch size, so that size only bounds prefetch: at
@@ -1548,31 +1550,6 @@ vector:
           mechanism: "${KAFKA_SASL_MECHANISM:-PLAIN}"
           # username/password are intentionally omitted; the CLI injects them
           # for external SASL Kafka. Do not add empty-string defaults here.
-      # ==== ClickHouse pipeline: source ====
-      # Add with the decision_logs_clickhouse sink below, and only when
-      # clickhouse.persistence.enabled=true (the stateless mode has no table
-      # to insert into). Same topic, its own consumer group: no new topic,
-      # but Kafka ACLs/IAM must allow this group name too.
-      # Every limit is in bytes, because one log record can be megabytes.
-      # fetch.max.bytes must be >= message.max.bytes or the client won't start.
-      #
-      # kafka_clickhouse:
-      #   type: kafka
-      #   bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS:-rulebricks-kafka-kafka-bootstrap:9092}"
-      #   group_id: "${KAFKA_CONSUMER_GROUP:-vector-consumers}-clickhouse"
-      #   topics:
-      #     - "${KAFKA_LOG_TOPIC:-logs}"
-      #   auto_offset_reset: latest
-      #   librdkafka_options:
-      #     message.max.bytes: "67108864"
-      #     fetch.message.max.bytes: "4194304"
-      #     fetch.max.bytes: "67108864"
-      #     queued.max.messages.kbytes: "16384"
-      #   tls:
-      #     enabled: ${KAFKA_TLS_ENABLED:-false}
-      #   sasl:
-      #     enabled: ${KAFKA_SASL_ENABLED:-false}
-      #     mechanism: "${KAFKA_SASL_MECHANISM:-PLAIN}"
     transforms:
       normalize_logs:
         type: remap
@@ -1634,47 +1611,33 @@ vector:
       #   # Authentication via IRSA (recommended) - no credentials needed in config.
       #   # Vector will use the IAM role attached to its service account.
       #
-      # ==== ClickHouse pipeline: sink ====
-      # Fed by kafka_clickhouse above, never by normalize_logs. Each Kafka
-      # record is forwarded unchanged and ClickHouse parses it, so the buffer
-      # and batch limits are real bytes for large and small records alike.
-      # Acknowledged with a blocking buffer: nothing is dropped, and a slow
-      # ClickHouse shows up as Kafka lag (bounded by the topic's retention).
-      # A small fixed number of large inserts, one connection each. Spaces in
-      # the uri are "+" because the sink reads "%" as a time format.
+      # The CLI adds this second sink when ClickHouse persistence is enabled.
+      # The existing Kafka group commits after both destinations accept the
+      # log. Short write stalls use Vector's standard retry and backoff.
       #
       # decision_logs_clickhouse:
-      #   type: http
-      #   inputs:
-      #     - kafka_clickhouse
-      #   method: post
-      #   uri: "http://{{ .Release.Name }}-clickhouse:8123/?query=INSERT+INTO+rulebricks.decision_logs+FORMAT+JSONEachRow&input_format_skip_unknown_fields=1&date_time_input_format=best_effort&input_format_allow_errors_num=100&input_format_allow_errors_ratio=0.001"
-      #   healthcheck:
-      #     enabled: true
-      #     uri: "http://{{ .Release.Name }}-clickhouse:8123/ping"
+      #   type: clickhouse
+      #   inputs: [normalize_logs]
+      #   endpoint: "http://{{ .Release.Name }}-clickhouse:8123"
+      #   database: rulebricks
+      #   table: decision_logs
+      #   format: json_each_row
+      #   skip_unknown_fields: true
       #   auth:
       #     strategy: basic
       #     user: rulebricks
       #     password: "${CLICKHOUSE_PASSWORD}"
-      #   encoding:
-      #     codec: text
-      #   framing:
-      #     method: newline_delimited
-      #   compression: zstd
       #   acknowledgements:
       #     enabled: true
       #   buffer:
       #     type: memory
-      #     max_size: 134217728
+      #     max_size: 67108864
       #     when_full: block
       #   batch:
       #     max_bytes: 67108864
       #     timeout_secs: 5
       #   request:
-      #     concurrency: 4
-      #     timeout_secs: 600
-      #     headers:
-      #       Connection: close
+      #     concurrency: 2
 
 # =============================================================================
 # VECTOR KAFKA BRIDGE (token-auth managed Kafka)
